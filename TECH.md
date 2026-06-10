@@ -295,6 +295,43 @@ Der Übersetzungs-Helfer [lib/i18n/index.ts](lib/i18n/index.ts) hat jetzt echte,
 
 [lib/media/constants.ts](lib/media/constants.ts): `MAX_VIDEO_SECONDS` von 30 auf **20** gesenkt (Default 20s; später pro Betrieb konfigurierbar via Settings, Ceiling 30s).
 
+## Basis-Settings (Schritt 5a)
+
+Erste Slice des Settings-Moduls: pro Betrieb konfigurierbare Basis-Einstellungen (Branding-Farben/Font/Logo-Toggle, Video-Limit, Online-Links, Auslieferung, Aufbewahrung). **Keine neue Migration** — alles liegt in bestehenden Spalten. KEIN Logo-Upload (5b), KEIN Intro/Outro (5c), KEIN Slot-Editor (5d).
+
+### Datenablage (bestehende Spalten aus 0001)
+
+- `businesses.branding` (jsonb): `{ primary_color, secondary_color, font, logo_per_page }` — `logo_url` folgt in 5b.
+- `businesses.settings` (jsonb): `{ video_max_seconds, ig_handle, google_review_url, website_url, delivery_mode }`.
+- `businesses.retention_months` (Spalte, DB-Check 1…120), `businesses.name` (Spalte).
+
+Die jsonb-Spalten werden beim Speichern **vollständig überschrieben** (in 5a gibt es keine weiteren Keys; 5b bezieht `logo_url` mit ein).
+
+### Optionen & Grenzen ([lib/settings/options.ts](lib/settings/options.ts))
+
+Eine geteilte Quelle für Auswahllisten, Grenzen, Defaults und Typ-Guards (`isHexColor`/`isFontOption`/`isDeliveryMode`) — genutzt von `getCurrentBusiness` (Defaults beim Lesen), Settings-Form (Auswahl + Client-Validierung) und Route Handler (Server-Validierung): `FONT_OPTIONS`, `DELIVERY_MODES` (`'manual' | 'auto'`), `VIDEO_SECONDS` (`{ min: 5, max: 30, default: 20 }`), `RETENTION_MONTHS` (`{ min: 1, max: 120, default: 12 }`), `DEFAULT_BRANDING`.
+
+### `getCurrentBusiness`-Erweiterung ([lib/auth/current-business.ts](lib/auth/current-business.ts))
+
+Rückgabe um `branding` (`BusinessBranding`), `settings` (`BusinessSettings`) und `retention_months` ergänzt — typsicher, **kein `any`**. Die jsonb-Felder kommen als `unknown` aus der Rohzeile und werden mit Defaults normalisiert/geclamped (z. B. `video_max_seconds ?? 20`, ungültige Hex/Font → Default).
+
+### Seite & Form ([app/portal/settings/](app/portal/settings/))
+
+- [page.tsx](app/portal/settings/page.tsx) (Server Component): lädt `getCurrentBusiness`, rendert die Client-Form mit den aktuellen Werten (defensiver `notFound()`-Guard — die Shell garantiert bereits einen Betrieb).
+- [settings-form.tsx](app/portal/settings/settings-form.tsx) (Client, **kein `<form>`** — Speichern via `div + onClick`): Felder in `.card`-Gruppen (Betrieb / Branding / Aufnahme / Online-Präsenz / Auslieferung). Farb-Felder = Swatch (`<input type="color">`) + synchroner Hex-Text; Font/Delivery = `<select>`; `logo_per_page` = Toggle (`role="switch"`, div+onClick); Video/Retention = Range-Slider + gekoppeltes Zahlenfeld. Client-Validierung (nicht-leerer Name, Hex, Ranges) deckt sich mit dem Server; Erfolg/Fehler-Indikator über i18n. Desktop-first, dank `.form-input`/`.card` responsiv nutzbar.
+
+### Route Handler ([app/api/portal/settings/route.ts](app/api/portal/settings/route.ts), `PATCH`)
+
+AUTHENTICATED Client; `getCurrentBusiness` → sonst 401/403. **ISOLATION:** die `business_id` stammt aus der Session, NIE aus dem Body. Validierung (sonst 400): `name` nicht leer; `primary_color`/`secondary_color` gültiges Hex; `font ∈ FONT_OPTIONS`; `delivery_mode ∈ {manual,auto}`; `video_max_seconds ∈ [5,30]`; `retention_months ∈ [1,120]`. Update von `name`, `branding` (jsonb), `settings` (jsonb), `retention_months` für die Session-`business_id` über die RLS-Policy `businesses_update`; gibt die aktualisierten Werte zurück.
+
+### Video-Limit-Verdrahtung
+
+[app/portal/orders/[id]/page.tsx](app/portal/orders/[id]/page.tsx) lädt `business.settings.video_max_seconds` (`?? VIDEO_SECONDS.default`) und reicht es als Prop `maxVideoSeconds` an [capture.tsx](app/portal/orders/[id]/capture.tsx) durch. Der Capture nutzt das Prop für den Längen-Check; `MAX_VIDEO_SECONDS` bleibt nur noch Fallback-Default des Props.
+
+### Navigation & i18n
+
+Drittes Nav-Item „Einstellungen" → `/portal/settings` (Zahnrad-Icon) in der geteilten `ITEMS`-Definition ([portal-nav.tsx](app/portal/portal-nav.tsx)) — erscheint damit in Sidebar (Desktop) **und** Bottom-Tab-Nav (Mobile); Aktiv-Erkennung via `usePathname` (`startsWith("/portal/settings")`). Strings: `nav.settings` + `settings.*` ([lib/i18n/de.ts](lib/i18n/de.ts)), Hinweise/Fehler mit `t()`-Interpolation.
+
 ---
 
 > Nächste Migration: **0003**.

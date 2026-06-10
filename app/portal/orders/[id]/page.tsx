@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { getCurrentBusiness } from "@/lib/auth/current-business";
+import { VIDEO_SECONDS } from "@/lib/settings/options";
 import { DEFAULT_LOCALE, t } from "@/lib/i18n";
 import { OrderStatusBadge } from "@/components/order-status-badge";
 import { Capture } from "./capture";
@@ -40,6 +42,11 @@ export default async function OrderDetailPage({
   if (!order) notFound();
 
   const media = await getOrderMedia(order.id);
+
+  // Pro-Betrieb konfiguriertes Video-Limit (Settings 5a) an den Capture geben.
+  const business = await getCurrentBusiness();
+  const maxVideoSeconds =
+    business?.settings.video_max_seconds ?? VIDEO_SECONDS.default;
 
   const supabase = await createClient();
   const mediaWithUrls: MediaWithUrl[] = await Promise.all(
@@ -142,7 +149,11 @@ export default async function OrderDetailPage({
 
         {/* Foto-Capture (Client): zeigt Pending-Items, bis router.refresh()
             sie in die unten server-gerenderte Liste überführt. */}
-        <Capture businessId={order.business_id} orderId={order.id} />
+        <Capture
+          businessId={order.business_id}
+          orderId={order.id}
+          maxVideoSeconds={maxVideoSeconds}
+        />
 
         {mediaWithUrls.length === 0 ? (
           <div

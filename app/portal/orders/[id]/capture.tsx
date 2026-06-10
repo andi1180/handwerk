@@ -96,9 +96,12 @@ async function uploadWithRetry(
 export function Capture({
   businessId,
   orderId,
+  maxVideoSeconds = MAX_VIDEO_SECONDS,
 }: {
   businessId: string;
   orderId: string;
+  /** Pro Betrieb konfiguriert (Settings); fällt auf die Konstante zurück. */
+  maxVideoSeconds?: number;
 }) {
   const router = useRouter();
   const supabase = useMemo(() => createClient(), []);
@@ -231,9 +234,9 @@ export function Capture({
       setNotice(t(DEFAULT_LOCALE, "capture.error"));
       return;
     }
-    if (duration > MAX_VIDEO_SECONDS) {
+    if (duration > maxVideoSeconds) {
       setNotice(
-        t(DEFAULT_LOCALE, "capture.videoTooLong", { max: MAX_VIDEO_SECONDS }),
+        t(DEFAULT_LOCALE, "capture.videoTooLong", { max: maxVideoSeconds }),
       );
       return;
     }
