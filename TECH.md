@@ -334,4 +334,43 @@ Drittes Nav-Item „Einstellungen" → `/portal/settings` (Zahnrad-Icon) in der 
 
 ---
 
+## Mobiler Booklet-Assembler 6a — Reorder + Löschen
+
+Erste Slice des **mobilen Booklet-Assemblers** (ersetzt den ursprünglich geplanten Desktop-Sequenz-Builder): die Medien eines Auftrags werden **am Handy** sortierbar + löschbar, mit einheitlichen Vorschau-Größen und abspielbarem Video. **Keine** Captions (6b), **kein** Finalize (6c). **Keine neue Migration** (`order_media.sort_order` existiert aus 0001; Storage-Delete-Policy aus 0002).
+
+### Architektur-Klärung: pro Auftrag (mobil) vs. pro Betrieb (Desktop)
+
+Der frühere Plan eines Desktop-Sequenz-Builders **entfällt**. Stattdessen:
+
+- **Pro Auftrag = mobil** (am Werkstück/Tresen): Capture (4b/4c) → **Reorder/Löschen (6a)** → Captions (6b) → Abschließen (6c). Alles auf der Detailseite, daumenbedienbar.
+- **Pro Betrieb = Desktop** (einmalige Einrichtung): Settings (5a), Logo (5b), Intro/Outro, Hintergründe/Backgrounds.
+
+### Abhängigkeit (dnd-kit)
+
+`@dnd-kit/core` 6.3.1, `@dnd-kit/sortable` 10.0.0, `@dnd-kit/utilities` 3.2.2 (pnpm). **Keine** React-19-Peer-Konflikte — dnd-kit wurde wie geplant verwendet (kein Long-Press-Eigenbau/Pfeil-Fallback nötig).
+
+### Medien-Liste ([app/portal/orders/[id]/media-list.tsx](app/portal/orders/[id]/media-list.tsx), Client)
+
+Die Server-Page lädt `order_media` (RLS, `sort_order` ASC) inkl. server-seitiger Signed-URLs (3600 s) und übergibt sie als Props `{ orderId, items }` an `<MediaList>` (ersetzt die bisher server-gerenderte Liste; `<Capture>` + `router.refresh()` bleiben unverändert darüber). Der Typ `MediaWithUrl` (= `OrderMedia & { signedUrl }`) wird hier exportiert und von der Page importiert.
+
+- **Lokaler State aus Props:** `items` startet aus den Props; ein `useEffect([initialItems])` setzt den State neu, wenn der Server neu rendert (Capture-Refresh, Navigation). Eigene `setState`-Aufrufe ändern die Prop-Referenz nicht — der optimistische State wird also nicht überschrieben.
+- **Einheitliches Raster:** `.media-grid` (3 Spalten mobil, ab Desktop `auto-fill minmax(140px)`) aus quadratischen `.media-tile`-Kacheln (`aspect-ratio: 1 / 1`, `object-fit: cover`). **Fotos und Videos gleich groß.** Video-Kachel: erstes Frame via `<video preload="metadata" src="…#t=0.1">` als Poster (das `#t`-Fragment geht **nicht** an den Server, die Signatur bleibt gültig) + dekoratives Play-Overlay. Inneres `img`/`video` hat `pointer-events: none`, damit Taps/Drag an die Kachel gehen.
+- **Reorder (dnd-kit Sortable):** `DndContext` + `SortableContext` (rect-Strategie). **Sensoren:** `TouchSensor` mit `activationConstraint.delay ≈ 220ms` (Long-Press zum Greifen → Tippen/Scrollen bleibt frei; **kein** `touch-action: none`) und `MouseSensor` mit `distance: 8` (ein Klick öffnet die Vorschau, erst ein Zug reordert). Beim Drop: **optimistisches** `arrayMove` + `PATCH` (s. u.); bei Fehler Rollback auf den vorigen Stand + i18n-Hinweis (`assembler.reorderError`).
+- **Tap = ansehen/abspielen (nicht reorder):** ein Tap auf die Kachel öffnet einen Vollbild-`MediaViewer` (Overlay; Foto groß bzw. `<video controls autoPlay>`; Schließen per X, Backdrop-Klick oder Escape → zurück zur gleich großen Kachel). Ein `draggedRef`-Flag (in `onDragStart` gesetzt, ~50 ms nach Drop zurückgesetzt) unterdrückt den unmittelbar nach einem echten Drag folgenden Klick.
+- **Löschen:** kleiner Lösch-Button pro Kachel (`.media-tile-delete`, obere Ecke; `stopPropagation` auf Pointer/Click, damit weder Drag noch Vorschau auslösen) → Bestätigung (`window.confirm`, `assembler.deleteConfirm`) → **optimistische** Entfernung + `DELETE` → bei Erfolg `router.refresh()`; bei Fehler Rollback + i18n-Hinweis (`assembler.deleteError`).
+
+### Route Handler — Reorder ([…/media/reorder/route.ts](app/api/portal/orders/[id]/media/reorder/route.ts), `PATCH`)
+
+AUTHENTICATED Server-Client (kein `service_role`). `getCurrentBusiness` → 401/403; Order über RLS (fremde/fehlende id ⇒ 404). Body `{ ids: string[] }`: validiert als nicht-leeres String-Array **ohne Duplikate**, das **exakt** der Medien-Menge dieser Order entspricht (alle vorhandenen Ids, keine fremden, keine fehlenden) — sonst 400. Setzt `sort_order = Position+1` (1..n) via mehrerer `update`-Aufrufe, jeweils zusätzlich defensiv auf `order_id` gefiltert; `order_media`-RLS greift ohnehin.
+
+### Route Handler — Löschen ([…/media/[mediaId]/route.ts](app/api/portal/orders/[id]/media/[mediaId]/route.ts), `DELETE`)
+
+AUTHENTICATED Server-Client. `getCurrentBusiness` → 401/403. Die Medien-Zeile wird über RLS geladen **und** gegen `order_id` (Pfad) geprüft (fremde/fehlende Kombination ⇒ 404). Reihenfolge: erst `storage.from('order-media').remove([storage_path])` (Delete-Policy bindet das erste Pfad-Segment an die `business_id`), dann die `order_media`-Zeile (RLS-Policy `order_media_all`, defensiv auf `order_id`). `sort_order`-Lücken bleiben unkritisch (Sortierung ist ASC). Die statische Route `media/reorder` und die dynamische `media/[mediaId]` liegen konfliktfrei nebeneinander (Next.js bevorzugt das statische Segment).
+
+### i18n
+
+Neuer Block `assembler.*` in [lib/i18n/de.ts](lib/i18n/de.ts): `reorderHint` („Halten zum Verschieben"), `delete`, `deleteConfirm`, `play`, `close`, `reorderError`, `deleteError`.
+
+---
+
 > Nächste Migration: **0003**.

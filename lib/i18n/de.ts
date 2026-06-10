@@ -108,4 +108,13 @@ export const de = {
     error: "Fehler",
     retry: "Erneut",
   },
+  assembler: {
+    reorderHint: "Halten zum Verschieben",
+    delete: "Löschen",
+    deleteConfirm: "Dieses Medium wirklich löschen?",
+    play: "Abspielen",
+    close: "Schließen",
+    reorderError: "Reihenfolge konnte nicht gespeichert werden.",
+    deleteError: "Löschen fehlgeschlagen. Bitte erneut versuchen.",
+  },
 } as const;

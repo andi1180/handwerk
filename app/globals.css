@@ -348,3 +348,98 @@ body {
     padding: 12px 14px;
   }
 }
+
+/* --- Mobiler Booklet-Assembler 6a: Medien-Raster (sortierbar + löschbar) --- */
+
+/* Einheitliches Raster quadratischer Kacheln — Fotos und Videos gleich groß.
+   Mobil 3 Spalten; ab Desktop füllen sich die Spalten auf. */
+.media-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+@media (min-width: 769px) {
+  .media-grid {
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 12px;
+  }
+}
+
+.media-tile {
+  position: relative;
+  aspect-ratio: 1 / 1;
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  /* Kein touch-action: none — der Long-Press-Sensor (Delay) lässt Scrollen zu,
+     bis das Greifen aktiviert; danach steuert dnd-kit das Verhalten. */
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+/* Medien füllen die Kachel; Pointer-Events gehen an die Kachel (Drag + Ansehen). */
+.media-tile img,
+.media-tile video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  pointer-events: none;
+}
+
+/* Play-Overlay (Video) — rein dekorativ, fängt keine Taps ab. */
+.media-tile-play {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.media-tile-play span {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.5);
+  color: #ffffff;
+}
+
+/* Lösch-Button in der oberen Ecke. */
+.media-tile-delete {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #ffffff;
+  cursor: pointer;
+}
+
+/* Tag-Pill in der unteren Ecke (vorher/nachher/prozess). */
+.media-tile-tag {
+  position: absolute;
+  left: 6px;
+  bottom: 6px;
+  z-index: 2;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  background: var(--gold);
+  color: #ffffff;
+  pointer-events: none;
+}
