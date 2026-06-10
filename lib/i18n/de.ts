@@ -117,6 +117,7 @@ export const de = {
       uploading: "Lädt hoch…",
       remove: "Entfernen",
       preview: "Hintergrund-Vorschau",
+      previewHint: "Vorschau 9:16 — so wird zugeschnitten.",
       typeError: "Nur PNG, JPEG oder WebP sind erlaubt.",
       tooLarge: "Die Datei ist zu groß (max. 10 MB).",
       error: "Hintergrund konnte nicht gespeichert werden. Bitte erneut versuchen.",

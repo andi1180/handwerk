@@ -296,12 +296,16 @@ export function SettingsForm({
           slot="intro"
           label={t(DEFAULT_LOCALE, "settings.background.intro")}
           initialPreviewUrl={introBgPreviewUrl}
+          previewAspect={9 / 16}
+          previewFit="cover"
         />
         <ImageUploadField
           businessId={business.id}
           slot="outro"
           label={t(DEFAULT_LOCALE, "settings.background.outro")}
           initialPreviewUrl={outroBgPreviewUrl}
+          previewAspect={9 / 16}
+          previewFit="cover"
         />
       </div>
 
@@ -932,11 +936,17 @@ function ImageUploadField({
   slot,
   label,
   initialPreviewUrl,
+  previewAspect = 16 / 9,
+  previewFit = "cover",
 }: {
   businessId: string;
   slot: BackgroundSlot;
   label: string;
   initialPreviewUrl: string | null;
+  /** Vorschau-Seitenverhältnis (Breite/Höhe). Default = bisheriges Querformat. */
+  previewAspect?: number;
+  /** Vorschau-`object-fit`. Default = bisheriges Verhalten. */
+  previewFit?: "cover" | "contain";
 }) {
   const router = useRouter();
   const supabase = useMemo(() => createClient(), []);
@@ -1061,9 +1071,10 @@ function ImageUploadField({
             alt={t(DEFAULT_LOCALE, "settings.background.preview")}
             style={{
               width: 160,
-              height: 90,
+              maxWidth: 160,
+              aspectRatio: String(previewAspect),
               flexShrink: 0,
-              objectFit: "cover",
+              objectFit: previewFit,
               borderRadius: "var(--radius)",
               border: "1px solid var(--border)",
               background: "var(--surface-2)",
@@ -1100,6 +1111,10 @@ function ImageUploadField({
             : t(DEFAULT_LOCALE, "settings.background.upload")}
         </div>
       )}
+
+      <span style={{ ...captionStyle, fontSize: 12 }}>
+        {t(DEFAULT_LOCALE, "settings.background.previewHint")}
+      </span>
 
       {error ? (
         <span style={{ fontSize: 13, color: "#B23B3B" }}>{error}</span>

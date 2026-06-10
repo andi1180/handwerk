@@ -692,6 +692,11 @@ eigenen Keys an (symmetrische Trennung, kein Wegschreiben fremder Werte).
   (getrennt vom „Speichern" der Form): `prepareBackground` → Direktupload →
   `POST` → `router.refresh()`; Vorschau (signierte URL bzw. optimistische
   `objectURL`) + „Entfernen" → `DELETE`. `div + onClick`, **kein `<form>`**.
+  Die Vorschau **spiegelt den realen Render-Ausschnitt**: zwei optionale Props
+  `previewAspect` (Default Querformat) / `previewFit` (Default unverändert) steuern
+  `aspect-ratio`/`object-fit` der Vorschau-Box; die Background-Felder setzen
+  `previewAspect = 9/16` + `previewFit = "cover"` (Portrait, ~160px breit, mit
+  Hinweis „so wird zugeschnitten") — wie der Renderer in Step 8 auf 9:16 covert.
 
 ### i18n
 
