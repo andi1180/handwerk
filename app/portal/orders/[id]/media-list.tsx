@@ -25,6 +25,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { DEFAULT_LOCALE, t } from "@/lib/i18n";
+import { CAPTION_MAX_LENGTH } from "@/lib/ai/caption-limits";
 import type { OrderMedia } from "@/lib/orders/queries";
 
 /** Medien-Item samt server-seitig erzeugter, befristeter Signed-URL (page.tsx). */
@@ -35,15 +36,19 @@ const NOTICE_TIMEOUT_MS = 4000;
 
 /**
  * Medien-Liste des Auftrags (Client Component) — Kern des **mobilen
- * Booklet-Assemblers** (6a): einheitliches, quadratisches Kachel-Raster
- * (Fotos und Videos gleich groß), Reorder per Long-Press (dnd-kit) und Löschen.
+ * Booklet-Assemblers**: quadratisches Kachel-Raster (Fotos und Videos gleich
+ * groß), Reorder per Long-Press (dnd-kit), Löschen und **KI-Captions (6b)**.
+ *
+ * Captions: „Captions generieren" (Batch) füllt alle Medien OHNE Caption; das
+ * Bearbeiten/Neu-Generieren pro Item läuft im Vollbild-Viewer (nicht in den
+ * engen Kacheln). Jede Kachel zeigt einen dezenten Indikator hat-Caption/fehlt.
  *
  * Daten kommen server-seitig (RLS, `sort_order` ASC, Signed-URLs) als Props; der
- * lokale State erlaubt optimistische Neuordnung/Löschung. Wechselt die Prop-Liste
- * (z. B. nach Capture → `router.refresh()`), wird der State daraus neu gesetzt.
+ * lokale State erlaubt optimistische Mutationen. Wechselt die Prop-Liste (z. B.
+ * nach Capture/Batch → `router.refresh()`), wird der State daraus neu gesetzt.
  *
- * ISOLATION: Beide Mutationen laufen über Route Handler, die `order_id`/Betrieb
- * gegen die Session prüfen; `order_media`-RLS + Storage-Delete-Policy greifen.
+ * ISOLATION: Alle Mutationen laufen über Route Handler, die `order_id`/Betrieb
+ * gegen die Session prüfen; das Bild wird server-seitig (RLS) geladen.
  */
 export function MediaList({
   orderId,
@@ -54,15 +59,19 @@ export function MediaList({
 }) {
   const router = useRouter();
   const [items, setItems] = useState<MediaWithUrl[]>(initialItems);
-  const [viewing, setViewing] = useState<MediaWithUrl | null>(null);
+  const [viewingId, setViewingId] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [generating, setGenerating] = useState(false);
 
-  // Prop-Liste → State, wenn der Server neu rendert (Capture-Refresh, Navigation).
-  // Eigene setState-Aufrufe ändern die Prop-Referenz nicht, überschreiben den
-  // optimistischen State also nicht.
+  // Prop-Liste → State, wenn der Server neu rendert (Capture-/Batch-Refresh,
+  // Navigation). Eigene setState-Aufrufe ändern die Prop-Referenz nicht.
   useEffect(() => {
     setItems(initialItems);
   }, [initialItems]);
+
+  // Der gerade betrachtete Eintrag wird aus `items` abgeleitet, damit Caption-
+  // Updates (Speichern/Neu generieren) sofort im Viewer sichtbar sind.
+  const viewing = viewingId ? items.find((m) => m.id === viewingId) ?? null : null;
 
   // Hinweis nach kurzer Zeit automatisch ausblenden.
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -90,6 +99,14 @@ export function MediaList({
   // Nach einem echten Drag den unmittelbar folgenden Klick unterdrücken (sonst
   // würde das Loslassen die Vorschau öffnen). Flag kurz nach dem Drop zurücksetzen.
   const draggedRef = useRef(false);
+
+  /** Caption eines Items lokal setzen (optimistisch, nach Save/Regenerate/Batch). */
+  const applyCaption = useCallback((id: string, caption: string) => {
+    const value = caption.length > 0 ? caption : null;
+    setItems((prev) =>
+      prev.map((m) => (m.id === id ? { ...m, caption: value } : m)),
+    );
+  }, []);
 
   const handleDragEnd = useCallback(
     (event: DragEndEvent) => {
@@ -134,7 +151,7 @@ export function MediaList({
 
       const previous = items;
       setItems((prev) => prev.filter((m) => m.id !== media.id)); // optimistisch
-      if (viewing?.id === media.id) setViewing(null);
+      if (viewingId === media.id) setViewingId(null);
 
       void (async () => {
         try {
@@ -150,8 +167,36 @@ export function MediaList({
         }
       })();
     },
-    [items, orderId, router, showNotice, viewing],
+    [items, orderId, router, showNotice, viewingId],
   );
+
+  /** Batch: Captions für alle Medien OHNE Caption generieren. */
+  const handleGenerate = useCallback(() => {
+    setGenerating(true);
+    void (async () => {
+      try {
+        const res = await fetch(`/api/portal/orders/${orderId}/captions`, {
+          method: "POST",
+        });
+        if (!res.ok) throw new Error("captions_failed");
+        const data = (await res.json()) as {
+          updated: { id: string; caption: string }[];
+        };
+        // Optimistisch sofort anzeigen; refresh reconciled mit dem Server.
+        setItems((prev) =>
+          prev.map((m) => {
+            const hit = data.updated.find((u) => u.id === m.id);
+            return hit ? { ...m, caption: hit.caption || null } : m;
+          }),
+        );
+        router.refresh();
+      } catch {
+        showNotice(t(DEFAULT_LOCALE, "captions.error"));
+      } finally {
+        setGenerating(false);
+      }
+    })();
+  }, [orderId, router, showNotice]);
 
   if (items.length === 0) {
     return (
@@ -168,17 +213,39 @@ export function MediaList({
     );
   }
 
+  const missingCount = items.filter((m) => !m.caption).length;
+
   return (
     <div>
-      <p
+      <div
         style={{
-          margin: "0 0 10px",
-          fontSize: 12,
-          color: "var(--text-secondary)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 12,
+          marginBottom: 10,
         }}
       >
-        {t(DEFAULT_LOCALE, "assembler.reorderHint")}
-      </p>
+        <p style={{ margin: 0, fontSize: 12, color: "var(--text-secondary)" }}>
+          {t(DEFAULT_LOCALE, "assembler.reorderHint")}
+        </p>
+        <button
+          type="button"
+          className="btn-dark"
+          onClick={handleGenerate}
+          disabled={generating || missingCount === 0}
+          style={{
+            flexShrink: 0,
+            opacity: generating || missingCount === 0 ? 0.6 : 1,
+            cursor:
+              generating || missingCount === 0 ? "default" : "pointer",
+          }}
+        >
+          {generating
+            ? t(DEFAULT_LOCALE, "captions.generating")
+            : t(DEFAULT_LOCALE, "captions.generate")}
+        </button>
+      </div>
 
       <DndContext
         sensors={sensors}
@@ -203,7 +270,7 @@ export function MediaList({
                 key={media.id}
                 media={media}
                 draggedRef={draggedRef}
-                onView={() => setViewing(media)}
+                onView={() => setViewingId(media.id)}
                 onDelete={() => handleDelete(media)}
               />
             ))}
@@ -228,13 +295,18 @@ export function MediaList({
       ) : null}
 
       {viewing ? (
-        <MediaViewer media={viewing} onClose={() => setViewing(null)} />
+        <MediaViewer
+          media={viewing}
+          orderId={orderId}
+          onClose={() => setViewingId(null)}
+          onCaptionChange={applyCaption}
+        />
       ) : null}
     </div>
   );
 }
 
-/** Eine sortierbare, quadratische Kachel: Foto/Video-Poster + Play/Tag/Löschen. */
+/** Eine sortierbare, quadratische Kachel: Foto/Video-Poster + Play/Tag/Caption/Löschen. */
 function SortableTile({
   media,
   draggedRef,
@@ -261,6 +333,8 @@ function SortableTile({
     if (draggedRef.current) return;
     onView();
   };
+
+  const hasCaption = Boolean(media.caption);
 
   return (
     <div
@@ -302,6 +376,22 @@ function SortableTile({
         </div>
       ) : null}
 
+      {/* Dezenter Caption-Indikator: gefüllt = hat Caption, schwach = fehlt. */}
+      <span
+        className="media-tile-caption"
+        aria-label={
+          hasCaption
+            ? t(DEFAULT_LOCALE, "captions.edit")
+            : t(DEFAULT_LOCALE, "captions.empty")
+        }
+        style={{
+          background: hasCaption ? "var(--gold)" : "rgba(0, 0, 0, 0.45)",
+          opacity: hasCaption ? 1 : 0.7,
+        }}
+      >
+        <CaptionIcon />
+      </span>
+
       {media.tag ? (
         <span className="media-tile-tag">{t(DEFAULT_LOCALE, `mediaTag.${media.tag}`)}</span>
       ) : null}
@@ -329,13 +419,20 @@ function SortableTile({
   );
 }
 
-/** Vergrößerte Vorschau: Foto groß bzw. Video mit Steuerung (Vollbild-Overlay). */
+/**
+ * Vergrößerte Vorschau (Vollbild-Overlay): Foto groß bzw. Video mit Steuerung,
+ * darunter der Caption-Editor (Bearbeiten + Neu generieren).
+ */
 function MediaViewer({
   media,
+  orderId,
   onClose,
+  onCaptionChange,
 }: {
   media: MediaWithUrl;
+  orderId: string;
   onClose: () => void;
+  onCaptionChange: (id: string, caption: string) => void;
 }) {
   // Escape schließt das Overlay.
   useEffect(() => {
@@ -356,9 +453,7 @@ function MediaViewer({
         inset: 0,
         zIndex: 60,
         display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: 16,
+        flexDirection: "column",
         background: "rgba(0, 0, 0, 0.82)",
       }}
     >
@@ -374,6 +469,7 @@ function MediaViewer({
           position: "absolute",
           top: 16,
           right: 16,
+          zIndex: 1,
           width: 40,
           height: 40,
           display: "flex",
@@ -388,56 +484,224 @@ function MediaViewer({
         <CloseIcon />
       </div>
 
-      {media.signedUrl ? (
-        media.media_type === "video" ? (
-          <video
-            src={media.signedUrl}
-            controls
-            autoPlay
-            playsInline
-            onClick={(e) => e.stopPropagation()}
-            style={{
-              maxWidth: "100%",
-              maxHeight: "100%",
-              borderRadius: "var(--radius)",
-              background: "#000",
-            }}
-          />
-        ) : (
-          // eslint-disable-next-line @next/next/no-img-element -- Signed-URL aus privatem Bucket.
-          <img
-            src={media.signedUrl}
-            alt={media.keyword ?? ""}
-            onClick={(e) => e.stopPropagation()}
-            style={{
-              maxWidth: "100%",
-              maxHeight: "100%",
-              objectFit: "contain",
-              borderRadius: "var(--radius)",
-            }}
-          />
-        )
-      ) : null}
+      {/* Medien-Bereich (füllt den Platz oberhalb des Caption-Panels). */}
+      <div
+        style={{
+          flex: 1,
+          minHeight: 0,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          padding: 16,
+        }}
+      >
+        {media.signedUrl ? (
+          media.media_type === "video" ? (
+            <video
+              src={media.signedUrl}
+              controls
+              autoPlay
+              playsInline
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                maxWidth: "100%",
+                maxHeight: "100%",
+                borderRadius: "var(--radius)",
+                background: "#000",
+              }}
+            />
+          ) : (
+            // eslint-disable-next-line @next/next/no-img-element -- Signed-URL aus privatem Bucket.
+            <img
+              src={media.signedUrl}
+              alt={media.keyword ?? ""}
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                maxWidth: "100%",
+                maxHeight: "100%",
+                objectFit: "contain",
+                borderRadius: "var(--radius)",
+              }}
+            />
+          )
+        ) : null}
+      </div>
 
-      {media.keyword ? (
-        <div
+      {/* Caption-Editor: eigener key pro Item, damit der Text beim Wechsel neu lädt. */}
+      <CaptionEditor
+        key={media.id}
+        orderId={orderId}
+        media={media}
+        onCaptionChange={onCaptionChange}
+      />
+    </div>
+  );
+}
+
+/** Bearbeiten + Neu-Generieren der Caption (im Vollbild-Viewer, unter dem Medium). */
+function CaptionEditor({
+  orderId,
+  media,
+  onCaptionChange,
+}: {
+  orderId: string;
+  media: MediaWithUrl;
+  onCaptionChange: (id: string, caption: string) => void;
+}) {
+  const [text, setText] = useState(media.caption ?? "");
+  const [saving, setSaving] = useState(false);
+  const [regenerating, setRegenerating] = useState(false);
+  const [feedback, setFeedback] = useState<"saved" | "error" | null>(null);
+
+  const busy = saving || regenerating;
+
+  const handleSave = useCallback(() => {
+    setSaving(true);
+    setFeedback(null);
+    void (async () => {
+      try {
+        const res = await fetch(
+          `/api/portal/orders/${orderId}/media/${media.id}/caption`,
+          {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ caption: text }),
+          },
+        );
+        if (!res.ok) throw new Error("save_failed");
+        const data = (await res.json()) as { id: string; caption: string };
+        setText(data.caption);
+        onCaptionChange(media.id, data.caption);
+        setFeedback("saved");
+      } catch {
+        setFeedback("error");
+      } finally {
+        setSaving(false);
+      }
+    })();
+  }, [orderId, media.id, text, onCaptionChange]);
+
+  const handleRegenerate = useCallback(() => {
+    setRegenerating(true);
+    setFeedback(null);
+    void (async () => {
+      try {
+        const res = await fetch(
+          `/api/portal/orders/${orderId}/media/${media.id}/caption/regenerate`,
+          { method: "POST" },
+        );
+        if (!res.ok) throw new Error("regenerate_failed");
+        const data = (await res.json()) as { id: string; caption: string };
+        setText(data.caption);
+        onCaptionChange(media.id, data.caption);
+      } catch {
+        setFeedback("error");
+      } finally {
+        setRegenerating(false);
+      }
+    })();
+  }, [orderId, media.id, onCaptionChange]);
+
+  return (
+    <div
+      onClick={(e) => e.stopPropagation()}
+      style={{
+        background: "var(--surface)",
+        borderTop: "1px solid var(--border)",
+        padding: "12px 16px",
+        paddingBottom: "calc(12px + env(safe-area-inset-bottom, 0px))",
+        display: "flex",
+        flexDirection: "column",
+        gap: 8,
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 12,
+        }}
+      >
+        <span style={{ fontSize: 13, fontWeight: 600 }}>
+          {t(DEFAULT_LOCALE, "captions.edit")}
+        </span>
+        <button
+          type="button"
+          onClick={handleRegenerate}
+          disabled={busy}
+          aria-label={t(DEFAULT_LOCALE, "captions.regenerate")}
+          title={t(DEFAULT_LOCALE, "captions.regenerate")}
           style={{
-            position: "absolute",
-            left: 0,
-            right: 0,
-            bottom: 0,
-            padding: "16px",
-            paddingBottom: "calc(16px + env(safe-area-inset-bottom, 0px))",
-            textAlign: "center",
-            color: "#fff",
-            fontSize: 14,
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            padding: "6px 10px",
+            fontSize: 13,
             fontWeight: 600,
-            background: "linear-gradient(to top, rgba(0,0,0,0.6), transparent)",
+            color: "var(--text-secondary)",
+            background: "transparent",
+            border: "1px solid var(--border)",
+            borderRadius: "var(--radius)",
+            cursor: busy ? "default" : "pointer",
+            opacity: busy ? 0.6 : 1,
           }}
         >
-          {media.keyword}
-        </div>
+          <RegenerateIcon spinning={regenerating} />
+          <span>{t(DEFAULT_LOCALE, "captions.regenerate")}</span>
+        </button>
+      </div>
+
+      {media.keyword ? (
+        <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+          {t(DEFAULT_LOCALE, "capture.keyword")}: {media.keyword}
+        </span>
       ) : null}
+
+      <textarea
+        className="form-input"
+        value={text}
+        onChange={(e) => {
+          setText(e.target.value);
+          setFeedback(null);
+        }}
+        maxLength={CAPTION_MAX_LENGTH}
+        rows={2}
+        placeholder={t(DEFAULT_LOCALE, "captions.empty")}
+        style={{ resize: "none" }}
+      />
+
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 12,
+        }}
+      >
+        <span
+          style={{
+            fontSize: 13,
+            minHeight: 18,
+            color: feedback === "error" ? "#B23B3B" : "var(--text-secondary)",
+          }}
+        >
+          {feedback === "saved"
+            ? t(DEFAULT_LOCALE, "captions.saved")
+            : feedback === "error"
+              ? t(DEFAULT_LOCALE, "captions.error")
+              : ""}
+        </span>
+        <button
+          type="button"
+          className="btn-gold"
+          onClick={handleSave}
+          disabled={busy}
+          style={{ opacity: busy ? 0.6 : 1, cursor: busy ? "default" : "pointer" }}
+        >
+          {t(DEFAULT_LOCALE, "captions.save")}
+        </button>
+      </div>
     </div>
   );
 }
@@ -483,6 +747,46 @@ function PlayIcon() {
   return (
     <svg width={20} height={20} viewBox="0 0 24 24" fill="currentColor" aria-hidden>
       <path d="M8 5v14l11-7z" />
+    </svg>
+  );
+}
+
+/** Caption-Indikator (Untertitel-Linien). Reine Deko. */
+function CaptionIcon() {
+  return (
+    <svg
+      width={12}
+      height={12}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M5 8h14M5 12h9M5 16h12" />
+    </svg>
+  );
+}
+
+/** Refresh-/Neu-generieren-Icon; dreht sich während der Generierung. */
+function RegenerateIcon({ spinning }: { spinning: boolean }) {
+  return (
+    <svg
+      width={15}
+      height={15}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.8}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+      style={spinning ? { animation: "spin 0.9s linear infinite" } : undefined}
+    >
+      <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+      <path d="M21 3v6h-6" />
     </svg>
   );
 }

@@ -373,4 +373,45 @@ Neuer Block `assembler.*` in [lib/i18n/de.ts](lib/i18n/de.ts): `reorderHint` (�
 
 ---
 
+## KI-Captions 6b — Batch, Regenerate, Edit (Haiku 4.5)
+
+Zweite Slice des mobilen Assemblers: kurze, deutsche Bildunterschriften (memorybook-Stil) für die Medien eines Auftrags. **Erste Anthropic-Integration.** **Keine neue Migration** (`order_media.caption` existiert aus 0001). **Kein** Finalize (6c).
+
+### Anthropic-Integration (server-only)
+
+- **SDK:** `@anthropic-ai/sdk` (pnpm). Client in [lib/ai/anthropic.ts](lib/ai/anthropic.ts): lazily instanziiert, prozessweit gecacht. Key **ausschließlich** aus `ANTHROPIC_API_KEY` (server-only — **nie** `NEXT_PUBLIC`, nie im Client). `getAnthropic()` wirft, wenn der Key fehlt; `isAiConfigured()` ist der Route-Guard (⇒ 500 `ai_not_configured`, statt stillem Leerlauf).
+- **Modell:** Haiku 4.5, ID `claude-haiku-4-5-20251001` (Konstante `HAIKU_MODEL`). Haiku 4.5 unterstützt **kein** `effort`/adaptives Thinking → schlichter `messages.create`-Request, `max_tokens: 64`.
+- **`.env.example`** um `ANTHROPIC_API_KEY=` ergänzt.
+
+### Caption-Generator ([lib/ai/captions.ts](lib/ai/captions.ts))
+
+`generateCaption({ mediaType, keyword, imageBase64?, imageMediaType? })` → kurzer Caption-String.
+
+- **FOTO:** Bild (base64) **+** Stichwort gehen als Vision-Input (`{ type: "image", source: { type: "base64", … } }` + Text) an Haiku.
+- **VIDEO:** **nur** das Stichwort — die Frame-Extraktion folgt später mit dem Reel (Kommentar im Code). Ein Video **ohne** Stichwort liefert einen **leeren** String zurück (manuell nachzutragen), ohne die API zu bemühen.
+- **System-Prompt:** „sehr kurze Bildunterschriften … max ~8 Wörter, ein knappes Fragment … Deutsch, kein Marketing-Sprech, keine Anführungszeichen, keine Emojis, kein abschließender Punkt". Output = nur der Caption-Text; `cleanCaption()` entfernt defensiv umschließende Anführungszeichen + einen abschließenden Punkt und kürzt auf `CAPTION_MAX_LENGTH` (120).
+- **Client-sicheres Limit:** `CAPTION_MAX_LENGTH` liegt in [lib/ai/caption-limits.ts](lib/ai/caption-limits.ts) (kein SDK-Import) und wird von `captions.ts` re-exportiert — so kann der Client das Limit importieren, **ohne** den Anthropic-SDK ins Client-Bundle zu ziehen.
+- **Storage-Helfer** [lib/ai/media-caption.ts](lib/ai/media-caption.ts): lädt das Bild server-seitig über den **AUTHENTICATED** Client (RLS) aus dem privaten Bucket (`storage.download` → `Buffer` → base64), leitet den Bild-Medientyp aus der Endung ab und ruft `generateCaption`.
+
+### Route Handler
+
+Alle AUTHENTICATED (kein `service_role`), `getCurrentBusiness` → 401/403, Order/Media gegen Session+`order_id` validiert (⇒ 404).
+
+- **Batch** ([…/captions/route.ts](app/api/portal/orders/[id]/captions/route.ts), `POST`): lädt alle `order_media` **mit `caption IS NULL`** (manuelle Edits werden so nie überschrieben), generiert mit begrenzter Nebenläufigkeit (`mapWithConcurrency`, max. 3 parallel), speichert pro Treffer `caption` (Update defensiv auf `order_id`). Leere Captions (Video ohne Stichwort) werden **nicht** gespeichert → bleiben offen. Gibt `{ updated: { id, caption }[] }` zurück. Guard `isAiConfigured()` ⇒ 500.
+- **Regenerate** ([…/media/[mediaId]/caption/regenerate/route.ts](app/api/portal/orders/[id]/media/[mediaId]/caption/regenerate/route.ts), `POST`): generiert ein **einzelnes** Item neu und **überschreibt** dessen Caption (leer ⇒ `null`). Generierungsfehler ⇒ 502. Gibt `{ id, caption }` zurück.
+- **Manuelles Edit** ([…/media/[mediaId]/caption/route.ts](app/api/portal/orders/[id]/media/[mediaId]/caption/route.ts), `PATCH`): speichert editierten Text (Body `{ caption }`); Länge serverseitig auf `CAPTION_MAX_LENGTH` begrenzt (sonst 400), leer ⇒ `null`. **Keine KI** (reines Update, kein `isAiConfigured`-Guard). Gibt `{ id, caption }` zurück.
+
+### UI ([app/portal/orders/[id]/media-list.tsx](app/portal/orders/[id]/media-list.tsx), Client)
+
+- **Query/Type:** `OrderMedia` + `getOrderMedia` um `caption` erweitert; fließt über `MediaWithUrl` an die Liste.
+- **Batch-Button** „Captions generieren" (`.btn-dark`, oben neben dem Reorder-Hinweis): Ladezustand `captions.generating`, deaktiviert wenn nichts fehlt (`missingCount === 0`). POST → optimistisches Anwenden der `updated`-Captions + `router.refresh()`.
+- **Caption-Bearbeitung im Vollbild-Viewer** (nicht in den engen Kacheln): Der Viewer ist eine Flex-Spalte (Medium oben, Panel unten). `CaptionEditor` (key = `media.id`) zeigt `media.keyword` als Kontext, ein `textarea.form-input` (`maxLength`), einen **Neu-generieren**-Icon-Button (dreht sich während der Generierung, `@keyframes spin`) und **Speichern** (`.btn-gold`). Manuelles Edit → PATCH; Regenerate → POST; beide aktualisieren `text` lokal **und** den Parent-State (`onCaptionChange`), sodass der Kachel-Indikator sofort umspringt. Feedback `captions.saved`/`captions.error` inline. Der `viewing`-Eintrag wird aus `items` **abgeleitet** (State `viewingId`), damit Caption-Updates ohne Refresh sichtbar sind.
+- **Kachel-Indikator** (`.media-tile-caption`, obere linke Ecke, `pointer-events: none`): Untertitel-Icon, gefüllt (`--gold`) = hat Caption, schwach = fehlt.
+
+### i18n
+
+Neuer Block `captions.*` in [lib/i18n/de.ts](lib/i18n/de.ts): `generate`, `generating`, `regenerate`, `edit`, `save`, `saved`, `empty`, `error`.
+
+---
+
 > Nächste Migration: **0003**.

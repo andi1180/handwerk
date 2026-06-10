@@ -24,6 +24,7 @@ export type OrderMedia = {
   storage_path: string;
   keyword: string | null;
   tag: MediaTag | null;
+  caption: string | null;
   sort_order: number;
 };
 
@@ -52,7 +53,7 @@ export async function getOrderMedia(orderId: string): Promise<OrderMedia[]> {
   const supabase = await createClient();
   const { data } = await supabase
     .from("order_media")
-    .select("id, media_type, storage_path, keyword, tag, sort_order")
+    .select("id, media_type, storage_path, keyword, tag, caption, sort_order")
     .eq("order_id", orderId)
     .order("sort_order", { ascending: true })
     .returns<OrderMedia[]>();

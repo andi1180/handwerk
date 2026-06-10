@@ -117,4 +117,14 @@ export const de = {
     reorderError: "Reihenfolge konnte nicht gespeichert werden.",
     deleteError: "Löschen fehlgeschlagen. Bitte erneut versuchen.",
   },
+  captions: {
+    generate: "Captions generieren",
+    generating: "Generiere Captions…",
+    regenerate: "Neu generieren",
+    edit: "Bildunterschrift",
+    save: "Speichern",
+    saved: "Gespeichert",
+    empty: "Keine Bildunterschrift",
+    error: "Aktion fehlgeschlagen. Bitte erneut versuchen.",
+  },
 } as const;
