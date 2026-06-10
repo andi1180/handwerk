@@ -21,6 +21,34 @@ export const de = {
   },
   nav: {
     dashboard: "Dashboard",
+    orders: "Aufträge",
     logout: "Abmelden",
+  },
+  orders: {
+    title: "Aufträge",
+    new: "Neuer Auftrag",
+    empty: "Noch keine Aufträge angelegt.",
+    customerName: "Kundenname",
+    email: "E-Mail",
+    phone: "Telefon",
+    externalRef: "Externe Referenz",
+    externalRefHint: "z. B. roapp-Nr.",
+    itemDescription: "Beschreibung",
+    itemDescriptionHint: "Kontext für die KI — z. B. Material, Arbeitsschritte (optional).",
+    consent: "Einwilligung des Kunden liegt vor",
+    consentHint:
+      "Der Kunde hat zugestimmt, dass seine Fotos und Angaben zur Erstellung des Booklets verwendet werden dürfen. Optional — der Auftrag kann auch ohne Einwilligung angelegt werden.",
+    create: "Anlegen",
+    nameRequired: "Bitte einen Kundennamen angeben.",
+    createError:
+      "Der Auftrag konnte nicht angelegt werden. Bitte erneut versuchen.",
+  },
+  orderStatus: {
+    draft: "Entwurf",
+    finalized: "Abgeschlossen",
+    generated: "Generiert",
+    sent: "Gesendet",
+    viewed: "Angesehen",
+    shared: "Geteilt",
   },
 } as const;

@@ -1,9 +1,9 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentBusiness } from "@/lib/auth/current-business";
 import { DEFAULT_LOCALE, t } from "@/lib/i18n";
 import LogoutButton from "./logout-button";
+import PortalNav from "./portal-nav";
 
 /**
  * Geschützte Portal-Shell (Server Component, desktop-first).
@@ -62,23 +62,7 @@ export default async function PortalLayout({
           {t(DEFAULT_LOCALE, "app.name")}
         </div>
 
-        <nav style={{ flex: 1 }}>
-          <Link
-            href="/portal"
-            style={{
-              display: "block",
-              padding: "10px 18px",
-              borderLeft: "2px solid var(--gold)",
-              background: "var(--gold-light)",
-              color: "var(--text-primary)",
-              fontSize: 14,
-              fontWeight: 600,
-              textDecoration: "none",
-            }}
-          >
-            {t(DEFAULT_LOCALE, "nav.dashboard")}
-          </Link>
-        </nav>
+        <PortalNav />
 
         <div style={{ padding: "0 18px" }}>
           <LogoutButton />
