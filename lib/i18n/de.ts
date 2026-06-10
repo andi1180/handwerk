@@ -188,6 +188,7 @@ export const de = {
     done: "Booklet generiert",
     needMedia: "Bitte zuerst mindestens ein Medium hinzufügen.",
     error: "Erzeugung fehlgeschlagen. Bitte erneut versuchen.",
+    timeout: "Zeitüberschreitung. Bitte erneut versuchen.",
     aiNotConfigured:
       "Die KI ist nicht konfiguriert. Bitte später erneut versuchen.",
     previewSoon: "Die Vorschau-Seite folgt in Kürze.",

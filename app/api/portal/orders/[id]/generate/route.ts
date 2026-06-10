@@ -3,8 +3,13 @@ import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { getCurrentBusiness } from "@/lib/auth/current-business";
 import { isAiConfigured } from "@/lib/ai/anthropic";
-import { generateIntro } from "@/lib/ai/intro";
+import { generateIntro, IntroParseError } from "@/lib/ai/intro";
 import { generateAccessToken } from "@/lib/booklet/token";
+
+/** Echte Fehlermeldung für die Server-Logs (Vercel) extrahieren. */
+function errMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
 
 /**
  * POST /api/portal/orders/[id]/generate — erzeugt die Booklet-Daten eines
@@ -94,6 +99,8 @@ export async function POST(
     .filter((c): c is string => Boolean(c));
 
   // KI-Intro (Sonnet 4.6). Parse-/API-Fehler ⇒ 502 (kein stiller Fehler).
+  // Unparsebares JSON (IntroParseError) ⇒ parse_failed, sonstiger Sonnet-/
+  // Netzwerkfehler ⇒ generation_failed — beide mit echter Message geloggt.
   let intro: { title: string; description: string };
   try {
     intro = await generateIntro({
@@ -104,11 +111,16 @@ export async function POST(
       businessContext: business.settings.ai_context ?? undefined,
     });
   } catch (error) {
+    const isParse = error instanceof IntroParseError;
     console.error("generate: intro generation failed", {
       order_id: order.id,
-      error,
+      step: isParse ? "intro_parse" : "intro_sonnet",
+      message: errMessage(error),
     });
-    return NextResponse.json({ error: "intro_failed" }, { status: 502 });
+    return NextResponse.json(
+      { error: isParse ? "parse_failed" : "generation_failed" },
+      { status: 502 },
+    );
   }
 
   // booklets UPSERT by order_id (unique) über service_role, strikt auf die
@@ -124,9 +136,10 @@ export async function POST(
   if (loadError) {
     console.error("generate: booklet load failed", {
       order_id: order.id,
-      error: loadError,
+      step: "booklet_load",
+      message: loadError.message,
     });
-    return NextResponse.json({ error: "booklet_failed" }, { status: 500 });
+    return NextResponse.json({ error: "upsert_failed" }, { status: 500 });
   }
 
   const token = existing?.access_token ?? generateAccessToken();
@@ -146,9 +159,10 @@ export async function POST(
     if (updateError) {
       console.error("generate: booklet update failed", {
         order_id: order.id,
-        error: updateError,
+        step: "booklet_update",
+        message: updateError.message,
       });
-      return NextResponse.json({ error: "booklet_failed" }, { status: 500 });
+      return NextResponse.json({ error: "upsert_failed" }, { status: 500 });
     }
   } else {
     // reel_url/review_draft/ig_caption/image_urls/expires_at bleiben null (8b/9).
@@ -164,9 +178,10 @@ export async function POST(
     if (insertError) {
       console.error("generate: booklet insert failed", {
         order_id: order.id,
-        error: insertError,
+        step: "booklet_insert",
+        message: insertError.message,
       });
-      return NextResponse.json({ error: "booklet_failed" }, { status: 500 });
+      return NextResponse.json({ error: "upsert_failed" }, { status: 500 });
     }
   }
 
@@ -180,7 +195,8 @@ export async function POST(
   if (statusError) {
     console.error("generate: order status update failed", {
       order_id: order.id,
-      error: statusError,
+      step: "status_update",
+      message: statusError.message,
     });
     return NextResponse.json({ error: "status_failed" }, { status: 500 });
   }

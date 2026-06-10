@@ -21,12 +21,32 @@ import { postAction } from "./finalize-controls";
  * geprüft, die `business_id` stammt aus der geladenen Order.
  */
 
-/** POST auf `generate` (kein Body — Session + Order entscheiden serverseitig). */
+/** Antwortet die Generierung (Sonnet) nicht, wird hart abgebrochen. */
+const GENERATE_TIMEOUT_MS = 60_000;
+
+/**
+ * POST auf `generate` (kein Body — Session + Order entscheiden serverseitig).
+ * Mit AbortController-Timeout: kommt nie eine Antwort, wirft `fetch` einen
+ * AbortError statt ewig zu hängen.
+ */
 async function postGenerate(orderId: string): Promise<Response> {
-  return fetch(`/api/portal/orders/${orderId}/generate`, { method: "POST" });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), GENERATE_TIMEOUT_MS);
+  try {
+    return await fetch(`/api/portal/orders/${orderId}/generate`, {
+      method: "POST",
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
-/** Server-Fehlercode → i18n-Hinweis (need_media / ai_not_configured / sonst). */
+/**
+ * Server-Fehlercode → i18n-Hinweis (need_media / ai_not_configured / sonst).
+ * Hängt den technischen Diagnose-Teil (HTTP-Status + error-Code) an, damit ein
+ * Fehler im UI sichtbar und nachvollziehbar ist (kein stilles Hängen).
+ */
 async function noticeForError(res: Response): Promise<string> {
   let code = "";
   try {
@@ -35,10 +55,22 @@ async function noticeForError(res: Response): Promise<string> {
   } catch {
     // kein/ungültiger Body → generischer Fehler unten
   }
-  if (code === "need_media") return t(DEFAULT_LOCALE, "generate.needMedia");
-  if (code === "ai_not_configured") {
-    return t(DEFAULT_LOCALE, "generate.aiNotConfigured");
+  const base =
+    code === "need_media"
+      ? t(DEFAULT_LOCALE, "generate.needMedia")
+      : code === "ai_not_configured"
+        ? t(DEFAULT_LOCALE, "generate.aiNotConfigured")
+        : t(DEFAULT_LOCALE, "generate.error");
+  const detail = code ? `${res.status} ${code}` : String(res.status);
+  return `${base} (${detail})`;
+}
+
+/** AbortError (Timeout) → eigener Hinweis, sonst generischer Fehler. */
+function noticeForThrow(error: unknown): string {
+  if (error instanceof DOMException && error.name === "AbortError") {
+    return t(DEFAULT_LOCALE, "generate.timeout");
   }
+  console.error("generate: request failed", error);
   return t(DEFAULT_LOCALE, "generate.error");
 }
 
@@ -86,12 +118,13 @@ export function GenerateButton({
         const res = await postGenerate(orderId);
         if (!res.ok) {
           setNotice(await noticeForError(res));
-          setBusy(false);
           return;
         }
         router.refresh(); // Server rendert die Seite im Generiert-Modus neu
-      } catch {
-        setNotice(t(DEFAULT_LOCALE, "generate.error"));
+      } catch (error) {
+        setNotice(noticeForThrow(error));
+      } finally {
+        // Lade-Zustand IMMER zurücksetzen — nie ein Dauer-„Erzeuge…".
         setBusy(false);
       }
     })();
@@ -138,12 +171,13 @@ export function GeneratedBanner({ orderId }: { orderId: string }) {
                 ? await noticeForError(res)
                 : t(DEFAULT_LOCALE, "generate.error"),
             );
-            setBusy(null);
             return;
           }
           router.refresh();
-        } catch {
-          setNotice(t(DEFAULT_LOCALE, "generate.error"));
+        } catch (error) {
+          setNotice(noticeForThrow(error));
+        } finally {
+          // Lade-Zustand IMMER zurücksetzen — nie ein Dauer-„Erzeuge…".
           setBusy(null);
         }
       })();
