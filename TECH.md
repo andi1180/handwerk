@@ -530,4 +530,33 @@ Neu: `captions.selectAll`, `captions.deselectAll`, `capture.uploadError`.
 
 ---
 
+## Schritt-8/9-Vorgaben (Render: Web-Story + Reel)
+
+Verbindlich für Schritt 8 (Web-Story-Render) und Schritt 9 (Reel/FFmpeg + Auslieferung).
+Wo das Pflichtenheft die Regel bereits trägt, wird sie hier NUR referenziert — nicht neu
+ausformuliert (Single Source of Truth, Drift-Schutz):
+
+- Reel mute-safe (Captions/Text tragen die Story; Kunde addiert Audio in IG/TikTok selbst;
+  Fremdmusik nur optional/lizenziert, nicht im MVP) → Pflichtenheft §6.
+- Share: Reel als Datei (navigator.share({ files })) für IG/TikTok-Story; Web-Story als URL
+  → §4 + §8.5.
+- Google-Review-Entwurf personalisiert aus dem Booklet-Inhalt; nie Verbatim-Zwang, nie an
+  eine Belohnung gekoppelt → §8.6.
+- IG-Caption vorbefüllt mit @-Handle des Betriebs + Hashtags → §6 / §9.
+
+NEU (steht in keiner MD — hier verbindlich):
+
+- Caption-Fallback `caption ?? keyword`: Jedes Booklet-Item zeigt im Overlay die KI-Caption.
+  Ist `caption` null/leer → zeige das getippte `keyword` (Stichwort). Sind BEIDE leer
+  (z. B. Video ohne Stichwort + ohne Caption) → KEIN Overlay rendern (niemals ein leeres Feld).
+- Eine gemeinsame Helper-Funktion, genutzt von Web-Story (Schritt 8) UND Reel-Overlay
+  (Schritt 9) — nicht zweimal inline, sonst driften Story und Reel auseinander.
+  Zielort: lib/booklet/caption.ts
+  Signatur: displayCaption(media: { caption: string | null; keyword: string | null }): string | null
+  (Rückgabe null = Overlay weglassen.)
+  Die Funktion wird mit ihrem ersten Konsumenten in Schritt 8 angelegt; Schritt 9 importiert
+  dieselbe Funktion. JETZT keine Orphan-Funktion anlegen (kein Konsument).
+
+---
+
 > Nächste Migration: **0003**.
