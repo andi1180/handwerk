@@ -170,4 +170,42 @@ Erstes echtes Feature: Aufträge anlegen und auflisten — der **manuelle Pfad**
 
 ---
 
-> Nächste Migration: **0002**.
+## Storage + Auftrags-Detail (Schritt 4a)
+
+Storage-Fundament (Migration 0002) plus Auftrags-Detailseite mit reiner **Medien-Anzeige**. **Noch ohne Capture/Upload** (folgt in 4b) und **ohne Generierung**. **Mobile-first**: ein Mitarbeiter öffnet einen Auftrag am Handy.
+
+### Storage-Bucket & Policies (Migration 0002)
+
+Datei: [supabase/migrations/0002_storage.sql](supabase/migrations/0002_storage.sql) — **manuell** im SQL-Editor anwenden.
+
+- **Bucket `order-media`** (`public = false`): privater Bucket, `on conflict do nothing` (idempotent).
+- **Pfad-Konvention:** `{business_id}/{order_id}/{media_id}` — das **erste Pfad-Segment ist die `business_id`** und damit die Mandanten-Grenze im Storage.
+- **Tenant-skopierte Policies auf `storage.objects`** (nur `authenticated`): `order_media_select`/`_insert`/`_delete` erlauben Zugriff genau dann, wenn `bucket_id = 'order-media'` **und** der eingeloggte Nutzer Mitglied des Betriebs ist, dessen Id im ersten Pfad-Segment steht (`(storage.foldername(name))[1] = bu.business_id::text`).
+- **`service_role`** umgeht RLS (für spätere server-seitige Generierung) — **keine** Policy nötig. **`anon`**: keine Policy = **kein** Zugriff.
+- **Privater Bucket → Signed URLs:** Reads laufen nie direkt; die Detailseite erzeugt pro Medium **server-seitig** eine `createSignedUrl(path, 3600)` (Ablauf 3600 s).
+- Verifikation: [supabase/verify/0002_storage_checks.sql](supabase/verify/0002_storage_checks.sql) prüft (1) Bucket existiert + privat, (2) genau 3 `order_media_*`-Policies, alle nur für `authenticated`.
+
+### Query-Helper (`lib/orders/queries.ts`)
+
+[lib/orders/queries.ts](lib/orders/queries.ts), beide über den **AUTHENTICATED Server-Client** (RLS), typsicher:
+
+- `getOrderById(id)` → `OrderDetail | null`. RLS skopiert auf den Betrieb; fremde/fehlende id → `null` (Seite ruft `notFound()`).
+- `getOrderMedia(orderId)` → `OrderMedia[]`, sortiert nach `sort_order` ASC. Exportiert zugleich `MediaTag` (`vorher`/`nachher`/`prozess`).
+
+### Detailseite (`app/portal/orders/[id]/page.tsx`)
+
+[app/portal/orders/[id]/page.tsx](app/portal/orders/[id]/page.tsx) (Server Component, mobile-first):
+
+- **Dauerhaft sichtbarer Kopf** (sticky): `customer_name` + Status-Badge (Wiederverwendung von [components/order-status-badge.tsx](components/order-status-badge.tsx)) + „Zurück zur Liste"-Link (`orderDetail.back`).
+- **Stammdaten** (nur falls vorhanden): `external_ref`, `customer_email`, `customer_phone`, `item_description`, sowie das Anlagedatum (`de-DE`).
+- **Medien-Liste:** lädt `order_media` (RLS, `sort_order` ASC). Pro Item: Thumbnail (Foto → `<img>` mit Signed-URL; Video → Typ-Icon), Medientyp-Icon (Inline-SVG Foto/Video), `keyword` und `tag`-Pill. Leerer Zustand: `orderDetail.noMedia`.
+- **Kein Capture-Button** in 4a (folgt in 4b).
+- Die **Auftragsliste** ([app/portal/orders/page.tsx](app/portal/orders/page.tsx)) ist nun zeilenweise klickbar (`<Link>` auf `/portal/orders/[id]`, Hover-Stil `.card-link` → `--surface-2`).
+
+### i18n
+
+Neue Schlüssel in [lib/i18n/de.ts](lib/i18n/de.ts): `orderDetail.back`/`.media`/`.noMedia` und `mediaTag.vorher`/`.nachher`/`.prozess`. Keine Inline-Strings in der UI.
+
+---
+
+> Nächste Migration: **0003**.

@@ -51,4 +51,14 @@ export const de = {
     viewed: "Angesehen",
     shared: "Geteilt",
   },
+  orderDetail: {
+    back: "Zurück zur Liste",
+    media: "Medien",
+    noMedia: "Noch keine Medien zu diesem Auftrag.",
+  },
+  mediaTag: {
+    vorher: "Vorher",
+    nachher: "Nachher",
+    prozess: "Prozess",
+  },
 } as const;

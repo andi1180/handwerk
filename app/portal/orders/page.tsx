@@ -83,9 +83,10 @@ export default async function OrdersPage() {
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           {orders.map((order) => (
-            <div
+            <Link
               key={order.id}
-              className="card"
+              href={`/portal/orders/${order.id}`}
+              className="card card-link"
               style={{
                 display: "flex",
                 alignItems: "center",
@@ -127,7 +128,7 @@ export default async function OrdersPage() {
                   {DATE_FORMAT.format(new Date(order.created_at))}
                 </div>
               </div>
-            </div>
+            </Link>
           ))}
         </div>
       )}
