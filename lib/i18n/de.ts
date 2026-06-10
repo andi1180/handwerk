@@ -173,4 +173,15 @@ export const de = {
     reopen: "Wieder bearbeiten",
     error: "Aktion fehlgeschlagen. Bitte erneut versuchen.",
   },
+  generate: {
+    generate: "Vorschau erzeugen",
+    generating: "Erzeuge…",
+    regenerate: "Neu generieren",
+    done: "Booklet generiert",
+    needMedia: "Bitte zuerst mindestens ein Medium hinzufügen.",
+    error: "Erzeugung fehlgeschlagen. Bitte erneut versuchen.",
+    aiNotConfigured:
+      "Die KI ist nicht konfiguriert. Bitte später erneut versuchen.",
+    previewSoon: "Die Vorschau-Seite folgt in Kürze.",
+  },
 } as const;

@@ -706,6 +706,100 @@ Neuer Block `settings.background.*` in [lib/i18n/de.ts](lib/i18n/de.ts):
 
 ---
 
+## Booklet-Generierung 8a-1 (Web-Story-Daten)
+
+Erste Slice von Schritt 8: aus einem abgeschlossenen Auftrag werden die
+Booklet-Daten erzeugt — **KI-Intro (Sonnet 4.6)**, ein unerratbarer
+`access_token`, Status `generated`. **OHNE Render** (`/b/[token]` folgt in 8a-2),
+**ohne Reel** (8b), **ohne Share-/Review-/Delivery-UI** (Step 9). **Keine neue
+Migration** (`booklets` existiert aus 0001).
+
+### Sonnet-Integration (server-only, reuse 6b)
+
+- [lib/ai/anthropic.ts](lib/ai/anthropic.ts): Konstante `SONNET_MODEL =
+  "claude-sonnet-4-6"` neben `HAIKU_MODEL`. `getAnthropic()`/`isAiConfigured()`
+  werden **wiederverwendet** (gleicher gecachter Client, Key nur aus
+  `ANTHROPIC_API_KEY`, server-only).
+- [lib/ai/intro.ts](lib/ai/intro.ts) (NEU): `generateIntro({ itemDescription,
+  captions, language })` → `{ title, description }`. System-Prompt DE („erster
+  Eindruck, hochwertig"): kurzer Titel (≤ ~6 Wörter) + 1–2 Sätze zur
+  Transformation des Stücks, aus `item_description` + den vorhandenen Captions;
+  kein Marketing-Sprech, keine Emojis. Sonnet liefert **nur JSON** `{"title":
+  …,"description": …}` (kein Markdown/Backticks); **defensives Parsen**
+  (Fence-Strip + Eingrenzung auf das erste `{…}` + `try/catch`) → bei
+  Parse-Fehler `IntroParseError` (Route ⇒ **502**). `max_tokens: 300`.
+  **Sprach-parametrisiert** über `language` (§15): `LANGUAGE_NAMES`-Map
+  (`de → Deutsch`, Default = Code) — neue Sprache = Config, kein Refactor.
+
+### Token ([lib/booklet/token.ts](lib/booklet/token.ts), NEU)
+
+`generateAccessToken()` = `randomBytes(24).toString("base64url")` (24 Byte =
+192 bit, URL-sicher, erfüllt die 0001-Vorgabe „≥ 24 Byte base64url"). Server-only
+(`node:crypto`). Der Token ist die **einzige vertrauenswürdige Quelle** für den
+späteren öffentlichen Read `/b/[token]` (§14.2): Token → Booklet → `business_id`.
+
+### Route Handler ([…/generate/route.ts](app/api/portal/orders/[id]/generate/route.ts), `POST`)
+
+AUTHENTICATED Server-Client zuerst (kein User ⇒ 401, kein Betrieb ⇒ 403). Order
+über RLS geladen (fremde/fehlende id ⇒ 404). **Guards:** Status muss `finalized`
+**oder** `generated` sein (Re-Generate erlaubt, solange NICHT versendet) ⇒ sonst
+**409**; defensiv ≥ 1 `order_media` (`count`, head) ⇒ sonst **400 `need_media`**;
+`isAiConfigured()` ⇒ sonst **500 `ai_not_configured`**. Captions der Order werden
+über den AUTHENTICATED Client als Intro-Kontext geladen (`caption IS NOT NULL`,
+`sort_order` ASC), dann `generateIntro(...)` (Fehler ⇒ **502 `intro_failed`**).
+
+- **ISOLATION (§14.2):** Der booklets-Insert/Update läuft über **`service_role`**
+  (0001-RLS lässt nur serverseitiges Insert/Delete zu). Die `business_id` stammt
+  **aus der geladenen Order** (über RLS gegen die Session validiert), **nie aus
+  dem Body**; jeder `service_role`-Zugriff ist strikt auf diese `business_id`
+  gescoped (Select/Update zusätzlich `.eq("business_id", …)`).
+- **UPSERT by `order_id` (unique):** zuerst bestehendes Booklet laden
+  (order_id + business_id). Vorhanden ⇒ `update` (`intro_title`,
+  `intro_description`, `language = order.language`, `web_story_ready = false`),
+  **Token unverändert** (geteilte Links dürfen nicht brechen). Nicht vorhanden ⇒
+  `insert` mit **neuem** `access_token`. `reel_url`/`review_draft`/`ig_caption`/
+  `image_urls`/`expires_at` bleiben `null` (8b/9); `web_story_ready` setzt 8a-2
+  nach Render-Fähigkeit.
+- **Order-Status → `generated`** über den AUTHENTICATED Client (RLS), defensiv
+  `.eq("status", order.status)` (kein Doppelübergang; bei Re-Generate No-op-Treffer).
+- **Response** `{ ok: true, token }` (200). Fehlerpfade loggen `console.error`
+  mit `order_id` + Schritt (wie 6b.3).
+
+### Reopen erweitert ([…/reopen/route.ts](app/api/portal/orders/[id]/reopen/route.ts))
+
+Der 6c-Reopen (`finalized → draft`) akzeptiert jetzt **auch `generated → draft`**
+(Guard: Status ∈ {`finalized`,`generated`}, sonst 409; Update defensiv auf den
+Ausgangsstatus gefiltert). Die Versand-Stufen (`sent`/`viewed`/`shared`) lassen
+sich weiterhin **nicht** zurückdrehen. Das bereits erzeugte Booklet (inkl. Token)
+bleibt bestehen — ein erneutes Generieren behält den Token.
+
+### Portal-UI ([page.tsx](app/portal/orders/[id]/page.tsx) + [generate-controls.tsx](app/portal/orders/[id]/generate-controls.tsx), NEU)
+
+Die Detailseite leitet `isGenerated` aus dem Status ab (neben `isDraft`/`isFinalized`):
+
+- **`finalized`:** zusätzlich zum bestehenden „Wieder bearbeiten"-Banner ein
+  prominenter **„Vorschau erzeugen"** (`<GenerateButton>`, `btn-gold capture-btn`)
+  am Seitenende → `POST generate` → `router.refresh()`. Ohne Medium kein Request
+  (Server prüft zusätzlich); Server-Fehlercode → i18n (`need_media`/
+  `ai_not_configured`/sonst).
+- **`generated`:** Banner **„Booklet generiert"** (`<GeneratedBanner>`, gold) mit
+  Hinweis **„Vorschau-Seite folgt"** (der `/b/[token]`-Link kommt erst in 8a-2 —
+  hier **nicht** verlinkt), **„Neu generieren"** (erneutes `POST generate`,
+  überschreibt das Intro, behält den Token) und **„Wieder bearbeiten"** (Reopen,
+  geteilt über das aus [finalize-controls.tsx](app/portal/orders/[id]/finalize-controls.tsx)
+  exportierte `postAction`). Capture ausgeblendet, `<MediaList readOnly>`.
+
+Beide Komponenten: `div + onClick`, **kein `<form>`**, Loading-/Fehler-State; der
+Anthropic-SDK bleibt server-only (kein Import im Client-Bundle).
+
+### i18n
+
+Neuer Block `generate.*` in [lib/i18n/de.ts](lib/i18n/de.ts): `generate`,
+`generating`, `regenerate`, `done`, `needMedia`, `error`, `aiNotConfigured`,
+`previewSoon`.
+
+---
+
 ## Schritt-8/9-Vorgaben (Render: Web-Story + Reel)
 
 Verbindlich für Schritt 8 (Web-Story-Render) und Schritt 9 (Reel/FFmpeg + Auslieferung).

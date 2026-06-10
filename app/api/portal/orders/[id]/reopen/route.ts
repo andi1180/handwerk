@@ -3,20 +3,22 @@ import { createClient } from "@/lib/supabase/server";
 import { getCurrentBusiness } from "@/lib/auth/current-business";
 
 /**
- * POST /api/portal/orders/[id]/reopen — öffnet ein abgeschlossenes Booklet
- * wieder zur Bearbeitung (mobiler Assembler 6c): Status-Übergang
- * `finalized` → `draft`. Gegenstück zu `finalize`; bringt den Editier-Modus
- * (Capture, Reorder, Löschen, Captions) zurück.
+ * POST /api/portal/orders/[id]/reopen — öffnet ein Booklet wieder zur
+ * Bearbeitung: Status-Übergang `finalized` → `draft` (6c) bzw. seit 8a-1 auch
+ * `generated` → `draft`. Gegenstück zu `finalize`/`generate`; bringt den
+ * Editier-Modus (Capture, Reorder, Löschen, Captions) zurück. Das bereits
+ * erzeugte Booklet (inkl. Token) bleibt bestehen — ein erneutes Generieren
+ * behält den Token.
  *
  * Guards (alle vor dem Update):
  *  - AUTHENTICATED Server-Client (kein `service_role`); kein User ⇒ 401.
  *  - `getCurrentBusiness` (Session); kein Betrieb ⇒ 403.
  *  - Order über RLS geladen (fremde/fehlende id ⇒ 404).
- *  - Aktueller Status muss `finalized` sein — sonst 409 (nichts zu öffnen;
- *    spätere Stufen wie `generated`/`sent` lassen sich nicht zurückdrehen).
+ *  - Aktueller Status muss `finalized` oder `generated` sein — sonst 409. Die
+ *    Versand-Stufen (`sent`/`viewed`/`shared`) lassen sich NICHT zurückdrehen.
  *
  * Das Update läuft über die `orders_all`-RLS-Policy; defensiv zusätzlich auf
- * `status = 'finalized'` gefiltert.
+ * den Ausgangsstatus gefiltert (kein Doppel-Übergang bei Races).
  */
 export async function POST(
   _request: Request,
@@ -48,8 +50,9 @@ export async function POST(
     return NextResponse.json({ error: "not_found" }, { status: 404 });
   }
 
-  // Nur ein abgeschlossenes Booklet lässt sich wieder öffnen.
-  if (order.status !== "finalized") {
+  // Abgeschlossene oder generierte Booklets lassen sich wieder öffnen — nicht
+  // mehr, sobald versendet (sent/viewed/shared).
+  if (order.status !== "finalized" && order.status !== "generated") {
     return NextResponse.json({ error: "invalid_status" }, { status: 409 });
   }
 
@@ -57,7 +60,7 @@ export async function POST(
     .from("orders")
     .update({ status: "draft" })
     .eq("id", order.id)
-    .eq("status", "finalized");
+    .eq("status", order.status);
   if (error) {
     return NextResponse.json({ error: "update_failed" }, { status: 500 });
   }

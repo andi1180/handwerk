@@ -8,6 +8,7 @@ import { OrderStatusBadge } from "@/components/order-status-badge";
 import { Capture } from "./capture";
 import { MediaList, type MediaWithUrl } from "./media-list";
 import { FinalizeBanner, FinalizeButton } from "./finalize-controls";
+import { GenerateButton, GeneratedBanner } from "./generate-controls";
 import { getOrderById, getOrderMedia } from "@/lib/orders/queries";
 
 const DATE_FORMAT = new Intl.DateTimeFormat("de-DE", {
@@ -53,9 +54,11 @@ export default async function OrderDetailPage({
   );
 
   // Editier-Modus nur im Entwurf (6c). Abgeschlossene/spätere Stufen sind
-  // read-only; nur `finalized` lässt sich per Banner wieder öffnen (Reopen).
+  // read-only. `finalized` lässt sich abschließen/erzeugen, `generated` neu
+  // erzeugen — beide auch wieder öffnen (Reopen), solange nicht versendet.
   const isDraft = order.status === "draft";
   const isFinalized = order.status === "finalized";
+  const isGenerated = order.status === "generated";
 
   return (
     <div style={{ maxWidth: 720, margin: "0 auto" }}>
@@ -103,6 +106,9 @@ export default async function OrderDetailPage({
 
       {/* Abgeschlossen-Banner + „Wieder bearbeiten" (nur Status finalized). */}
       {isFinalized ? <FinalizeBanner orderId={order.id} /> : null}
+
+      {/* Generiert-Banner + „Neu generieren"/„Wieder bearbeiten" (Status generated). */}
+      {isGenerated ? <GeneratedBanner orderId={order.id} /> : null}
 
       {/* Stammdaten. */}
       <div
@@ -173,6 +179,11 @@ export default async function OrderDetailPage({
       {/* Prominenter Abschluss-Button am Seitenende (nur Status draft, 6c). */}
       {isDraft ? (
         <FinalizeButton orderId={order.id} mediaCount={media.length} />
+      ) : null}
+
+      {/* Vorschau erzeugen am Seitenende (nur Status finalized, 8a-1). */}
+      {isFinalized ? (
+        <GenerateButton orderId={order.id} mediaCount={media.length} />
       ) : null}
     </div>
   );

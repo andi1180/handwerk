@@ -20,7 +20,7 @@ import { DEFAULT_LOCALE, t } from "@/lib/i18n";
  */
 
 /** Gemeinsamer POST auf `finalize`/`reopen` (kein Body — Session entscheidet). */
-async function postAction(
+export async function postAction(
   orderId: string,
   action: "finalize" | "reopen",
 ): Promise<Response> {

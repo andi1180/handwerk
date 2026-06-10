@@ -12,6 +12,13 @@ import Anthropic from "@anthropic-ai/sdk";
  */
 export const HAIKU_MODEL = "claude-haiku-4-5-20251001";
 
+/**
+ * Modell-ID Sonnet 4.6: `claude-sonnet-4-6` (stärkeres Modell für das Booklet-
+ * Intro, Schritt 8a-1). Liefert die API einen Modell-ID-Fehler, hier auf die
+ * aktuelle Sonnet-4.6-ID anpassen (nicht raten — aus den Anthropic-Docs).
+ */
+export const SONNET_MODEL = "claude-sonnet-4-6";
+
 let cached: Anthropic | null = null;
 
 /**
