@@ -30,6 +30,13 @@ function intOrNull(value: unknown): number | null {
     : null;
 }
 
+/** Endliche, positive Zahl → der Wert selbst, sonst null (für duration_seconds). */
+function positiveNumberOrNull(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? value
+    : null;
+}
+
 /**
  * POST /api/portal/orders/[id]/media — legt die **Metadaten** eines bereits
  * direkt in den Storage geladenen Mediums an (zweistufiger Upload).
@@ -81,9 +88,17 @@ export async function POST(
   }
   const payload = (body ?? {}) as Record<string, unknown>;
 
-  // media_type — in 4b ausschließlich 'photo' (Video folgt in 4c).
-  if (payload.media_type !== "photo") {
+  // media_type — 'photo' (4b) oder 'video' (4c).
+  if (payload.media_type !== "photo" && payload.media_type !== "video") {
     return NextResponse.json({ error: "invalid_media_type" }, { status: 400 });
+  }
+  const mediaType = payload.media_type;
+
+  // duration_seconds — bei 'video' erforderlich, bei 'photo' ignoriert (null).
+  const durationSeconds =
+    mediaType === "video" ? positiveNumberOrNull(payload.duration_seconds) : null;
+  if (mediaType === "video" && durationSeconds === null) {
+    return NextResponse.json({ error: "invalid_duration" }, { status: 400 });
   }
 
   // storage_path MUSS im mandanten- UND auftragsskopierten Pfad liegen.
@@ -116,12 +131,13 @@ export async function POST(
     .insert({
       order_id: order.id,
       business_id: businessId,
-      media_type: "photo",
+      media_type: mediaType,
       storage_path: storagePath,
       keyword: trimmedOrNull(payload.keyword),
       tag,
       width: intOrNull(payload.width),
       height: intOrNull(payload.height),
+      duration_seconds: durationSeconds,
       sort_order: nextSortOrder,
     })
     .select("id, media_type, storage_path, keyword, tag, sort_order")

@@ -4,8 +4,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { compressImage } from "@/lib/media/compress";
+import { getVideoDuration } from "@/lib/media/video";
+import { MAX_VIDEO_SECONDS } from "@/lib/media/constants";
 import { DEFAULT_LOCALE, t } from "@/lib/i18n";
 import type { MediaTag } from "@/lib/orders/queries";
+
+/** Medientyp einer Aufnahme (Foto in 4b, Video in 4c). */
+type MediaType = "photo" | "video";
 
 /** Browser-Client (anon-Key, RLS) — pro Komponenteninstanz einmal erzeugt. */
 type BrowserClient = ReturnType<typeof createClient>;
@@ -21,6 +26,8 @@ const UPLOAD_BACKOFF_MS = 800; // wächst linear pro Versuch
 type Draft = {
   file: File;
   objectUrl: string;
+  mediaType: MediaType;
+  durationSeconds: number | null; // nur bei Video gesetzt
   keyword: string;
   tag: MediaTag | null;
 };
@@ -28,13 +35,23 @@ type Draft = {
 /** Ein in der In-Memory-Queue laufendes (optimistisches) Upload-Item. */
 type PendingItem = {
   id: string; // lokaler Schlüssel für React + Queue-Operationen
-  storagePath: string; // {businessId}/{orderId}/{uuid}.jpg (einmalig vergeben)
-  objectUrl: string; // lokales Thumbnail (Original-Aufnahme)
-  file: File; // Original — bei „Erneut" wird neu komprimiert
+  storagePath: string; // {businessId}/{orderId}/{uuid}.{ext} (einmalig vergeben)
+  objectUrl: string; // lokale Vorschau (Original-Aufnahme)
+  file: File; // Original — Foto wird neu komprimiert, Video unverändert
+  mediaType: MediaType;
+  durationSeconds: number | null; // nur bei Video gesetzt
   keyword: string | null;
   tag: MediaTag | null;
   status: "uploading" | "error";
 };
+
+/** Dateiendung für den Storage-Pfad eines Videos (aus dem MIME-Subtyp). */
+function videoExtension(file: File): string {
+  const subtype = file.type.split("/")[1]?.toLowerCase();
+  if (subtype === "quicktime") return "mov";
+  if (subtype && /^[a-z0-9]+$/.test(subtype)) return subtype;
+  return "mp4";
+}
 
 /** Pause (ms) — kurzer Backoff zwischen Upload-Versuchen. */
 function delay(ms: number): Promise<void> {
@@ -51,12 +68,13 @@ async function uploadWithRetry(
   supabase: BrowserClient,
   path: string,
   blob: Blob,
+  contentType: string,
 ): Promise<void> {
   let lastError: unknown;
   for (let attempt = 0; attempt < UPLOAD_MAX_ATTEMPTS; attempt++) {
     const { error } = await supabase.storage
       .from("order-media")
-      .upload(path, blob, { contentType: "image/jpeg", upsert: true });
+      .upload(path, blob, { contentType, upsert: true });
     if (!error) return;
     lastError = error;
     if (attempt < UPLOAD_MAX_ATTEMPTS - 1) {
@@ -84,10 +102,12 @@ export function Capture({
 }) {
   const router = useRouter();
   const supabase = useMemo(() => createClient(), []);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const photoInputRef = useRef<HTMLInputElement>(null);
+  const videoInputRef = useRef<HTMLInputElement>(null);
 
   const [draft, setDraft] = useState<Draft | null>(null);
   const [items, setItems] = useState<PendingItem[]>([]);
+  const [notice, setNotice] = useState<string | null>(null); // z. B. Video zu lang
 
   // Spiegel für die Unmount-Bereinigung (objectURLs freigeben).
   const itemsRef = useRef<PendingItem[]>([]);
@@ -114,20 +134,45 @@ export function Capture({
         ),
       );
       try {
-        const compressed = await compressImage(item.file);
-        await uploadWithRetry(supabase, item.storagePath, compressed.blob);
-
-        const res = await fetch(`/api/portal/orders/${orderId}/media`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
+        // Body je Medientyp: Foto wird komprimiert (Maße), Video unverändert
+        // hochgeladen (Dauer als Metadatum). Storage-Upload zweistufig wie 4b.
+        let metadata: Record<string, unknown>;
+        if (item.mediaType === "video") {
+          await uploadWithRetry(
+            supabase,
+            item.storagePath,
+            item.file,
+            item.file.type || "video/mp4",
+          );
+          metadata = {
+            storage_path: item.storagePath,
+            media_type: "video",
+            duration_seconds: item.durationSeconds,
+            keyword: item.keyword,
+            tag: item.tag,
+          };
+        } else {
+          const compressed = await compressImage(item.file);
+          await uploadWithRetry(
+            supabase,
+            item.storagePath,
+            compressed.blob,
+            "image/jpeg",
+          );
+          metadata = {
             storage_path: item.storagePath,
             media_type: "photo",
             keyword: item.keyword,
             tag: item.tag,
             width: compressed.width,
             height: compressed.height,
-          }),
+          };
+        }
+
+        const res = await fetch(`/api/portal/orders/${orderId}/media`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(metadata),
         });
         if (!res.ok) throw new Error("metadata_failed");
 
@@ -149,16 +194,58 @@ export function Capture({
     [supabase, orderId, router],
   );
 
-  const openCamera = () => fileInputRef.current?.click();
+  const openPhoto = () => photoInputRef.current?.click();
+  const openVideo = () => videoInputRef.current?.click();
 
-  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+  /** Verwirft einen evtl. offenen Entwurf und setzt den neuen Entwurf. */
+  const replaceDraft = (next: Draft) => {
+    if (draft) URL.revokeObjectURL(draft.objectUrl);
+    setNotice(null);
+    setDraft(next);
+  };
+
+  const handlePhotoFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = ""; // erlaubt erneute Auswahl derselben Datei
     if (!file) return;
-    if (draft) URL.revokeObjectURL(draft.objectUrl); // vorigen Entwurf verwerfen
-    setDraft({
+    replaceDraft({
       file,
       objectUrl: URL.createObjectURL(file),
+      mediaType: "photo",
+      durationSeconds: null,
+      keyword: "",
+      tag: null,
+    });
+  };
+
+  const handleVideoFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // erlaubt erneute Auswahl derselben Datei
+    if (!file) return;
+
+    // Längen-Check NACH der Aufnahme — zu lang ⇒ ablehnen, kein Upload, kein Trim.
+    let duration: number;
+    try {
+      duration = await getVideoDuration(file);
+    } catch {
+      setNotice(t(DEFAULT_LOCALE, "capture.error"));
+      return;
+    }
+    if (duration > MAX_VIDEO_SECONDS) {
+      setNotice(
+        t(DEFAULT_LOCALE, "capture.videoTooLong").replace(
+          "{max}",
+          String(MAX_VIDEO_SECONDS),
+        ),
+      );
+      return;
+    }
+
+    replaceDraft({
+      file,
+      objectUrl: URL.createObjectURL(file),
+      mediaType: "video",
+      durationSeconds: duration,
       keyword: "",
       tag: null,
     });
@@ -172,11 +259,14 @@ export function Capture({
   const saveDraft = () => {
     if (!draft) return;
     const uuid = crypto.randomUUID();
+    const ext = draft.mediaType === "video" ? videoExtension(draft.file) : "jpg";
     const item: PendingItem = {
       id: crypto.randomUUID(),
-      storagePath: `${businessId}/${orderId}/${uuid}.jpg`,
+      storagePath: `${businessId}/${orderId}/${uuid}.${ext}`,
       objectUrl: draft.objectUrl, // Eigentum geht ans Item über → nicht revoken
       file: draft.file,
+      mediaType: draft.mediaType,
+      durationSeconds: draft.durationSeconds,
       keyword: draft.keyword.trim() || null,
       tag: draft.tag,
       status: "uploading",
@@ -188,30 +278,70 @@ export function Capture({
 
   return (
     <div style={{ marginBottom: 12 }}>
-      {/* Verstecktes Datei-Input — native Kamera (Rückseite), nur Bilder. */}
+      {/* Versteckte Datei-Inputs — native Kamera (Rückseite), Foto bzw. Video. */}
       <input
-        ref={fileInputRef}
+        ref={photoInputRef}
         type="file"
         accept="image/*"
         capture="environment"
         style={{ display: "none" }}
-        onChange={handleFile}
+        onChange={handlePhotoFile}
+      />
+      <input
+        ref={videoInputRef}
+        type="file"
+        accept="video/*"
+        capture="environment"
+        style={{ display: "none" }}
+        onChange={(e) => void handleVideoFile(e)}
       />
 
-      {/* Großer, klar tappbarer Aufnahme-Button. */}
-      <div
-        role="button"
-        tabIndex={0}
-        className="btn-dark"
-        style={{ width: "100%", padding: "16px", fontSize: 16, gap: 10 }}
-        onClick={openCamera}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") openCamera();
-        }}
-      >
-        <CameraIcon />
-        {t(DEFAULT_LOCALE, "capture.photo")}
+      {/* Große, klar tappbare Aufnahme-Buttons (Foto + Video). */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        <div
+          role="button"
+          tabIndex={0}
+          className="btn-dark"
+          style={{ width: "100%", padding: "16px", fontSize: 16, gap: 10 }}
+          onClick={openPhoto}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") openPhoto();
+          }}
+        >
+          <CameraIcon />
+          {t(DEFAULT_LOCALE, "capture.photo")}
+        </div>
+        <div
+          role="button"
+          tabIndex={0}
+          className="btn-outline"
+          style={{ width: "100%", padding: "16px", fontSize: 16, gap: 10 }}
+          onClick={openVideo}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") openVideo();
+          }}
+        >
+          <VideoIcon />
+          {t(DEFAULT_LOCALE, "capture.video")}
+        </div>
       </div>
+
+      {/* Hinweis (z. B. Video zu lang) — nur sichtbar, wenn gesetzt. */}
+      {notice ? (
+        <div
+          role="alert"
+          className="card"
+          style={{
+            marginTop: 12,
+            padding: 12,
+            fontSize: 13,
+            color: "#B23B3B",
+            borderColor: "var(--border)",
+          }}
+        >
+          {notice}
+        </div>
+      ) : null}
 
       {/* Entwurf: Vorschau + Stichwort + Tag + Speichern/Verwerfen. */}
       {draft ? (
@@ -224,18 +354,33 @@ export function Capture({
             marginTop: 12,
           }}
         >
-          {/* eslint-disable-next-line @next/next/no-img-element -- lokale objectURL-Vorschau, kein Remote-Bild. */}
-          <img
-            src={draft.objectUrl}
-            alt=""
-            style={{
-              width: "100%",
-              maxHeight: 320,
-              objectFit: "contain",
-              borderRadius: "var(--radius)",
-              background: "var(--surface-2)",
-            }}
-          />
+          {draft.mediaType === "video" ? (
+            <video
+              src={draft.objectUrl}
+              controls
+              playsInline
+              preload="metadata"
+              style={{
+                width: "100%",
+                maxHeight: 320,
+                borderRadius: "var(--radius)",
+                background: "var(--surface-2)",
+              }}
+            />
+          ) : (
+            // eslint-disable-next-line @next/next/no-img-element -- lokale objectURL-Vorschau, kein Remote-Bild.
+            <img
+              src={draft.objectUrl}
+              alt=""
+              style={{
+                width: "100%",
+                maxHeight: 320,
+                objectFit: "contain",
+                borderRadius: "var(--radius)",
+                background: "var(--surface-2)",
+              }}
+            />
+          )}
 
           <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             <span style={{ fontSize: 13, color: "var(--text-secondary)" }}>
@@ -368,14 +513,27 @@ function PendingRow({
           borderRadius: "var(--radius)",
           overflow: "hidden",
           background: "var(--surface-2)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
         }}
       >
-        {/* eslint-disable-next-line @next/next/no-img-element -- lokale objectURL-Vorschau. */}
-        <img
-          src={item.objectUrl}
-          alt={item.keyword ?? ""}
-          style={{ width: "100%", height: "100%", objectFit: "cover" }}
-        />
+        {item.mediaType === "video" ? (
+          <video
+            src={item.objectUrl}
+            muted
+            playsInline
+            preload="metadata"
+            style={{ width: "100%", height: "100%", objectFit: "cover" }}
+          />
+        ) : (
+          // eslint-disable-next-line @next/next/no-img-element -- lokale objectURL-Vorschau.
+          <img
+            src={item.objectUrl}
+            alt={item.keyword ?? ""}
+            style={{ width: "100%", height: "100%", objectFit: "cover" }}
+          />
+        )}
       </div>
 
       <div style={{ minWidth: 0, flex: 1 }}>
@@ -439,6 +597,26 @@ function CameraIcon() {
     >
       <path d="M4 8h3l1.5-2h7L17 8h3v11H4z" />
       <circle cx="12" cy="13.5" r="3.2" />
+    </svg>
+  );
+}
+
+/** Schlichtes Inline-SVG-Video-Icon für den Video-Button. Reine Deko. */
+function VideoIcon() {
+  return (
+    <svg
+      width={20}
+      height={20}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.8}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <rect x="3" y="5" width="18" height="14" rx="2" />
+      <path d="M10 9l5 3-5 3z" fill="currentColor" stroke="none" />
     </svg>
   );
 }

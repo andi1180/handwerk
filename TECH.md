@@ -239,4 +239,32 @@ Neuer Block `capture.*` in [lib/i18n/de.ts](lib/i18n/de.ts): `photo`, `keyword`,
 
 ---
 
+## Video-Capture (Schritt 4c)
+
+Aufbauend auf demselben Flow wie 4b — bestehende Capture-Komponente + Route Handler **erweitert, nicht dupliziert**. Keine neue Migration (`order_media.duration_seconds` existiert bereits aus 0001).
+
+### Längen-Check (post-capture, kein Trim)
+
+- [constants.ts](lib/media/constants.ts): `MAX_VIDEO_SECONDS = 30` (später via Settings konfigurierbar).
+- [video.ts](lib/media/video.ts): `getVideoDuration(file)` liest die Dauer über ein verstecktes `<video preload="metadata">` (`loadedmetadata`); die Object-URL wird in jedem Fall freigegeben. Typsicher, kein `any`.
+- Der Check läuft **nach** der Aufnahme: ist der Clip > `MAX_VIDEO_SECONDS`, wird er **abgelehnt** (i18n `capture.videoTooLong`, `{max}`-Platzhalter) — **kein Upload, kein clientseitiges Trimmen** (MVP).
+
+### Keine Client-Kompression für Video
+
+Anders als Fotos wird Video **nicht** clientseitig komprimiert (Canvas-Re-Encode wäre am Handy zu schwer) — die Datei geht **unverändert** in den Storage, unter `{business_id}/{order_id}/{uuid}.{ext}` (`ext` aus dem MIME-Subtyp, `quicktime → mov`, sonst Subtyp, Fallback `mp4`). Der `contentType` des Uploads ist der `file.type`. Hintergrund-Queue, 2 Retries und optimistische Liste werden **wiederverwendet** — `runUpload` verzweigt nur auf `media_type='video'`.
+
+### Route-Handler-Erweiterung
+
+[app/api/portal/orders/[id]/media/route.ts](app/api/portal/orders/[id]/media/route.ts): `media_type ∈ {'photo','video'}`. `duration_seconds` (numeric) wird akzeptiert — bei `'video'` **erforderlich** (> 0, sonst 400), bei `'photo'` ignoriert (`null`). Restliche Isolation/Validierung (Order gehört zum Betrieb, Pfad-Präfix `${business_id}/${order_id}/`, `sort_order = max+1`) unverändert; Insert um `duration_seconds` erweitert.
+
+### Inline-Video in der Liste
+
+Detailseite ([app/portal/orders/[id]/page.tsx](app/portal/orders/[id]/page.tsx)) rendert Video-Items als **inline abspielbares** `<video src={signedUrl} controls preload="metadata">` (server-seitige Signed-URL, 3600 s) — damit der Mitarbeiter den Clip direkt prüfen kann. Fotos unverändert (Thumbnail-Zeile).
+
+### i18n
+
+`capture.*` ergänzt um `video` und `videoTooLong` (mit `{max}`-Platzhalter, am Aufrufort interpoliert).
+
+---
+
 > Nächste Migration: **0003**.

@@ -194,8 +194,53 @@ function MetaRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-/** Ein Medien-Eintrag: Thumbnail (Foto) bzw. Typ-Icon, Keyword und Tag. */
+/** Ein Medien-Eintrag: Thumbnail (Foto) bzw. inline-Player (Video), Keyword, Tag. */
 function MediaListItem({ media }: { media: MediaWithUrl }) {
+  // Video: inline abspielbar, damit der Mitarbeiter den Clip direkt prüfen kann.
+  if (media.media_type === "video") {
+    return (
+      <div
+        className="card"
+        style={{ display: "flex", flexDirection: "column", gap: 10, padding: 12 }}
+      >
+        {media.signedUrl ? (
+          <video
+            src={media.signedUrl}
+            controls
+            playsInline
+            preload="metadata"
+            style={{
+              width: "100%",
+              maxHeight: 360,
+              borderRadius: "var(--radius)",
+              background: "var(--surface-2)",
+            }}
+          />
+        ) : (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              height: 120,
+              borderRadius: "var(--radius)",
+              background: "var(--surface-2)",
+            }}
+          >
+            <MediaTypeIcon type="video" size={28} />
+          </div>
+        )}
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <MediaTypeIcon type="video" size={16} />
+          {media.keyword ? (
+            <span style={{ fontSize: 14, fontWeight: 600 }}>{media.keyword}</span>
+          ) : null}
+        </div>
+        {media.tag ? <MediaTagBadge tag={media.tag} /> : null}
+      </div>
+    );
+  }
+
   return (
     <div
       className="card"
