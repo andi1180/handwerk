@@ -33,14 +33,16 @@ export const RETENTION_MONTHS = { min: 1, max: 120, default: 12 } as const;
 export const HEX_COLOR_REGEX = /^#[0-9a-fA-F]{6}$/;
 
 /**
- * Längen-Grenzen für die Booklet-Inhalt-Texte (Schritt 7b). Geteilt von
- * Settings-Form (Client-Validierung + `maxLength`) und Route Handler
- * (Server-Validierung), damit beide Seiten exakt dasselbe Limit erzwingen.
+ * Längen-Grenzen für die Booklet-Inhalt-Texte (Schritt 7b) und den
+ * Betriebs-KI-Kontext (Schritt 8a-1b). Geteilt von Settings-Form
+ * (Client-Validierung + `maxLength`) und Route Handler (Server-Validierung),
+ * damit beide Seiten exakt dasselbe Limit erzwingen.
  */
 export const CONTENT_LIMITS = {
   introTagline: 80,
   outroMessage: 300,
   contactPhone: 40,
+  aiContext: 500,
 } as const;
 
 /** Pragmatisches E-Mail-Format für die öffentliche Kontakt-Mail (Outro). */

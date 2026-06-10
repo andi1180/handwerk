@@ -114,6 +114,7 @@ export function SettingsForm({
   const [contactPhone, setContactPhone] = useState(
     business.settings.contact_phone ?? "",
   );
+  const [aiContext, setAiContext] = useState(business.settings.ai_context ?? "");
 
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -180,6 +181,10 @@ export function SettingsForm({
       fail(t(DEFAULT_LOCALE, "settings.content.emailInvalid"));
       return;
     }
+    if (aiContext.trim().length > CONTENT_LIMITS.aiContext) {
+      fail(t(DEFAULT_LOCALE, "settings.aiContext.tooLong"));
+      return;
+    }
 
     setSaveState("saving");
     setErrorMsg(null);
@@ -204,6 +209,7 @@ export function SettingsForm({
           outro_message: outroMessage,
           contact_email: contactEmail,
           contact_phone: contactPhone,
+          ai_context: aiContext,
         }),
       });
 
@@ -405,6 +411,24 @@ export function SettingsForm({
           onChange={(v) => {
             markDirty();
             setContactPhone(v);
+          }}
+        />
+      </div>
+
+      {/* KI-Stil — Fach-/Stilkontext, der die KI-Textgenerierung erdet (8a-1b) */}
+      <div className="card" style={cardStyle}>
+        <h2 style={groupTitleStyle}>
+          {t(DEFAULT_LOCALE, "settings.aiContext.sectionTitle")}
+        </h2>
+        <TextAreaField
+          label={t(DEFAULT_LOCALE, "settings.aiContext.label")}
+          value={aiContext}
+          maxLength={CONTENT_LIMITS.aiContext}
+          hint={t(DEFAULT_LOCALE, "settings.aiContext.hint")}
+          placeholder={t(DEFAULT_LOCALE, "settings.aiContext.placeholder")}
+          onChange={(v) => {
+            markDirty();
+            setAiContext(v);
           }}
         />
       </div>

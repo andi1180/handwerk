@@ -117,6 +117,13 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: "invalid_email" }, { status: 400 });
   }
 
+  // Betriebs-KI-Kontext (Schritt 8a-1b): Fach-/Stilkontext, erdet die
+  // KI-Textgenerierung (aktuell Intro). KONTEXT, keine Anweisung. Leer ⇒ null.
+  const aiContext = trimmedOrNull(payload.ai_context);
+  if (aiContext !== null && aiContext.length > CONTENT_LIMITS.aiContext) {
+    return NextResponse.json({ error: "content_too_long" }, { status: 400 });
+  }
+
   // READ-MERGE-WRITE des branding-jsonb: nur die 5a-Form-Felder schreiben,
   // `logo_url` (und evtl. weitere Keys) BEIBEHALTEN. Das Logo wird ausschließlich
   // über /api/portal/settings/logo gepflegt — symmetrische Trennung, dieser
@@ -150,6 +157,7 @@ export async function PATCH(request: Request) {
     outro_message: outroMessage,
     contact_email: contactEmail,
     contact_phone: contactPhone,
+    ai_context: aiContext,
   };
 
   const { data, error } = await supabase

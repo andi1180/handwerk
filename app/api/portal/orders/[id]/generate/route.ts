@@ -100,6 +100,8 @@ export async function POST(
       itemDescription: order.item_description,
       captions,
       language: order.language,
+      // Betriebs-KI-Kontext (8a-1b) — erdet Ton/Fachsprache, KONTEXT keine Anweisung.
+      businessContext: business.settings.ai_context ?? undefined,
     });
   } catch (error) {
     console.error("generate: intro generation failed", {

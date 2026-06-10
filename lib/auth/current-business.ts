@@ -40,6 +40,12 @@ export type BusinessSettings = {
   contact_email: string | null;
   /** Öffentliche Telefonnummer fürs Outro, optional. */
   contact_phone: string | null;
+  /**
+   * Fach-/Stilkontext des Betriebs (Schritt 8a-1b), der die KI-Textgenerierung
+   * erdet. Aktuell nur fürs Intro genutzt, in Step 9 für den Review-Entwurf
+   * wiederverwendet. KONTEXT, keine Anweisung. Optional.
+   */
+  ai_context: string | null;
 };
 
 /**
@@ -118,6 +124,7 @@ function normalizeSettings(raw: unknown): BusinessSettings {
     outro_message: asTrimmedOrNull(s.outro_message),
     contact_email: asTrimmedOrNull(s.contact_email),
     contact_phone: asTrimmedOrNull(s.contact_phone),
+    ai_context: asTrimmedOrNull(s.ai_context),
   };
 }
 

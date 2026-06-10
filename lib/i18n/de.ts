@@ -98,6 +98,14 @@ export const de = {
       emailInvalid: "Bitte eine gültige E-Mail-Adresse angeben.",
       tooLong: "Der Text ist zu lang.",
     },
+    aiContext: {
+      sectionTitle: "KI-Stil",
+      label: "KI-Kontext",
+      hint: "Erdet die KI-Texte (Intro): Fachsprache, Fokus und Ton. Kontext, keine Anweisung — keine erfundenen Fakten.",
+      placeholder:
+        "z. B. 'Meisterschneider, ändere v. a. Hosen. Beschreibe die Arbeitsschritte und die Sorgfalt bei der Qualität.'",
+      tooLong: "Der KI-Kontext ist zu lang (max. 500 Zeichen).",
+    },
     logo: {
       title: "Logo",
       upload: "Logo hochladen",
