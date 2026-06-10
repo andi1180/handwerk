@@ -49,13 +49,18 @@ const NOTICE_TIMEOUT_MS = 4000;
  *
  * ISOLATION: Alle Mutationen laufen über Route Handler, die `order_id`/Betrieb
  * gegen die Session prüfen; das Bild wird server-seitig (RLS) geladen.
+ *
+ * `readOnly` (Abgeschlossen-Modus, 6c): blendet alle Mutations-Controls aus
+ * (Reorder/Löschen/Caption-Edit/Batch). Ansehen/Abspielen bleibt.
  */
 export function MediaList({
   orderId,
   items: initialItems,
+  readOnly = false,
 }: {
   orderId: string;
   items: MediaWithUrl[];
+  readOnly?: boolean;
 }) {
   const router = useRouter();
   const [items, setItems] = useState<MediaWithUrl[]>(initialItems);
@@ -217,35 +222,39 @@ export function MediaList({
 
   return (
     <div>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: 12,
-          marginBottom: 10,
-        }}
-      >
-        <p style={{ margin: 0, fontSize: 12, color: "var(--text-secondary)" }}>
-          {t(DEFAULT_LOCALE, "assembler.reorderHint")}
-        </p>
-        <button
-          type="button"
-          className="btn-dark"
-          onClick={handleGenerate}
-          disabled={generating || missingCount === 0}
+      {/* Mutations-Kopf (Reorder-Hinweis + Batch-Captions) — im Abgeschlossen-
+          Modus ausgeblendet. */}
+      {!readOnly ? (
+        <div
           style={{
-            flexShrink: 0,
-            opacity: generating || missingCount === 0 ? 0.6 : 1,
-            cursor:
-              generating || missingCount === 0 ? "default" : "pointer",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 12,
+            marginBottom: 10,
           }}
         >
-          {generating
-            ? t(DEFAULT_LOCALE, "captions.generating")
-            : t(DEFAULT_LOCALE, "captions.generate")}
-        </button>
-      </div>
+          <p style={{ margin: 0, fontSize: 12, color: "var(--text-secondary)" }}>
+            {t(DEFAULT_LOCALE, "assembler.reorderHint")}
+          </p>
+          <button
+            type="button"
+            className="btn-dark"
+            onClick={handleGenerate}
+            disabled={generating || missingCount === 0}
+            style={{
+              flexShrink: 0,
+              opacity: generating || missingCount === 0 ? 0.6 : 1,
+              cursor:
+                generating || missingCount === 0 ? "default" : "pointer",
+            }}
+          >
+            {generating
+              ? t(DEFAULT_LOCALE, "captions.generating")
+              : t(DEFAULT_LOCALE, "captions.generate")}
+          </button>
+        </div>
+      ) : null}
 
       <DndContext
         sensors={sensors}
@@ -270,6 +279,7 @@ export function MediaList({
                 key={media.id}
                 media={media}
                 draggedRef={draggedRef}
+                readOnly={readOnly}
                 onView={() => setViewingId(media.id)}
                 onDelete={() => handleDelete(media)}
               />
@@ -298,6 +308,7 @@ export function MediaList({
         <MediaViewer
           media={viewing}
           orderId={orderId}
+          readOnly={readOnly}
           onClose={() => setViewingId(null)}
           onCaptionChange={applyCaption}
         />
@@ -310,16 +321,18 @@ export function MediaList({
 function SortableTile({
   media,
   draggedRef,
+  readOnly,
   onView,
   onDelete,
 }: {
   media: MediaWithUrl;
   draggedRef: React.RefObject<boolean>;
+  readOnly: boolean;
   onView: () => void;
   onDelete: () => void;
 }) {
   const { setNodeRef, attributes, listeners, transform, transition, isDragging } =
-    useSortable({ id: media.id });
+    useSortable({ id: media.id, disabled: readOnly });
 
   const style: CSSProperties = {
     transform: CSS.Transform.toString(transform),
@@ -335,14 +348,15 @@ function SortableTile({
   };
 
   const hasCaption = Boolean(media.caption);
+  // Read-only: keine Drag-Listener (nur Ansehen), kein Lösch-Button.
+  const dragProps = readOnly ? {} : { ...attributes, ...listeners };
 
   return (
     <div
       ref={setNodeRef}
       style={style}
       className="media-tile"
-      {...attributes}
-      {...listeners}
+      {...dragProps}
       onClick={view}
       onKeyDown={(e) => {
         if (e.key === "Enter") view();
@@ -396,25 +410,27 @@ function SortableTile({
         <span className="media-tile-tag">{t(DEFAULT_LOCALE, `mediaTag.${media.tag}`)}</span>
       ) : null}
 
-      <div
-        role="button"
-        tabIndex={0}
-        aria-label={t(DEFAULT_LOCALE, "assembler.delete")}
-        className="media-tile-delete"
-        onPointerDown={(e) => e.stopPropagation()}
-        onClick={(e) => {
-          e.stopPropagation();
-          onDelete();
-        }}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") {
+      {!readOnly ? (
+        <div
+          role="button"
+          tabIndex={0}
+          aria-label={t(DEFAULT_LOCALE, "assembler.delete")}
+          className="media-tile-delete"
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
             e.stopPropagation();
             onDelete();
-          }
-        }}
-      >
-        <TrashIcon />
-      </div>
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.stopPropagation();
+              onDelete();
+            }
+          }}
+        >
+          <TrashIcon />
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -426,11 +442,13 @@ function SortableTile({
 function MediaViewer({
   media,
   orderId,
+  readOnly,
   onClose,
   onCaptionChange,
 }: {
   media: MediaWithUrl;
   orderId: string;
+  readOnly: boolean;
   onClose: () => void;
   onCaptionChange: (id: string, caption: string) => void;
 }) {
@@ -527,13 +545,48 @@ function MediaViewer({
         ) : null}
       </div>
 
-      {/* Caption-Editor: eigener key pro Item, damit der Text beim Wechsel neu lädt. */}
-      <CaptionEditor
-        key={media.id}
-        orderId={orderId}
-        media={media}
-        onCaptionChange={onCaptionChange}
-      />
+      {/* Caption: editierbar im Entwurf, sonst read-only (Abgeschlossen-Modus, 6c).
+          Eigener key pro Item, damit der Text beim Wechsel neu lädt. */}
+      {readOnly ? (
+        <CaptionReadOnly media={media} />
+      ) : (
+        <CaptionEditor
+          key={media.id}
+          orderId={orderId}
+          media={media}
+          onCaptionChange={onCaptionChange}
+        />
+      )}
+    </div>
+  );
+}
+
+/** Read-only-Anzeige der Caption (Abgeschlossen-Modus) — kein Edit, kein KI-Button. */
+function CaptionReadOnly({ media }: { media: MediaWithUrl }) {
+  return (
+    <div
+      onClick={(e) => e.stopPropagation()}
+      style={{
+        background: "var(--surface)",
+        borderTop: "1px solid var(--border)",
+        padding: "12px 16px",
+        paddingBottom: "calc(12px + env(safe-area-inset-bottom, 0px))",
+        display: "flex",
+        flexDirection: "column",
+        gap: 4,
+      }}
+    >
+      <span style={{ fontSize: 13, fontWeight: 600 }}>
+        {t(DEFAULT_LOCALE, "captions.edit")}
+      </span>
+      <span
+        style={{
+          fontSize: 14,
+          color: media.caption ? "var(--text-primary)" : "var(--text-secondary)",
+        }}
+      >
+        {media.caption ?? t(DEFAULT_LOCALE, "captions.empty")}
+      </span>
     </div>
   );
 }

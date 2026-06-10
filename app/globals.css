@@ -15,6 +15,11 @@
   --gold-light: rgba(196, 169, 91, 0.10);
   --gold-border: rgba(196, 169, 91, 0.35);
 
+  /* Dezentes Grün für „gesendet"-Stufen (Lifecycle-Badges 6c). */
+  --green-light: rgba(46, 125, 70, 0.10);
+  --green-border: rgba(46, 125, 70, 0.30);
+  --green-text: #2E7D46;
+
   --btn-dark-bg: #3A3A3A;
   --btn-gold-bg: #C4A95B;
 

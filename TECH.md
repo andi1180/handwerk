@@ -433,4 +433,43 @@ Neben „Foto/Video **aufnehmen**" (native Kamera, `<input … capture="environm
 
 ---
 
+## Finalize + Lifecycle (Schritt 6c)
+
+Schließt den **mobilen Assembler** ab: aus dem Editier-Modus wird per Knopfdruck ein abgeschlossenes Booklet — und zurück. **Keine neue Migration** (Status-Spalte + Check-Constraint aus 0001), **keine Generierung** (das ist Schritt 8; der Generierungs-Hook hängt sich später an den Finalize-Übergang).
+
+### Status-Übergänge (draft ↔ finalized)
+
+- **Finalize** `draft → finalized` ([…/finalize/route.ts](app/api/portal/orders/[id]/finalize/route.ts), `POST`): schließt das Booklet ab.
+- **Reopen** `finalized → draft` ([…/reopen/route.ts](app/api/portal/orders/[id]/reopen/route.ts), `POST`): öffnet es wieder zur Bearbeitung.
+- Beide ohne Body — Betrieb/Order werden im Handler gegen die Session geprüft (AUTHENTICATED Client, kein `service_role`): kein User ⇒ 401, kein Betrieb ⇒ 403, fremde/fehlende Order (RLS) ⇒ 404. Spätere Stufen (`generated`/`sent`/…) lassen sich **nicht** zurückdrehen (Reopen verlangt exakt `finalized`).
+
+### Finalize-Guards
+
+- Aktueller Status muss **`draft`** sein (Reopen: **`finalized`**) — sonst **409**. Das `UPDATE` ist zusätzlich defensiv auf den Ausgangsstatus gefiltert (`.eq("status", …)`), kein Doppel-Übergang bei Races.
+- **Mindestens ein `order_media`** (`count`, head) — sonst **400 `need_media`**. Ohne Medium gibt es kein Booklet abzuschließen.
+
+### Editier- vs. Abgeschlossen-Modus ([page.tsx](app/portal/orders/[id]/page.tsx))
+
+Die Detailseite (Server Component) leitet aus dem Status zwei Flags ab (`isDraft`, `isFinalized`) und schaltet das UI:
+
+- **`draft` (Editier-Modus):** Capture sichtbar, [media-list.tsx](app/portal/orders/[id]/media-list.tsx) voll aktiv (Reorder/Löschen/Captions), plus ein prominenter **„Booklet abschließen"** am Seitenende (`<FinalizeButton>`, `btn-gold capture-btn`, mobil groß). Klick → Bestätigungsdialog (`finalize.confirm` + `finalize.confirmText`) → `POST finalize` → `router.refresh()`. Ohne Medium gar kein Request, sondern direkt `finalize.needMedia` (Server prüft zusätzlich).
+- **`finalized` (Abgeschlossen-Modus):** Capture **ausgeblendet**; `<MediaList readOnly>` unterdrückt alle Mutations-Controls — keine Drag-Listener (`useSortable({ disabled })`), keine Lösch-Buttons, kein Batch-Captions-Kopf, Caption im Viewer **read-only** (`<CaptionReadOnly>` statt Editor). Ansehen/Abspielen bleibt. Am Seitenkopf ein Banner **„Booklet abgeschlossen"** (`<FinalizeBanner>`, gold) mit **„Wieder bearbeiten"** → `POST reopen` → `router.refresh()`.
+- `<FinalizeButton>`/`<FinalizeBanner>` ([finalize-controls.tsx](app/portal/orders/[id]/finalize-controls.tsx), Client) teilen sich ein `postAction(orderId, "finalize"|"reopen")` — keine Logik dupliziert.
+
+### Lifecycle-Badges nach Stufe ([order-status-badge.tsx](components/order-status-badge.tsx))
+
+Farben gruppieren jetzt nach **Stufe** statt pro Status, damit die Auftragsliste auf einen Blick „in Arbeit / fertig / gesendet" zeigt:
+
+- **neutral** (surface/border) = `draft` (in Arbeit)
+- **Gold** (`--gold-light`/`--gold-border`) = `finalized` + `generated` (fertig)
+- **grünlich** (neue Tokens `--green-light`/`--green-border`/`--green-text`) = `sent` + `viewed` + `shared` (gesendet)
+
+Labels unverändert (Entwurf/Abgeschlossen/Generiert/Gesendet/Angesehen/Geteilt).
+
+### i18n
+
+`finalize.button` / `confirm` / `confirmText` / `needMedia` / `done` (Banner) / `reopen` (+ `error` für fehlgeschlagene Aktion).
+
+---
+
 > Nächste Migration: **0003**.

@@ -12,25 +12,38 @@ export type OrderStatus =
   | "viewed"
   | "shared";
 
-/** Pro Status ein dezenter Farbsatz (Hotel-Badge-Muster). `draft` = neutral. */
-const STATUS_STYLES: Record<
-  OrderStatus,
-  { background: string; border: string; color: string }
-> = {
-  draft: {
-    background: "var(--surface)",
-    border: "var(--border)",
-    color: "var(--text-secondary)",
-  },
-  finalized: { background: "#EAF3EC", border: "#CFE3D4", color: "#2E7D46" },
-  generated: {
-    background: "var(--gold-light)",
-    border: "var(--gold-border)",
-    color: "#8A7320",
-  },
-  sent: { background: "#E9EFF8", border: "#CFDCEF", color: "#2F5DA8" },
-  viewed: { background: "#F0EAF6", border: "#DECFEA", color: "#6B4B8A" },
-  shared: { background: "#E6F4F1", border: "#CDE8E2", color: "#1E7A6A" },
+type BadgeStyle = { background: string; border: string; color: string };
+
+/**
+ * Farbsätze nach **Lifecycle-Stufe** statt pro Status (6c) — die Liste zeigt so
+ * auf einen Blick „in Arbeit / fertig / gesendet":
+ *  - neutral  = in Arbeit (`draft`)
+ *  - gold     = fertig (`finalized`, `generated`)
+ *  - grünlich = gesendet/gesehen (`sent`, `viewed`, `shared`)
+ */
+const NEUTRAL: BadgeStyle = {
+  background: "var(--surface)",
+  border: "var(--border)",
+  color: "var(--text-secondary)",
+};
+const GOLD: BadgeStyle = {
+  background: "var(--gold-light)",
+  border: "var(--gold-border)",
+  color: "#8A7320",
+};
+const GREEN: BadgeStyle = {
+  background: "var(--green-light)",
+  border: "var(--green-border)",
+  color: "var(--green-text)",
+};
+
+const STATUS_STYLES: Record<OrderStatus, BadgeStyle> = {
+  draft: NEUTRAL,
+  finalized: GOLD,
+  generated: GOLD,
+  sent: GREEN,
+  viewed: GREEN,
+  shared: GREEN,
 };
 
 /**

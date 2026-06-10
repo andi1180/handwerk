@@ -129,4 +129,14 @@ export const de = {
     empty: "Keine Bildunterschrift",
     error: "Aktion fehlgeschlagen. Bitte erneut versuchen.",
   },
+  finalize: {
+    button: "Booklet abschließen",
+    confirm: "Booklet abschließen?",
+    confirmText:
+      "Danach sind keine Änderungen mehr möglich. Du kannst es jederzeit wieder zur Bearbeitung öffnen.",
+    needMedia: "Bitte zuerst mindestens ein Medium hinzufügen.",
+    done: "Booklet abgeschlossen",
+    reopen: "Wieder bearbeiten",
+    error: "Aktion fehlgeschlagen. Bitte erneut versuchen.",
+  },
 } as const;

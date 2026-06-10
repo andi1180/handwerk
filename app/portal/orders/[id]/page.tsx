@@ -7,6 +7,7 @@ import { DEFAULT_LOCALE, t } from "@/lib/i18n";
 import { OrderStatusBadge } from "@/components/order-status-badge";
 import { Capture } from "./capture";
 import { MediaList, type MediaWithUrl } from "./media-list";
+import { FinalizeBanner, FinalizeButton } from "./finalize-controls";
 import { getOrderById, getOrderMedia } from "@/lib/orders/queries";
 
 const DATE_FORMAT = new Intl.DateTimeFormat("de-DE", {
@@ -51,6 +52,11 @@ export default async function OrderDetailPage({
     }),
   );
 
+  // Editier-Modus nur im Entwurf (6c). Abgeschlossene/spätere Stufen sind
+  // read-only; nur `finalized` lässt sich per Banner wieder öffnen (Reopen).
+  const isDraft = order.status === "draft";
+  const isFinalized = order.status === "finalized";
+
   return (
     <div style={{ maxWidth: 720, margin: "0 auto" }}>
       {/* Dauerhaft sichtbarer Kopf: Kundenname + Status. Sticky; klinkt auf
@@ -94,6 +100,9 @@ export default async function OrderDetailPage({
           </div>
         </div>
       </div>
+
+      {/* Abgeschlossen-Banner + „Wieder bearbeiten" (nur Status finalized). */}
+      {isFinalized ? <FinalizeBanner orderId={order.id} /> : null}
 
       {/* Stammdaten. */}
       <div
@@ -141,18 +150,30 @@ export default async function OrderDetailPage({
         </h2>
 
         {/* Foto-/Video-Capture (Client): zeigt Pending-Items, bis router.refresh()
-            sie in die Medien-Liste überführt. */}
-        <Capture
-          businessId={order.business_id}
-          orderId={order.id}
-          maxVideoSeconds={maxVideoSeconds}
-        />
+            sie in die Medien-Liste überführt. Nur im Editier-Modus (Entwurf). */}
+        {isDraft ? (
+          <Capture
+            businessId={order.business_id}
+            orderId={order.id}
+            maxVideoSeconds={maxVideoSeconds}
+          />
+        ) : null}
 
-        {/* Mobiler Assembler (6a): einheitliches Kachel-Raster, Reorder + Löschen. */}
+        {/* Mobiler Assembler (6a): Kachel-Raster, Reorder + Löschen. Im
+            Abgeschlossen-Modus read-only (nur Ansehen/Abspielen). */}
         <div style={{ marginTop: 16 }}>
-          <MediaList orderId={order.id} items={mediaWithUrls} />
+          <MediaList
+            orderId={order.id}
+            items={mediaWithUrls}
+            readOnly={!isDraft}
+          />
         </div>
       </section>
+
+      {/* Prominenter Abschluss-Button am Seitenende (nur Status draft, 6c). */}
+      {isDraft ? (
+        <FinalizeButton orderId={order.id} mediaCount={media.length} />
+      ) : null}
     </div>
   );
 }
