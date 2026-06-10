@@ -15,3 +15,6 @@ node_modules
 
 # lokales Asset (Konvention: dauerhaft untracked, nie in Feature-Commits)
 /Logo.png
+
+# interne Strategie (Pricing, Wettbewerb, Sub-Verarbeiter), public Repo — dauerhaft untracked
+/HANDWERK_PFLICHTENHEFT.md

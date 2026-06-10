@@ -41,3 +41,4 @@ Technische Doku: siehe [TECH.md](TECH.md).
 ## Konventionen / Notes
 
 - `Logo.png` im Repo-Root bleibt dauerhaft **untracked** — nie in Feature-Commits ziehen, nicht nachfragen.
+- `HANDWERK_PFLICHTENHEFT.md` bleibt untracked (interne Strategie, public Repo) — nie committen, nicht nachfragen.
