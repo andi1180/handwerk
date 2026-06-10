@@ -1,0 +1,304 @@
+/* Öffentliche Web-Story /b/[token] (Schritt 8a-2).
+   Eigenständige, dunkle, hochwertige Bühne — full-bleed Scroll-Snap, das
+   Kundenfoto ist der Held. Klassen sind `booklet-`-präfixiert (globales CSS,
+   nur auf dieser Route geladen). Branding-Farben kommen als --bk-primary/
+   --bk-secondary per Inline-Style vom Server. */
+
+.booklet {
+  --bk-ink: #ffffff;
+  --bk-bg: #0e0d0b;
+  min-height: 100dvh;
+  background: var(--bk-bg);
+  color: var(--bk-ink);
+}
+
+/* Der eigentliche Scroller: ein Snap-Punkt pro Bildschirm. */
+.booklet-scroll {
+  height: 100dvh;
+  overflow-y: scroll;
+  scroll-snap-type: y mandatory;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.booklet-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+/* 100dvh statt 100vh — die mobile Browser-Chrome darf nicht abschneiden. */
+.booklet-section {
+  position: relative;
+  height: 100dvh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  scroll-snap-align: start;
+  scroll-snap-stop: always;
+}
+
+/* Full-bleed Hintergrund/Medium (Bild + Video). */
+.booklet-bg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  z-index: 0;
+}
+.booklet-video {
+  background: #000;
+}
+
+/* Fallback-Verlauf, wenn kein Hintergrundbild gesetzt ist. */
+.booklet-bg--fallback {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background: linear-gradient(
+    160deg,
+    var(--bk-primary) 0%,
+    var(--bk-secondary) 100%
+  );
+}
+
+/* Scrim für zentrierten Text (Intro/Outro) — Lesbarkeit auf jedem Bild. */
+.booklet-scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: linear-gradient(
+    180deg,
+    rgba(0, 0, 0, 0.5) 0%,
+    rgba(0, 0, 0, 0.3) 38%,
+    rgba(0, 0, 0, 0.62) 100%
+  );
+  pointer-events: none;
+}
+
+/* Inhaltsebene über BG + Scrim, mit Safe-Area-Polstern. */
+.booklet-content {
+  position: relative;
+  z-index: 2;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 0;
+  padding: calc(env(safe-area-inset-top, 0px) + 40px) 26px
+    calc(env(safe-area-inset-bottom, 0px) + 40px);
+}
+
+/* --- Intro / Outro Typo --- */
+
+.booklet-logo {
+  max-height: 64px;
+  max-width: 56%;
+  width: auto;
+  object-fit: contain;
+  margin-bottom: 30px;
+  filter: drop-shadow(0 2px 12px rgba(0, 0, 0, 0.4));
+}
+
+.booklet-title {
+  margin: 0;
+  font-size: clamp(2rem, 8.5vw, 3.4rem);
+  font-weight: 700;
+  line-height: 1.08;
+  letter-spacing: -0.01em;
+  text-wrap: balance;
+  text-shadow: 0 2px 26px rgba(0, 0, 0, 0.4);
+}
+
+.booklet-accent {
+  width: 48px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--bk-primary);
+  margin: 22px 0;
+}
+
+.booklet-desc {
+  margin: 0;
+  max-width: 32ch;
+  font-size: clamp(1rem, 4.2vw, 1.2rem);
+  line-height: 1.55;
+  opacity: 0.94;
+  text-shadow: 0 1px 12px rgba(0, 0, 0, 0.4);
+}
+
+.booklet-tagline {
+  margin: 20px 0 0;
+  font-size: clamp(0.78rem, 3.2vw, 0.95rem);
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--bk-primary);
+}
+
+/* Dezenter Scroll-Hinweis am unteren Rand der Intro-Seite. */
+.booklet-scroll-hint {
+  position: absolute;
+  left: 50%;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 22px);
+  z-index: 3;
+  display: flex;
+  color: var(--bk-ink);
+  opacity: 0.8;
+  animation: booklet-bounce 1.8s ease-in-out infinite;
+}
+@keyframes booklet-bounce {
+  0%,
+  100% {
+    transform: translate(-50%, 0);
+  }
+  50% {
+    transform: translate(-50%, 7px);
+  }
+}
+
+/* --- Medien-Seiten: Caption unten in der Safe-Zone --- */
+
+/* Scrim NUR unten — die obere Bildhälfte bleibt frei (Foto ist der Held). */
+.booklet-caption-scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: linear-gradient(
+    180deg,
+    transparent 0%,
+    transparent 42%,
+    rgba(0, 0, 0, 0.72) 100%
+  );
+  pointer-events: none;
+}
+
+/* Caption im unteren Drittel, aber abgehoben vom Rand (~16 % freilassen,
+   über der IG/TikTok-UI-Zone). */
+.booklet-caption {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 16%);
+  z-index: 2;
+  padding: 0 26px;
+  pointer-events: none;
+}
+.booklet-caption p {
+  margin: 0 auto;
+  max-width: 28ch;
+  text-align: center;
+  font-size: clamp(1.15rem, 5.2vw, 1.65rem);
+  font-weight: 600;
+  line-height: 1.32;
+  text-shadow: 0 2px 18px rgba(0, 0, 0, 0.6);
+}
+
+/* Logo pro Medien-Seite (nur wenn branding.logo_per_page). */
+.booklet-page-logo {
+  position: absolute;
+  top: calc(env(safe-area-inset-top, 0px) + 18px);
+  left: 18px;
+  z-index: 3;
+  max-height: 34px;
+  max-width: 42%;
+  object-fit: contain;
+  filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.55));
+  pointer-events: none;
+}
+
+/* --- Outro: Betriebsname, Nachricht, Kontakt --- */
+
+.booklet-outro-name {
+  margin: 0;
+  font-size: clamp(1.5rem, 6.5vw, 2.4rem);
+  font-weight: 700;
+  line-height: 1.12;
+  text-shadow: 0 2px 22px rgba(0, 0, 0, 0.4);
+}
+
+.booklet-outro-message {
+  margin: 16px 0 0;
+  max-width: 32ch;
+  font-size: clamp(1rem, 4.2vw, 1.18rem);
+  line-height: 1.55;
+  opacity: 0.92;
+  text-shadow: 0 1px 12px rgba(0, 0, 0, 0.4);
+}
+
+.booklet-contact {
+  margin-top: 30px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  max-width: 340px;
+}
+.booklet-contact a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 13px 18px;
+  color: var(--bk-ink);
+  text-decoration: none;
+  font-size: 1rem;
+  font-weight: 500;
+  word-break: break-word;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 999px;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease;
+}
+.booklet-contact a:hover {
+  border-color: var(--bk-primary);
+  background: rgba(255, 255, 255, 0.06);
+}
+.booklet-contact svg {
+  color: var(--bk-primary);
+  flex-shrink: 0;
+}
+
+/* --- „nicht mehr verfügbar"-Seite (abgelaufen) --- */
+
+.booklet-simple {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 10px;
+  padding: 32px;
+}
+.booklet-simple h1 {
+  margin: 0;
+  font-size: 1.4rem;
+  font-weight: 700;
+}
+.booklet-simple p {
+  margin: 0;
+  font-size: 0.95rem;
+  opacity: 0.7;
+}
+
+/* --- Desktop: zentrierte Portrait-Spalte vor dunklem Backdrop --- */
+@media (min-width: 700px) {
+  .booklet {
+    background: #000;
+  }
+  .booklet-scroll {
+    max-width: 480px;
+    margin: 0 auto;
+    box-shadow: 0 0 120px rgba(0, 0, 0, 0.6);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .booklet-scroll-hint {
+    animation: none;
+  }
+}

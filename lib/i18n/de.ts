@@ -191,6 +191,14 @@ export const de = {
     timeout: "Zeitüberschreitung. Bitte erneut versuchen.",
     aiNotConfigured:
       "Die KI ist nicht konfiguriert. Bitte später erneut versuchen.",
-    previewSoon: "Die Vorschau-Seite folgt in Kürze.",
+    openPreview: "Vorschau öffnen",
+  },
+  booklet: {
+    scrollHint: "Nach unten wischen",
+    contactEmail: "E-Mail",
+    contactPhone: "Telefon",
+    contactWebsite: "Website",
+    expiredTitle: "Diese Seite ist nicht mehr verfügbar.",
+    expiredText: "Der Link ist abgelaufen.",
   },
 } as const;

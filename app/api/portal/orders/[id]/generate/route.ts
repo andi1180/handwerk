@@ -145,14 +145,15 @@ export async function POST(
   const token = existing?.access_token ?? generateAccessToken();
 
   if (existing) {
-    // web_story_ready bleibt false — die Render-Fähigkeit setzt 8a-2.
+    // web_story_ready = true: der öffentliche Render /b/[token] existiert (8a-2),
+    // jedes generierte Booklet ist damit renderbar (Voraussetzung fürs Senden, Step 9).
     const { error: updateError } = await service
       .from("booklets")
       .update({
         intro_title: intro.title,
         intro_description: intro.description,
         language: order.language,
-        web_story_ready: false,
+        web_story_ready: true,
       })
       .eq("id", existing.id)
       .eq("business_id", order.business_id);
@@ -166,6 +167,7 @@ export async function POST(
     }
   } else {
     // reel_url/review_draft/ig_caption/image_urls/expires_at bleiben null (8b/9).
+    // web_story_ready = true: renderbar über /b/[token] (8a-2).
     const { error: insertError } = await service.from("booklets").insert({
       order_id: order.id,
       business_id: order.business_id,
@@ -173,7 +175,7 @@ export async function POST(
       intro_title: intro.title,
       intro_description: intro.description,
       language: order.language,
-      web_story_ready: false,
+      web_story_ready: true,
     });
     if (insertError) {
       console.error("generate: booklet insert failed", {

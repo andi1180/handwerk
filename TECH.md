@@ -884,4 +884,117 @@ NEU (steht in keiner MD — hier verbindlich):
 
 ---
 
+## Web-Story-Render 8a-2 (/b/[token])
+
+Zweite Slice von Schritt 8: die **öffentliche, sichtbare Web-Story** zu einem
+generierten Booklet — Vollbild-Scroll, Medien full-bleed, Caption unten in der
+Safe-Zone, Intro/Outro. **Keine** Migration. **KEIN** Reel (8b), **KEINE**
+Share-/Review-Buttons (Step 9), **KEIN** View-/Analytics-Tracking (Step 9/10).
+
+### Token als Trust-Quelle (§14.2)
+
+Der `access_token` aus der URL ist die **einzige** vertrauenswürdige Eingabe:
+`token → booklets-Row → business_id`. Der Lookup und **alle** weiteren Reads
+laufen ausschließlich über den **`service_role`**-Client
+([lib/supabase/service.ts](lib/supabase/service.ts)) — **kein** anon-SELECT
+(`anon` hat ohnehin keine Tabellen-Grants, 0001). Business (Branding/Settings)
+und `order_media` werden **strikt** auf die `business_id`/`order_id` **aus der
+Booklet-Row** gescoped, nie aus der URL/dem Client abgeleitet (außer dem Token).
+Die Route liegt **nicht** unter `/portal` → der Middleware-Guard
+([middleware.ts](middleware.ts), `pathname.startsWith("/portal")`) greift nicht,
+die Seite ist öffentlich erreichbar (kein Matcher-Eingriff nötig).
+
+### Lader ([lib/booklet/load.ts](lib/booklet/load.ts), NEU, server-only)
+
+`loadPublicBooklet(token)` → diskriminiertes `PublicBookletResult`:
+`not_found` (Seite ruft `notFound()` → 404), `expired` (einfache „nicht mehr
+verfügbar"-Seite — `expires_at` gesetzt **und** vergangen; in 8a immer `null`,
+forward-compat) oder `ok` mit `PublicBookletData`. Lädt Booklet (per unique
+`access_token`), Business und Medien (`sort_order` ASC) und **signiert pro
+Request frisch**: Medien aus Bucket `order-media`, `logo_url`/`intro_bg_url`/
+`outro_bg_url` aus Bucket `branding`, je `createSignedUrl(path, 3600)` (Batch
+`createSignedUrls` pro Bucket). Branding/Settings werden über die aus
+[lib/auth/current-business.ts](lib/auth/current-business.ts) **exportierten**
+`normalizeBranding`/`normalizeSettings` normalisiert (eine Quelle, kein Drift).
+
+### Caption-Helper ([lib/booklet/caption.ts](lib/booklet/caption.ts), NEU)
+
+Erster Konsument der Schritt-8/9-Vorgabe (oben): `displayCaption({ caption,
+keyword })` = `caption ?? keyword`; beide leer (getrimmt) ⇒ `null` = **kein**
+Overlay (niemals ein leeres Feld). Server-only, wird in Schritt 9 vom
+Reel-Overlay **wiederverwendet** (nicht zweimal inline).
+
+### Seite ([app/b/[token]/page.tsx](app/b/[token]/page.tsx), Server Component, mobile-first)
+
+`export const dynamic = "force-dynamic"` (frische Signed-URLs, nichts cachen).
+Vollbild-Scroll-Story: Container `scroll-snap-type: y mandatory`, jede Sektion
+`100dvh` (**nicht** `100vh` — mobile Browser-Chrome), `scroll-snap-align: start`
++ `scroll-snap-stop: always`. Branding angewandt: die gewählte `branding.font`
+über [lib/booklet/fonts.ts](lib/booklet/fonts.ts) (`next/font`, alle vier
+FONT_OPTIONS selbst-gehostet, `preload: false` → nur die gesetzte Schrift wird
+geladen); `primary_color`/`secondary_color` als CSS-Variablen
+(`--bk-primary`/`--bk-secondary`) für Akzente/Links/Tagline/Fallback-Verläufe.
+Styles in [app/b/[token]/booklet.css](app/b/[token]/booklet.css) (globales CSS,
+`booklet-`-präfixiert, nur auf dieser Route geladen).
+
+- **Intro:** `intro_bg_url` full-bleed `cover` (Fallback: Verlauf aus
+  primary/secondary). Logo (falls `logo_url`), KI-`intro_title` groß,
+  `intro_description`, `intro_tagline` (aus Settings) kleiner darunter. Scrim
+  (Verlauf) + Text-Shadow garantieren Lesbarkeit. Dezenter, animierter
+  Scroll-Indikator (Chevron, `prefers-reduced-motion`-fest).
+- **Medien-Sektionen** (eine pro `order_media`, in `sort_order`): **Foto**
+  `<img>` full-bleed `cover`/`100dvh` (statisch — Ken-Burns ist Sache des Reels,
+  8b). **Video** `<video controls playsInline preload="metadata">`, Poster-Frame
+  via `src="…#t=0.1"`, **kein** Auto-Play-on-Scroll im MVP (spart
+  IntersectionObserver-Komplexität auf der öffentlichen Seite) — Tap zum
+  Abspielen. **Caption-Overlay** unten in der Safe-Zone (`displayCaption`):
+  unteres Drittel, ~16 % vom unteren Rand abgehoben (über der IG/TikTok-UI-Zone),
+  mit Gradient-Scrim (transparent → dunkel) für Kontrast; `displayCaption == null`
+  ⇒ **kein** Overlay, **kein** Scrim. Logo pro Seite **nur** wenn
+  `branding.logo_per_page`. `pointer-events: none` am Overlay → Video bleibt
+  tappbar.
+- **Outro:** `outro_bg_url` `cover` (Fallback wie Intro). Logo, Betriebsname,
+  `outro_message`. Kontakt als Pill-Links: `contact_email` (`mailto:`),
+  `contact_phone` (`tel:`), `website_url` (`target="_blank" rel="noopener
+  noreferrer"`, Protokoll/Host normalisiert). **KEINE** Share-/Review-Buttons
+  (Step 9).
+
+Desktop: zentrierte Portrait-Spalte (max 480px) vor dunklem Backdrop — spiegelt
+das 9:16-Story-Format.
+
+### web_story_ready
+
+Da der Renderer jetzt existiert, setzt die Generate-Route
+([…/generate/route.ts](app/api/portal/orders/[id]/generate/route.ts)) bei
+Insert **und** Update nun `web_story_ready = true` (jedes generierte Booklet ist
+renderbar — Voraussetzung fürs Senden in Step 9). Der öffentliche Render bleibt
+**rein lesend** (kein DB-Write aus dem GET).
+
+### Portal-Vorschau-Link
+
+[app/portal/orders/[id]/page.tsx](app/portal/orders/[id]/page.tsx) lädt im Status
+`generated` die `booklets`-Row (`access_token`, AUTHENTICATED Client — RLS lässt
+Mitglieder Booklets lesen) und reicht sie an `<GeneratedBanner>`
+([generate-controls.tsx](app/portal/orders/[id]/generate-controls.tsx)). Der
+Banner zeigt jetzt **„Vorschau öffnen"** (`/b/[token]`, `target="_blank"`,
+Primär-Aktion) statt des 8a-1-„Vorschau-Seite folgt"-Platzhalters; „Neu
+generieren"/„Wieder bearbeiten" bleiben (auf `btn-outline` gesetzt). i18n:
+`generate.previewSoon` entfernt, `generate.openPreview` neu.
+
+### i18n
+
+Booklet-Sprache folgt `booklet.language` (i18n-Layer kennt aktuell nur `de` →
+unbekannt ⇒ Default); dynamischer Text (Intro/Captions/Outro) kommt
+sprachfertig aus der DB. Nur feste Labels neu: Block `booklet.*`
+([lib/i18n/de.ts](lib/i18n/de.ts)) — `scrollHint`, `contactEmail`,
+`contactPhone`, `contactWebsite`, `expiredTitle`, `expiredText`.
+
+### Deferred
+
+- **Auto-Play-Video on-scroll** (IntersectionObserver) — spätere Politur.
+- **View-/Engagement-Tracking** (`booklet_events`, `viewed_at`) — Step 9/10.
+- **Slot-Editor** (pro-Item-Hintergründe/Feinlayout) — nach Step 8.
+
+---
+
 > Nächste Migration: **0004**.

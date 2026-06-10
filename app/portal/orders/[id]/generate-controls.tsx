@@ -13,9 +13,9 @@ import { postAction } from "./finalize-controls";
  *  - `<GenerateButton>` (Status `finalized`): prominenter „Vorschau erzeugen"-
  *    Button am Seitenende → `POST generate` → `router.refresh()`.
  *  - `<GeneratedBanner>` (Status `generated`): Banner „Booklet generiert" mit
- *    „Neu generieren" (erneutes `POST generate`, überschreibt das Intro, behält
- *    den Token) und „Wieder bearbeiten" (Reopen, geteilt über `postAction`).
- *    Hinweis „Vorschau-Seite folgt" — der /b/[token]-Link kommt erst in 8a-2.
+ *    „Vorschau öffnen" (öffnet /b/[token] in neuem Tab, 8a-2), „Neu generieren"
+ *    (erneutes `POST generate`, überschreibt das Intro, behält den Token) und
+ *    „Wieder bearbeiten" (Reopen, geteilt über `postAction`).
  *
  * ISOLATION: kein Body; Betrieb/Order werden im Route Handler gegen die Session
  * geprüft, die `business_id` stammt aus der geladenen Order.
@@ -149,8 +149,14 @@ export function GenerateButton({
   );
 }
 
-/** Banner „Booklet generiert" + „Neu generieren" / „Wieder bearbeiten". */
-export function GeneratedBanner({ orderId }: { orderId: string }) {
+/** Banner „Booklet generiert" + „Vorschau öffnen" / „Neu generieren" / „Wieder bearbeiten". */
+export function GeneratedBanner({
+  orderId,
+  token,
+}: {
+  orderId: string;
+  token: string | null;
+}) {
   const router = useRouter();
   const [busy, setBusy] = useState<null | "regenerate" | "reopen">(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -214,14 +220,22 @@ export function GeneratedBanner({ orderId }: { orderId: string }) {
           {t(DEFAULT_LOCALE, "generate.done")}
         </span>
 
-        <p style={{ margin: 0, fontSize: 13, color: "var(--text-secondary)" }}>
-          {t(DEFAULT_LOCALE, "generate.previewSoon")}
-        </p>
-
         <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 2 }}>
+          {/* Primär-Aktion: die fertige Story prüfen (öffnet /b/[token]). */}
+          {token ? (
+            <a
+              className="btn-gold"
+              href={`/b/${token}`}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              <ExternalLinkIcon />
+              {t(DEFAULT_LOCALE, "generate.openPreview")}
+            </a>
+          ) : null}
           <button
             type="button"
-            className="btn-gold"
+            className="btn-outline"
             onClick={() => run("regenerate")}
             disabled={disabled}
             style={{
@@ -250,6 +264,28 @@ export function GeneratedBanner({ orderId }: { orderId: string }) {
 
       {notice ? <NoticeBox text={notice} /> : null}
     </div>
+  );
+}
+
+/** Externer-Link-Symbol für „Vorschau öffnen". Reine Deko. */
+function ExternalLinkIcon() {
+  return (
+    <svg
+      width={16}
+      height={16}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+      style={{ flexShrink: 0 }}
+    >
+      <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+      <path d="M15 3h6v6" />
+      <path d="M10 14L21 3" />
+    </svg>
   );
 }
 

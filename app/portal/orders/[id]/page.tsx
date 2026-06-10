@@ -60,6 +60,18 @@ export default async function OrderDetailPage({
   const isFinalized = order.status === "finalized";
   const isGenerated = order.status === "generated";
 
+  // Booklet-Token für den Vorschau-Link laden (8a-2). RLS lässt Mitglieder die
+  // booklets-Row lesen — kein service_role nötig. Nur relevant, sobald generiert.
+  let bookletToken: string | null = null;
+  if (isGenerated) {
+    const { data: booklet } = await supabase
+      .from("booklets")
+      .select("access_token")
+      .eq("order_id", order.id)
+      .maybeSingle<{ access_token: string }>();
+    bookletToken = booklet?.access_token ?? null;
+  }
+
   return (
     <div style={{ maxWidth: 720, margin: "0 auto" }}>
       {/* Dauerhaft sichtbarer Kopf: Kundenname + Status. Sticky; klinkt auf
@@ -107,8 +119,10 @@ export default async function OrderDetailPage({
       {/* Abgeschlossen-Banner + „Wieder bearbeiten" (nur Status finalized). */}
       {isFinalized ? <FinalizeBanner orderId={order.id} /> : null}
 
-      {/* Generiert-Banner + „Neu generieren"/„Wieder bearbeiten" (Status generated). */}
-      {isGenerated ? <GeneratedBanner orderId={order.id} /> : null}
+      {/* Generiert-Banner + „Vorschau öffnen"/„Neu generieren"/„Wieder bearbeiten". */}
+      {isGenerated ? (
+        <GeneratedBanner orderId={order.id} token={bookletToken} />
+      ) : null}
 
       {/* Stammdaten. */}
       <div

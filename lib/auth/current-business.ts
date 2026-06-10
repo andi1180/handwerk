@@ -81,8 +81,12 @@ function asTrimmedOrNull(value: unknown): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
-/** Branding mit sinnvollen Defaults + Clamping ungültiger Werte. */
-function normalizeBranding(raw: unknown): BusinessBranding {
+/**
+ * Branding mit sinnvollen Defaults + Clamping ungültiger Werte. Exportiert,
+ * damit der öffentliche Booklet-Render (8a-2, service_role) dieselbe
+ * Normalisierung nutzt — eine Quelle, kein Drift.
+ */
+export function normalizeBranding(raw: unknown): BusinessBranding {
   const b = asRecord(raw);
   return {
     primary_color: isHexColor(b.primary_color)
@@ -102,8 +106,11 @@ function normalizeBranding(raw: unknown): BusinessBranding {
   };
 }
 
-/** Settings mit sinnvollen Defaults + Clamping (z. B. video_max_seconds ?? 20). */
-function normalizeSettings(raw: unknown): BusinessSettings {
+/**
+ * Settings mit sinnvollen Defaults + Clamping (z. B. video_max_seconds ?? 20).
+ * Exportiert für den öffentlichen Booklet-Render (8a-2), analog `normalizeBranding`.
+ */
+export function normalizeSettings(raw: unknown): BusinessSettings {
   const s = asRecord(raw);
   const rawVideo = s.video_max_seconds;
   const video =
