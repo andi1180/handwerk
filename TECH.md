@@ -414,4 +414,23 @@ Neuer Block `captions.*` in [lib/i18n/de.ts](lib/i18n/de.ts): `generate`, `gener
 
 ---
 
+## Caption-Länge + Datei-Upload (Schritt 6b.1)
+
+Zwei kleine Anpassungen an 6b/Capture — **keine neuen Konzepte, keine Migration**.
+
+### Caption-Länge 180 / ~12–15 Wörter
+
+- `CAPTION_MAX_LENGTH` in [lib/ai/caption-limits.ts](lib/ai/caption-limits.ts) von **120 → 180**. Das Limit ist die **einzige Quelle**: der PATCH-Server-Check (manuelles Edit) und das Client-`maxLength` der Caption-`textarea` referenzieren die Konstante — nichts ist hartkodiert, alles läuft konsistent auf 180.
+- System-Prompt in [lib/ai/captions.ts](lib/ai/captions.ts) von „max ~8 Wörter" auf **„~12–15 Wörter, ein knappes, ansprechendes Fragment"** umgestellt (Stilregeln unverändert: kein Marketing-Sprech, keine Anführungszeichen/Emojis/Punkt). `max_tokens` 64 → **128**, damit längere Captions nicht mittendrin abgeschnitten werden; `cleanCaption()` kürzt weiterhin defensiv auf `CAPTION_MAX_LENGTH`.
+
+### Datei-Upload zusätzlich zur Live-Aufnahme ([capture.tsx](app/portal/orders/[id]/capture.tsx))
+
+Neben „Foto/Video **aufnehmen**" (native Kamera, `<input … capture="environment">`) gibt es jetzt „Foto/Video **hochladen**" über `<input type="file" accept="image/*|video/*">` **ohne** `capture` — das öffnet Galerie/Dateiauswahl statt der Kamera.
+
+- **Nur die Quelle unterscheidet sich.** Die Upload-Inputs hängen an **denselben** Handlern (`handlePhotoFile`/`handleVideoFile`); die komplette nachgelagerte Pipeline ist wiederverwendet, **nichts dupliziert**: Foto → `compressImage`; Video → `getVideoDuration` + Längen-Check (`maxVideoSeconds`, Ablehnung wie 4c); danach Hintergrund-Upload + In-Memory-Queue/Retry + Metadaten-POST (`business_id` aus Session, Isolation unverändert).
+- **Layout:** Die Buttons sind in zwei Zeilen gruppiert (`.capture-row`: Zeile „Aufnehmen" = Foto/Video, Zeile „Hochladen" = Foto/Video), je zwei gleich breite, große Tap-Targets (`.capture-btn`, mobil `min-height: 64px`).
+- **i18n:** `capture.uploadPhoto`/`capture.uploadVideo` ergänzt.
+
+---
+
 > Nächste Migration: **0003**.

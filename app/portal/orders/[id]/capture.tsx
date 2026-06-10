@@ -107,6 +107,9 @@ export function Capture({
   const supabase = useMemo(() => createClient(), []);
   const photoInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
+  // Galerie-/Datei-Auswahl (ohne `capture` → kein Kamera-Zwang) — gleiche Pipeline.
+  const photoUploadInputRef = useRef<HTMLInputElement>(null);
+  const videoUploadInputRef = useRef<HTMLInputElement>(null);
 
   const [draft, setDraft] = useState<Draft | null>(null);
   const [items, setItems] = useState<PendingItem[]>([]);
@@ -199,6 +202,8 @@ export function Capture({
 
   const openPhoto = () => photoInputRef.current?.click();
   const openVideo = () => videoInputRef.current?.click();
+  const openPhotoUpload = () => photoUploadInputRef.current?.click();
+  const openVideoUpload = () => videoUploadInputRef.current?.click();
 
   /** Verwirft einen evtl. offenen Entwurf und setzt den neuen Entwurf. */
   const replaceDraft = (next: Draft) => {
@@ -278,7 +283,8 @@ export function Capture({
 
   return (
     <div style={{ marginBottom: 12 }}>
-      {/* Versteckte Datei-Inputs — native Kamera (Rückseite), Foto bzw. Video. */}
+      {/* Versteckte Datei-Inputs. Aufnahme: native Kamera (`capture`); Upload:
+          Galerie/Dateiauswahl (ohne `capture`). Beide nutzen dieselben Handler. */}
       <input
         ref={photoInputRef}
         type="file"
@@ -295,32 +301,75 @@ export function Capture({
         style={{ display: "none" }}
         onChange={(e) => void handleVideoFile(e)}
       />
+      <input
+        ref={photoUploadInputRef}
+        type="file"
+        accept="image/*"
+        style={{ display: "none" }}
+        onChange={handlePhotoFile}
+      />
+      <input
+        ref={videoUploadInputRef}
+        type="file"
+        accept="video/*"
+        style={{ display: "none" }}
+        onChange={(e) => void handleVideoFile(e)}
+      />
 
-      {/* Große, klar tappbare Aufnahme-Buttons (Foto + Video) — Kern-Aktion. */}
+      {/* Große, klar tappbare Buttons — Zeile „Aufnehmen" (Kamera) + Zeile
+          „Hochladen" (Galerie/Datei). Beide Quellen, identische Pipeline. */}
       <div className="capture-actions">
-        <div
-          role="button"
-          tabIndex={0}
-          className="btn-dark capture-btn"
-          onClick={openPhoto}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" || e.key === " ") openPhoto();
-          }}
-        >
-          <CameraIcon />
-          {t(DEFAULT_LOCALE, "capture.photo")}
+        <div className="capture-row">
+          <div
+            role="button"
+            tabIndex={0}
+            className="btn-dark capture-btn"
+            onClick={openPhoto}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") openPhoto();
+            }}
+          >
+            <CameraIcon />
+            {t(DEFAULT_LOCALE, "capture.photo")}
+          </div>
+          <div
+            role="button"
+            tabIndex={0}
+            className="btn-outline capture-btn"
+            onClick={openVideo}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") openVideo();
+            }}
+          >
+            <VideoIcon />
+            {t(DEFAULT_LOCALE, "capture.video")}
+          </div>
         </div>
-        <div
-          role="button"
-          tabIndex={0}
-          className="btn-outline capture-btn"
-          onClick={openVideo}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" || e.key === " ") openVideo();
-          }}
-        >
-          <VideoIcon />
-          {t(DEFAULT_LOCALE, "capture.video")}
+        <div className="capture-row">
+          <div
+            role="button"
+            tabIndex={0}
+            className="btn-outline capture-btn"
+            onClick={openPhotoUpload}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") openPhotoUpload();
+            }}
+          >
+            <UploadIcon />
+            {t(DEFAULT_LOCALE, "capture.uploadPhoto")}
+          </div>
+          <div
+            role="button"
+            tabIndex={0}
+            className="btn-outline capture-btn"
+            onClick={openVideoUpload}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") openVideoUpload();
+            }}
+          >
+            <UploadIcon />
+            {t(DEFAULT_LOCALE, "capture.uploadVideo")}
+          </div>
         </div>
       </div>
 
@@ -596,6 +645,27 @@ function CameraIcon() {
     >
       <path d="M4 8h3l1.5-2h7L17 8h3v11H4z" />
       <circle cx="12" cy="13.5" r="3.2" />
+    </svg>
+  );
+}
+
+/** Schlichtes Inline-SVG-Upload-Icon für die Hochladen-Buttons. Reine Deko. */
+function UploadIcon() {
+  return (
+    <svg
+      width={20}
+      height={20}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.8}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M12 16V4" />
+      <path d="M7 9l5-5 5 5" />
+      <path d="M5 20h14" />
     </svg>
   );
 }

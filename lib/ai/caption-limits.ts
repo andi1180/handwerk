@@ -4,4 +4,4 @@
  */
 
 /** Längen-Limit für Captions (serverseitig erzwungen, im Client zur Begrenzung). */
-export const CAPTION_MAX_LENGTH = 120;
+export const CAPTION_MAX_LENGTH = 180;

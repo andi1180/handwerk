@@ -96,6 +96,8 @@ export const de = {
   capture: {
     photo: "Foto aufnehmen",
     video: "Video aufnehmen",
+    uploadPhoto: "Foto hochladen",
+    uploadVideo: "Video hochladen",
     videoTooLong:
       "Das Video ist zu lang (max. {max} Sekunden). Bitte kürzer aufnehmen.",
     keyword: "Stichwort",

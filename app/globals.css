@@ -286,11 +286,22 @@ body {
   }
 }
 
-/* --- Capture: große, prominente Aufnahme-Buttons (mobil-first) --- */
+/* --- Capture: große, prominente Aufnahme-/Upload-Buttons (mobil-first) --- */
 .capture-actions {
   display: flex;
   flex-direction: column;
+  gap: 14px;
+}
+
+/* Eine Zeile (Aufnehmen bzw. Hochladen): zwei gleich breite Buttons (Foto/Video). */
+.capture-row {
+  display: flex;
   gap: 10px;
+}
+
+.capture-row .capture-btn {
+  flex: 1;
+  min-width: 0;
 }
 
 .capture-btn {

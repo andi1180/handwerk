@@ -17,8 +17,8 @@ export type CaptionInput = {
 };
 
 const SYSTEM_PROMPT =
-  "Du schreibst sehr kurze Bildunterschriften für ein Handwerks-Booklet. " +
-  "Max ~8 Wörter, ein knappes Fragment, beschreibt was im Bild passiert (Bild + Stichwort). " +
+  "Du schreibst kurze Bildunterschriften für ein Handwerks-Booklet. " +
+  "~12–15 Wörter, ein knappes, ansprechendes Fragment, beschreibt was im Bild passiert (Bild + Stichwort). " +
   "Deutsch, kein Marketing-Sprech, keine Anführungszeichen, keine Emojis, kein abschließender Punkt nötig. " +
   "Antworte ausschließlich mit dem Caption-Text.";
 
@@ -74,14 +74,14 @@ export async function generateCaption(input: CaptionInput): Promise<string> {
   const subject = input.mediaType === "photo" ? "dieses Foto" : "diesen Video-Clip";
   content.push({
     type: "text",
-    text: `Schreibe eine sehr kurze Bildunterschrift für ${subject}. ${keywordLine}`,
+    text: `Schreibe eine kurze Bildunterschrift für ${subject}. ${keywordLine}`,
   });
 
   const anthropic = getAnthropic();
   // Haiku 4.5 unterstützt KEIN effort/adaptives Thinking — schlichter Request.
   const message = await anthropic.messages.create({
     model: HAIKU_MODEL,
-    max_tokens: 64,
+    max_tokens: 128,
     system: SYSTEM_PROMPT,
     messages: [{ role: "user", content }],
   });
