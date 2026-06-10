@@ -7,16 +7,12 @@ import { compressImage } from "@/lib/media/compress";
 import { getVideoDuration } from "@/lib/media/video";
 import { MAX_VIDEO_SECONDS } from "@/lib/media/constants";
 import { DEFAULT_LOCALE, t } from "@/lib/i18n";
-import type { MediaTag } from "@/lib/orders/queries";
 
 /** Medientyp einer Aufnahme (Foto in 4b, Video in 4c). */
 type MediaType = "photo" | "video";
 
 /** Browser-Client (anon-Key, RLS) — pro Komponenteninstanz einmal erzeugt. */
 type BrowserClient = ReturnType<typeof createClient>;
-
-/** Auswählbare Tags in fester Reihenfolge (vorher → nachher → prozess). */
-const TAG_OPTIONS: readonly MediaTag[] = ["vorher", "nachher", "prozess"];
 
 /** Retry-Verhalten des Hintergrund-Uploads (Direktupload in den Storage). */
 const UPLOAD_MAX_ATTEMPTS = 3; // 1 Versuch + bis zu 2 Retries
@@ -29,7 +25,6 @@ type Draft = {
   mediaType: MediaType;
   durationSeconds: number | null; // nur bei Video gesetzt
   keyword: string;
-  tag: MediaTag | null;
 };
 
 /** Ein in der In-Memory-Queue laufendes (optimistisches) Upload-Item. */
@@ -41,7 +36,6 @@ type PendingItem = {
   mediaType: MediaType;
   durationSeconds: number | null; // nur bei Video gesetzt
   keyword: string | null;
-  tag: MediaTag | null;
   status: "uploading" | "error";
 };
 
@@ -155,7 +149,6 @@ export function Capture({
             media_type: "video",
             duration_seconds: item.durationSeconds,
             keyword: item.keyword,
-            tag: item.tag,
           };
         } else {
           const compressed = await compressImage(item.file);
@@ -169,7 +162,6 @@ export function Capture({
             storage_path: item.storagePath,
             media_type: "photo",
             keyword: item.keyword,
-            tag: item.tag,
             width: compressed.width,
             height: compressed.height,
           };
@@ -222,7 +214,6 @@ export function Capture({
       mediaType: "photo",
       durationSeconds: null,
       keyword: "",
-      tag: null,
     });
   };
 
@@ -252,7 +243,6 @@ export function Capture({
       mediaType: "video",
       durationSeconds: duration,
       keyword: "",
-      tag: null,
     });
   };
 
@@ -273,7 +263,6 @@ export function Capture({
       mediaType: draft.mediaType,
       durationSeconds: draft.durationSeconds,
       keyword: draft.keyword.trim() || null,
-      tag: draft.tag,
       status: "uploading",
     };
     setItems((prev) => [...prev, item]);
@@ -445,45 +434,6 @@ export function Capture({
               }
             />
           </label>
-
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            <span style={{ fontSize: 13, color: "var(--text-secondary)" }}>
-              {t(DEFAULT_LOCALE, "capture.tagOptional")}
-            </span>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              {TAG_OPTIONS.map((tag) => {
-                const active = draft.tag === tag;
-                return (
-                  <div
-                    key={tag}
-                    role="button"
-                    tabIndex={0}
-                    aria-pressed={active}
-                    className={active ? "btn-dark" : "btn-outline"}
-                    style={{ flex: 1, minWidth: 96, padding: "10px 12px" }}
-                    onClick={() =>
-                      setDraft((prev) =>
-                        prev
-                          ? { ...prev, tag: prev.tag === tag ? null : tag }
-                          : prev,
-                      )
-                    }
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        setDraft((prev) =>
-                          prev
-                            ? { ...prev, tag: prev.tag === tag ? null : tag }
-                            : prev,
-                        );
-                      }
-                    }}
-                  >
-                    {t(DEFAULT_LOCALE, `mediaTag.${tag}`)}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
 
           <div style={{ display: "flex", gap: 12 }}>
             <div

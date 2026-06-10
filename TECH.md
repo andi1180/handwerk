@@ -470,6 +470,36 @@ Labels unverändert (Entwurf/Abgeschlossen/Generiert/Gesendet/Angesehen/Geteilt)
 
 `finalize.button` / `confirm` / `confirmText` / `needMedia` / `done` (Banner) / `reopen` (+ `error` für fehlgeschlagene Aktion).
 
+## Kachel entschlackt + Caption-Auswahl (Schritt 6b.2)
+
+Zwei UI-Anpassungen am mobilen Assembler — **keine neuen Konzepte, keine Migration**.
+
+### Tags raus (nur UI)
+
+Die Tag-Auswahl (Vorher/Nachher/Prozess) ist aus dem Aufnahme-/Upload-Dialog ([capture.tsx](app/portal/orders/[id]/capture.tsx)) und aus der Kachel/dem Viewer ([media-list.tsx](app/portal/orders/[id]/media-list.tsx)) entfernt; das **Stichwort** bleibt. Der Metadaten-`POST` schickt kein `tag` mehr, und der Insert in [media/route.ts](app/api/portal/orders/[id]/media/route.ts) setzt `order_media.tag` **nicht mehr** (bleibt `null`).
+
+> **`order_media.tag`-Spalte bleibt erhalten** (keine Migration; auch der `MediaTag`-Typ und das `getOrderMedia`-Select bleiben). Das Feld ist seit 6b.2 **vorhanden, aber ungenutzt** — eine spätere Reaktivierung für ein Vorher/Nachher-Format ist damit ohne DB-Änderung möglich. Die `mediaTag.*`- sowie `capture.tag`/`capture.tagOptional`-i18n-Keys sind entfernt.
+
+### Caption-Auswahl: ein zusammengelegter Indikator
+
+Jede Kachel trägt oben links **genau einen** Indikator (`.media-tile-indicator`) mit drei Zuständen; der Lösch-Button sitzt zur klaren Trennung in der **gegenüberliegenden** Ecke (oben rechts):
+
+- **ohne Caption + nicht ausgewählt** → leerer Kreis (Outline, `--select`).
+- **ohne Caption + ausgewählt** → gefüllter Gold-Kreis mit Häkchen (`--select.is-selected`).
+- **mit Caption** → Caption-Icon (Status, `--caption`, `pointer-events: none` — kein Auswahl-Verhalten).
+
+Tap auf den Indikator (nur bei Kacheln **ohne** Caption) toggelt die Auswahl (`onPointerDown`/`onClick` `stopPropagation` → kein Drag, kein Öffnen des Viewers). Tap auf den Kachel-Body bleibt Ansehen/Abspielen, Long-Press bleibt Drag. Die Auswahl (`selectedIds: Set<string>`) wird bei jedem Prop-Refresh auf weiterhin vorhandene, unbeschriftete Medien gestutzt.
+
+**Smarter „Captions generieren"-Button:** sind Kacheln ausgewählt, generiert er **nur** diese (uncaptioned), sonst **alle** ohne Caption (bisheriges Verhalten); das Label wird zu `captions.generateSelected` ({count}). Nach Erfolg wird die Auswahl zurückgesetzt; die betroffenen Kacheln zeigen via `router.refresh()`/Live-Update das Caption-Icon. Im **readOnly**-Modus (finalized) gibt es keine Auswahl und keinen Trash; Kacheln mit Caption zeigen das Caption-Icon als Status.
+
+### Batch-Endpoint ([captions/route.ts](app/api/portal/orders/[id]/captions/route.ts))
+
+Optionales Body-Feld `{ ids?: string[] }`: ist eine nicht-leere Auswahl gesetzt, wird die Query zusätzlich `.in("id", ids)` gefiltert (nur diese, und weiterhin nur `caption IS NULL`); fehlt/leer/ungültig ⇒ alle ohne Caption. Die `ids` werden durch `.eq("order_id", …)` (RLS-skopiert auf den Session-Betrieb) validiert — fremde ids matchen schlicht nicht.
+
+### i18n
+
+Neu: `captions.select` (Auswahl-Aria-Label), `captions.selected` ({count}), `captions.generateSelected` ({count}). Entfernt: `mediaTag.*`, `capture.tag`, `capture.tagOptional`.
+
 ---
 
 > Nächste Migration: **0003**.

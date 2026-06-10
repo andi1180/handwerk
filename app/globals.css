@@ -445,35 +445,38 @@ body {
   cursor: pointer;
 }
 
-/* Tag-Pill in der unteren Ecke (vorher/nachher/prozess). */
-.media-tile-tag {
-  position: absolute;
-  left: 6px;
-  bottom: 6px;
-  z-index: 2;
-  padding: 2px 7px;
-  border-radius: 999px;
-  font-size: 10px;
-  font-weight: 600;
-  background: var(--gold);
-  color: #ffffff;
-  pointer-events: none;
-}
-
-/* Dezenter Caption-Indikator (obere linke Ecke): hat Caption / fehlt (6b). */
-.media-tile-caption {
+/* Kombinierter Indikator (obere linke Ecke, 6b.2): Caption-Status bzw. Auswahl. */
+.media-tile-indicator {
   position: absolute;
   top: 6px;
   left: 6px;
-  z-index: 2;
+  z-index: 3;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 20px;
-  height: 20px;
+  width: 24px;
+  height: 24px;
   border-radius: 999px;
   color: #ffffff;
+}
+
+/* Caption-Status: passiv (fängt keine Taps ab), goldener Kreis. */
+.media-tile-indicator--caption {
+  background: var(--gold);
   pointer-events: none;
+}
+
+/* Auswahl-Kreis (nur Kacheln ohne Caption): tappbar, leer = Outline. */
+.media-tile-indicator--select {
+  cursor: pointer;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1.5px solid rgba(255, 255, 255, 0.9);
+}
+
+/* Ausgewählt: gefüllter Gold-Kreis mit Häkchen. */
+.media-tile-indicator--select.is-selected {
+  background: var(--gold);
+  border-color: var(--gold);
 }
 
 /* Dreh-Animation für das „Neu generieren"-Icon (Caption-Editor). */

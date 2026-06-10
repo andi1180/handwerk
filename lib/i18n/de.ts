@@ -57,11 +57,6 @@ export const de = {
     media: "Medien",
     noMedia: "Noch keine Medien zu diesem Auftrag.",
   },
-  mediaTag: {
-    vorher: "Vorher",
-    nachher: "Nachher",
-    prozess: "Prozess",
-  },
   settings: {
     title: "Einstellungen",
     groupBusiness: "Betrieb",
@@ -102,8 +97,6 @@ export const de = {
       "Das Video ist zu lang (max. {max} Sekunden). Bitte kürzer aufnehmen.",
     keyword: "Stichwort",
     keywordOptional: "Stichwort (optional)",
-    tag: "Markierung",
-    tagOptional: "Markierung (optional)",
     save: "Speichern",
     discard: "Verwerfen",
     uploading: "lädt…",
@@ -121,12 +114,15 @@ export const de = {
   },
   captions: {
     generate: "Captions generieren",
+    generateSelected: "Auswahl beschriften ({count})",
     generating: "Generiere Captions…",
     regenerate: "Neu generieren",
     edit: "Bildunterschrift",
     save: "Speichern",
     saved: "Gespeichert",
     empty: "Keine Bildunterschrift",
+    select: "Für Caption auswählen",
+    selected: "{count} ausgewählt",
     error: "Aktion fehlgeschlagen. Bitte erneut versuchen.",
   },
   finalize: {

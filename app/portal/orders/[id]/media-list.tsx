@@ -39,9 +39,11 @@ const NOTICE_TIMEOUT_MS = 4000;
  * Booklet-Assemblers**: quadratisches Kachel-Raster (Fotos und Videos gleich
  * groß), Reorder per Long-Press (dnd-kit), Löschen und **KI-Captions (6b)**.
  *
- * Captions: „Captions generieren" (Batch) füllt alle Medien OHNE Caption; das
- * Bearbeiten/Neu-Generieren pro Item läuft im Vollbild-Viewer (nicht in den
- * engen Kacheln). Jede Kachel zeigt einen dezenten Indikator hat-Caption/fehlt.
+ * Captions: „Captions generieren" (Batch) füllt Medien OHNE Caption — sind
+ * Kacheln ausgewählt, nur diese, sonst alle (6b.2). Das Bearbeiten/Neu-Generieren
+ * pro Item läuft im Vollbild-Viewer (nicht in den engen Kacheln). Jede Kachel
+ * trägt oben links **einen** Indikator: hat-Caption ⇒ Caption-Icon (Status);
+ * fehlt ⇒ tappbarer Auswahl-Kreis (leer/gold) zum Vormerken für die Generierung.
  *
  * Daten kommen server-seitig (RLS, `sort_order` ASC, Signed-URLs) als Props; der
  * lokale State erlaubt optimistische Mutationen. Wechselt die Prop-Liste (z. B.
@@ -67,11 +69,22 @@ export function MediaList({
   const [viewingId, setViewingId] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
+  // Für die Batch-Generierung vorgemerkte (unbeschriftete) Kacheln (6b.2).
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   // Prop-Liste → State, wenn der Server neu rendert (Capture-/Batch-Refresh,
   // Navigation). Eigene setState-Aufrufe ändern die Prop-Referenz nicht.
+  // Auswahl dabei auf weiterhin vorhandene, noch unbeschriftete Medien stutzen.
   useEffect(() => {
     setItems(initialItems);
+    setSelectedIds((prev) => {
+      if (prev.size === 0) return prev;
+      const next = new Set<string>();
+      for (const m of initialItems) {
+        if (!m.caption && prev.has(m.id)) next.add(m.id);
+      }
+      return next;
+    });
   }, [initialItems]);
 
   // Der gerade betrachtete Eintrag wird aus `items` abgeleitet, damit Caption-
@@ -111,6 +124,16 @@ export function MediaList({
     setItems((prev) =>
       prev.map((m) => (m.id === id ? { ...m, caption: value } : m)),
     );
+  }, []);
+
+  /** Auswahl einer (unbeschrifteten) Kachel umschalten. */
+  const toggleSelect = useCallback((id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   }, []);
 
   const handleDragEnd = useCallback(
@@ -156,6 +179,12 @@ export function MediaList({
 
       const previous = items;
       setItems((prev) => prev.filter((m) => m.id !== media.id)); // optimistisch
+      setSelectedIds((prev) => {
+        if (!prev.has(media.id)) return prev;
+        const next = new Set(prev);
+        next.delete(media.id);
+        return next;
+      });
       if (viewingId === media.id) setViewingId(null);
 
       void (async () => {
@@ -175,13 +204,21 @@ export function MediaList({
     [items, orderId, router, showNotice, viewingId],
   );
 
-  /** Batch: Captions für alle Medien OHNE Caption generieren. */
+  /**
+   * Batch: Captions generieren. Sind unbeschriftete Kacheln ausgewählt, nur
+   * diese; sonst alle ohne Caption. Nach Erfolg wird die Auswahl zurückgesetzt.
+   */
   const handleGenerate = useCallback(() => {
     setGenerating(true);
+    const ids = items
+      .filter((m) => !m.caption && selectedIds.has(m.id))
+      .map((m) => m.id);
     void (async () => {
       try {
         const res = await fetch(`/api/portal/orders/${orderId}/captions`, {
           method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(ids.length > 0 ? { ids } : {}),
         });
         if (!res.ok) throw new Error("captions_failed");
         const data = (await res.json()) as {
@@ -194,6 +231,7 @@ export function MediaList({
             return hit ? { ...m, caption: hit.caption || null } : m;
           }),
         );
+        setSelectedIds(new Set());
         router.refresh();
       } catch {
         showNotice(t(DEFAULT_LOCALE, "captions.error"));
@@ -201,7 +239,7 @@ export function MediaList({
         setGenerating(false);
       }
     })();
-  }, [orderId, router, showNotice]);
+  }, [items, selectedIds, orderId, router, showNotice]);
 
   if (items.length === 0) {
     return (
@@ -219,11 +257,13 @@ export function MediaList({
   }
 
   const missingCount = items.filter((m) => !m.caption).length;
+  const selectedCount = selectedIds.size;
+  const disableGenerate = generating || missingCount === 0;
 
   return (
     <div>
-      {/* Mutations-Kopf (Reorder-Hinweis + Batch-Captions) — im Abgeschlossen-
-          Modus ausgeblendet. */}
+      {/* Mutations-Kopf (Reorder-/Auswahl-Hinweis + Batch-Captions) — im
+          Abgeschlossen-Modus ausgeblendet. */}
       {!readOnly ? (
         <div
           style={{
@@ -235,23 +275,28 @@ export function MediaList({
           }}
         >
           <p style={{ margin: 0, fontSize: 12, color: "var(--text-secondary)" }}>
-            {t(DEFAULT_LOCALE, "assembler.reorderHint")}
+            {selectedCount > 0
+              ? t(DEFAULT_LOCALE, "captions.selected", { count: selectedCount })
+              : t(DEFAULT_LOCALE, "assembler.reorderHint")}
           </p>
           <button
             type="button"
             className="btn-dark"
             onClick={handleGenerate}
-            disabled={generating || missingCount === 0}
+            disabled={disableGenerate}
             style={{
               flexShrink: 0,
-              opacity: generating || missingCount === 0 ? 0.6 : 1,
-              cursor:
-                generating || missingCount === 0 ? "default" : "pointer",
+              opacity: disableGenerate ? 0.6 : 1,
+              cursor: disableGenerate ? "default" : "pointer",
             }}
           >
             {generating
               ? t(DEFAULT_LOCALE, "captions.generating")
-              : t(DEFAULT_LOCALE, "captions.generate")}
+              : selectedCount > 0
+                ? t(DEFAULT_LOCALE, "captions.generateSelected", {
+                    count: selectedCount,
+                  })
+                : t(DEFAULT_LOCALE, "captions.generate")}
           </button>
         </div>
       ) : null}
@@ -280,6 +325,8 @@ export function MediaList({
                 media={media}
                 draggedRef={draggedRef}
                 readOnly={readOnly}
+                selected={selectedIds.has(media.id)}
+                onToggleSelect={() => toggleSelect(media.id)}
                 onView={() => setViewingId(media.id)}
                 onDelete={() => handleDelete(media)}
               />
@@ -317,17 +364,25 @@ export function MediaList({
   );
 }
 
-/** Eine sortierbare, quadratische Kachel: Foto/Video-Poster + Play/Tag/Caption/Löschen. */
+/**
+ * Eine sortierbare, quadratische Kachel: Foto/Video-Poster + Play-Overlay.
+ * Oben links **ein** Indikator (Caption-Status bzw. Auswahl-Kreis), oben rechts
+ * der Lösch-Button (gegenüberliegende Ecke → klar getrennt).
+ */
 function SortableTile({
   media,
   draggedRef,
   readOnly,
+  selected,
+  onToggleSelect,
   onView,
   onDelete,
 }: {
   media: MediaWithUrl;
   draggedRef: React.RefObject<boolean>;
   readOnly: boolean;
+  selected: boolean;
+  onToggleSelect: () => void;
   onView: () => void;
   onDelete: () => void;
 }) {
@@ -390,24 +445,39 @@ function SortableTile({
         </div>
       ) : null}
 
-      {/* Dezenter Caption-Indikator: gefüllt = hat Caption, schwach = fehlt. */}
-      <span
-        className="media-tile-caption"
-        aria-label={
-          hasCaption
-            ? t(DEFAULT_LOCALE, "captions.edit")
-            : t(DEFAULT_LOCALE, "captions.empty")
-        }
-        style={{
-          background: hasCaption ? "var(--gold)" : "rgba(0, 0, 0, 0.45)",
-          opacity: hasCaption ? 1 : 0.7,
-        }}
-      >
-        <CaptionIcon />
-      </span>
-
-      {media.tag ? (
-        <span className="media-tile-tag">{t(DEFAULT_LOCALE, `mediaTag.${media.tag}`)}</span>
+      {/* Ein Indikator oben links (6b.2): hat Caption ⇒ Caption-Icon (Status);
+          fehlt ⇒ tappbarer Auswahl-Kreis (leer/gold) für die Batch-Generierung.
+          Im Abgeschlossen-Modus ohne Caption: kein Indikator. */}
+      {hasCaption ? (
+        <span
+          className="media-tile-indicator media-tile-indicator--caption"
+          aria-label={t(DEFAULT_LOCALE, "captions.edit")}
+        >
+          <CaptionIcon />
+        </span>
+      ) : !readOnly ? (
+        <div
+          role="button"
+          tabIndex={0}
+          aria-pressed={selected}
+          aria-label={t(DEFAULT_LOCALE, "captions.select")}
+          className={`media-tile-indicator media-tile-indicator--select${
+            selected ? " is-selected" : ""
+          }`}
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleSelect();
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.stopPropagation();
+              onToggleSelect();
+            }
+          }}
+        >
+          {selected ? <CheckIcon /> : null}
+        </div>
       ) : null}
 
       {!readOnly ? (
@@ -819,6 +889,25 @@ function CaptionIcon() {
       aria-hidden
     >
       <path d="M5 8h14M5 12h9M5 16h12" />
+    </svg>
+  );
+}
+
+/** Häkchen im gefüllten Gold-Kreis (ausgewählte, unbeschriftete Kachel). Deko. */
+function CheckIcon() {
+  return (
+    <svg
+      width={12}
+      height={12}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={3}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M5 12l5 5 9-11" />
     </svg>
   );
 }

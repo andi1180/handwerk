@@ -44,10 +44,32 @@ async function mapWithConcurrency<T, R>(
   return results;
 }
 
+/** Liest ein optionales `ids`-Array (String-Liste) aus dem Request-Body. */
+async function readSelectedIds(request: Request): Promise<string[] | null> {
+  try {
+    const body = (await request.json()) as unknown;
+    if (body && typeof body === "object" && "ids" in body) {
+      const raw = (body as { ids?: unknown }).ids;
+      if (Array.isArray(raw) && raw.every((v) => typeof v === "string")) {
+        return raw as string[];
+      }
+    }
+  } catch {
+    // Kein/ungültiger Body → wie „keine Auswahl" behandeln (alle ohne Caption).
+  }
+  return null;
+}
+
 /**
  * POST /api/portal/orders/[id]/captions — Batch-Generierung von KI-Captions
- * (Schritt 6b). Beschriftet **alle** Medien des Auftrags OHNE Caption; manuell
- * gesetzte Captions (caption ≠ null) bleiben unberührt.
+ * (Schritt 6b). Beschriftet Medien des Auftrags OHNE Caption; manuell gesetzte
+ * Captions (caption ≠ null) bleiben unberührt.
+ *
+ * Optionaler Body `{ ids?: string[] }` (6b.2): ist eine nicht-leere Auswahl
+ * gesetzt, werden **nur** diese (und nur unbeschriftete) generiert; fehlt/leer ⇒
+ * alle ohne Caption (bisheriges Verhalten). Die `ids` werden durch
+ * `.eq("order_id", …)` (RLS-skopiert) gegen Order/Betrieb validiert — fremde ids
+ * matchen schlicht nicht.
  *
  * ISOLATION: AUTHENTICATED Server-Client (kein `service_role`). `getCurrentBusiness`
  * (Session) → kein User/Betrieb ⇒ 401/403. Die Order wird über RLS geladen
@@ -56,7 +78,7 @@ async function mapWithConcurrency<T, R>(
  * defensiv auf `order_id` gefiltert. Gibt die aktualisierten `{ id, caption }` zurück.
  */
 export async function POST(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id: orderId } = await params;
@@ -89,12 +111,19 @@ export async function POST(
     return NextResponse.json({ error: "not_found" }, { status: 404 });
   }
 
+  const selectedIds = await readSelectedIds(request);
+
   // Nur Medien OHNE Caption (caption IS NULL) — manuelle Edits nicht überschreiben.
-  const { data: pending } = await supabase
+  // Bei gesetzter Auswahl zusätzlich auf diese ids beschränken (order-skopiert).
+  let query = supabase
     .from("order_media")
     .select("id, media_type, storage_path, keyword")
     .eq("order_id", order.id)
-    .is("caption", null)
+    .is("caption", null);
+  if (selectedIds && selectedIds.length > 0) {
+    query = query.in("id", selectedIds);
+  }
+  const { data: pending } = await query
     .order("sort_order", { ascending: true })
     .returns<PendingMedia[]>();
   const rows = pending ?? [];

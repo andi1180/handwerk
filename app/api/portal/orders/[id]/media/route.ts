@@ -2,17 +2,12 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentBusiness } from "@/lib/auth/current-business";
 
-/** Erlaubte Medien-Tags (Spiegel der DB-Check-Constraint auf `order_media.tag`). */
-const ALLOWED_TAGS = ["vorher", "nachher", "prozess"] as const;
-type AllowedTag = (typeof ALLOWED_TAGS)[number];
-
 /** Die zurückgegebene (und für die Liste relevante) Medien-Zeile. */
 type InsertedMedia = {
   id: string;
   media_type: "photo" | "video";
   storage_path: string;
   keyword: string | null;
-  tag: AllowedTag | null;
   sort_order: number;
 };
 
@@ -109,13 +104,6 @@ export async function POST(
     return NextResponse.json({ error: "invalid_path" }, { status: 400 });
   }
 
-  // tag optional; falls gesetzt, muss er gültig sein.
-  const rawTag = trimmedOrNull(payload.tag);
-  if (rawTag !== null && !ALLOWED_TAGS.includes(rawTag as AllowedTag)) {
-    return NextResponse.json({ error: "invalid_tag" }, { status: 400 });
-  }
-  const tag = rawTag as AllowedTag | null;
-
   // sort_order = coalesce(max(sort_order), 0) + 1 für diese Order.
   const { data: last } = await supabase
     .from("order_media")
@@ -126,6 +114,8 @@ export async function POST(
     .maybeSingle<{ sort_order: number }>();
   const nextSortOrder = (last?.sort_order ?? 0) + 1;
 
+  // `tag` (order_media.tag) wird seit 6b.2 NICHT mehr gesetzt (bleibt null) — die
+  // Spalte bleibt für ein späteres Vorher/Nachher-Format erhalten (UI entfernt).
   const { data, error } = await supabase
     .from("order_media")
     .insert({
@@ -134,13 +124,12 @@ export async function POST(
       media_type: mediaType,
       storage_path: storagePath,
       keyword: trimmedOrNull(payload.keyword),
-      tag,
       width: intOrNull(payload.width),
       height: intOrNull(payload.height),
       duration_seconds: durationSeconds,
       sort_order: nextSortOrder,
     })
-    .select("id, media_type, storage_path, keyword, tag, sort_order")
+    .select("id, media_type, storage_path, keyword, sort_order")
     .single<InsertedMedia>();
 
   if (error || !data) {
