@@ -28,6 +28,14 @@ export type BusinessSettings = {
   google_review_url: string | null;
   website_url: string | null;
   delivery_mode: DeliveryMode;
+  /** Booklet-Inhalt (Schritt 7b) — fester Claim unter dem KI-Intro-Titel, optional. */
+  intro_tagline: string | null;
+  /** Dankes-/Abschiedszeile auf der Outro-Seite, optional. */
+  outro_message: string | null;
+  /** ÖFFENTLICHE Kontakt-Mail fürs Outro (nicht business_email/Login). */
+  contact_email: string | null;
+  /** Öffentliche Telefonnummer fürs Outro, optional. */
+  contact_phone: string | null;
 };
 
 /**
@@ -100,6 +108,10 @@ function normalizeSettings(raw: unknown): BusinessSettings {
     google_review_url: asTrimmedOrNull(s.google_review_url),
     website_url: asTrimmedOrNull(s.website_url),
     delivery_mode: isDeliveryMode(s.delivery_mode) ? s.delivery_mode : "manual",
+    intro_tagline: asTrimmedOrNull(s.intro_tagline),
+    outro_message: asTrimmedOrNull(s.outro_message),
+    contact_email: asTrimmedOrNull(s.contact_email),
+    contact_phone: asTrimmedOrNull(s.contact_phone),
   };
 }
 

@@ -2,10 +2,12 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentBusiness } from "@/lib/auth/current-business";
 import {
+  CONTENT_LIMITS,
   RETENTION_MONTHS,
   VIDEO_SECONDS,
   asRecord,
   isDeliveryMode,
+  isEmailFormat,
   isFontOption,
   isHexColor,
 } from "@/lib/settings/options";
@@ -97,15 +99,33 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: "invalid_retention" }, { status: 400 });
   }
 
+  // Booklet-Inhalt (Schritt 7b): optionale Text-/Kontaktfelder. Leer ⇒ null.
+  const introTagline = trimmedOrNull(payload.intro_tagline);
+  if (introTagline !== null && introTagline.length > CONTENT_LIMITS.introTagline) {
+    return NextResponse.json({ error: "content_too_long" }, { status: 400 });
+  }
+  const outroMessage = trimmedOrNull(payload.outro_message);
+  if (outroMessage !== null && outroMessage.length > CONTENT_LIMITS.outroMessage) {
+    return NextResponse.json({ error: "content_too_long" }, { status: 400 });
+  }
+  const contactPhone = trimmedOrNull(payload.contact_phone);
+  if (contactPhone !== null && contactPhone.length > CONTENT_LIMITS.contactPhone) {
+    return NextResponse.json({ error: "content_too_long" }, { status: 400 });
+  }
+  const contactEmail = trimmedOrNull(payload.contact_email);
+  if (contactEmail !== null && !isEmailFormat(contactEmail)) {
+    return NextResponse.json({ error: "invalid_email" }, { status: 400 });
+  }
+
   // READ-MERGE-WRITE des branding-jsonb: nur die 5a-Form-Felder schreiben,
   // `logo_url` (und evtl. weitere Keys) BEIBEHALTEN. Das Logo wird ausschließlich
   // über /api/portal/settings/logo gepflegt — symmetrische Trennung, dieser
   // Handler fasst logo_url NIE an (sonst würde Speichern das Logo wegschreiben).
   const { data: current, error: readError } = await supabase
     .from("businesses")
-    .select("branding")
+    .select("branding, settings")
     .eq("id", business.id)
-    .single<{ branding: unknown }>();
+    .single<{ branding: unknown; settings: unknown }>();
   if (readError || !current) {
     return NextResponse.json({ error: "update_failed" }, { status: 500 });
   }
@@ -117,12 +137,19 @@ export async function PATCH(request: Request) {
     font: payload.font,
     logo_per_page: payload.logo_per_page === true,
   };
+  // READ-MERGE-WRITE auch auf settings: bestehende (evtl. künftige) Keys
+  // beibehalten, nur die von der Form geführten Felder überschreiben.
   const settings = {
+    ...asRecord(current.settings),
     video_max_seconds: videoMaxSeconds,
     ig_handle: trimmedOrNull(payload.ig_handle),
     google_review_url: trimmedOrNull(payload.google_review_url),
     website_url: trimmedOrNull(payload.website_url),
     delivery_mode: payload.delivery_mode,
+    intro_tagline: introTagline,
+    outro_message: outroMessage,
+    contact_email: contactEmail,
+    contact_phone: contactPhone,
   };
 
   const { data, error } = await supabase

@@ -28,6 +28,25 @@ export const RETENTION_MONTHS = { min: 1, max: 120, default: 12 } as const;
 /** Gültiges 6-stelliges Hex (#RRGGBB) — Branding-Farben. */
 export const HEX_COLOR_REGEX = /^#[0-9a-fA-F]{6}$/;
 
+/**
+ * Längen-Grenzen für die Booklet-Inhalt-Texte (Schritt 7b). Geteilt von
+ * Settings-Form (Client-Validierung + `maxLength`) und Route Handler
+ * (Server-Validierung), damit beide Seiten exakt dasselbe Limit erzwingen.
+ */
+export const CONTENT_LIMITS = {
+  introTagline: 80,
+  outroMessage: 300,
+  contactPhone: 40,
+} as const;
+
+/** Pragmatisches E-Mail-Format für die öffentliche Kontakt-Mail (Outro). */
+export const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/** Typ-Guard: sieht der String wie eine E-Mail-Adresse aus? */
+export function isEmailFormat(value: unknown): value is string {
+  return typeof value === "string" && EMAIL_REGEX.test(value);
+}
+
 /** Typ-Guard: gültige Hex-Farbe (#RRGGBB)? */
 export function isHexColor(value: unknown): value is string {
   return typeof value === "string" && HEX_COLOR_REGEX.test(value);

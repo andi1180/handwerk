@@ -87,6 +87,17 @@ export const de = {
     errColor: "Bitte gültige Hex-Farben angeben (z. B. #C4A95B).",
     errVideo: "Die Videolänge muss zwischen {min} und {max} Sekunden liegen.",
     errRetention: "Die Aufbewahrung muss zwischen {min} und {max} Monaten liegen.",
+    content: {
+      sectionTitle: "Booklet-Inhalt",
+      introTagline: "Intro-Claim",
+      introTaglineHint:
+        "Fester Claim unter dem KI-Titel auf der Intro-Seite (optional).",
+      outroMessage: "Outro-Nachricht",
+      contactEmail: "Kontakt-E-Mail (öffentlich)",
+      contactPhone: "Telefon (öffentlich)",
+      emailInvalid: "Bitte eine gültige E-Mail-Adresse angeben.",
+      tooLong: "Der Text ist zu lang.",
+    },
     logo: {
       title: "Logo",
       upload: "Logo hochladen",

@@ -576,6 +576,39 @@ Neuer Block `settings.logo.*` in [lib/i18n/de.ts](lib/i18n/de.ts): `title`, `upl
 
 ---
 
+## Intro/Outro-Text (Schritt 7b)
+
+Bewusst schmale Slice der Desktop-Business-Config: nur die Text-/Kontaktfelder, die der Renderer in Step 8 sicher braucht. **Keine** Migration (Keys im bestehenden `businesses.settings`-jsonb, wie 5a), **kein** neuer Bucket, **kein** neuer Endpoint — der bestehende Settings-`PATCH` (read-merge-write aus 7a) wird nur um die neuen Keys erweitert. **Keine** Layout-/Template-/Hintergrund-Konfiguration (das ist 7c bzw. Step 8).
+
+### Datenmodell (`businesses.settings`, neue Keys)
+
+Alle vier `string | null`, Default `null`, leer ⇒ `null` (getrimmt):
+
+- `intro_tagline` — optionaler **fester Claim UNTER dem KI-Titel** auf der Intro-Seite (≤ 80). Leer ⇒ Intro zeigt nur KI-Titel/Beschreibung aus Step 8. **Kein** fester Intro-Titel — der ist KI.
+- `outro_message` — optionale Dankes-/Abschiedszeile auf der Outro-Seite (≤ 300).
+- `contact_email` — **ÖFFENTLICHE** Kontakt-Mail fürs Outro (E-Mail-Format wenn gesetzt). **Nicht** `business_email`/Login.
+- `contact_phone` — öffentliche Telefonnummer fürs Outro (Freitext ≤ 40).
+
+`website_url`, `ig_handle`, `google_review_url` existieren bereits aus 5a und werden im Outro/Buttons wiederverwendet — hier **nicht** neu angelegt.
+
+### Optionen & Guards ([lib/settings/options.ts](lib/settings/options.ts))
+
+Geteilt Client + Server (wie 5a): `CONTENT_LIMITS` (`introTagline: 80`, `outroMessage: 300`, `contactPhone: 40`), `EMAIL_REGEX` + Typ-Guard `isEmailFormat`. [lib/auth/current-business.ts](lib/auth/current-business.ts): `BusinessSettings` um die 4 Keys ergänzt, `normalizeSettings` liest sie via `asTrimmedOrNull` (jsonb `unknown` → Default `null`), typsicher, **kein `any`**.
+
+### Route Handler ([app/api/portal/settings/route.ts](app/api/portal/settings/route.ts), `PATCH` — erweitert)
+
+`business_id` weiterhin **ausschließlich** aus der Session. Die 4 neuen Keys werden validiert (Längen → `content_too_long`, E-Mail-Format → `invalid_email`, sonst 400) und in den `settings`-jsonb gemergt. **READ-MERGE-WRITE auch auf `settings`** (vorher wurde es voll überschrieben): bestehende/künftige Keys bleiben erhalten, nur die von der Form geführten Felder werden gesetzt — symmetrisch zum `branding`-Merge, der `logo_url`-Schutz aus 7a bleibt unangetastet.
+
+### UI ([app/portal/settings/settings-form.tsx](app/portal/settings/settings-form.tsx))
+
+Neue `.card`-Gruppe „Booklet-Inhalt": `intro_tagline` (`TextField` mit Hinweis), `outro_message` (neues `TextAreaField`), `contact_email` (`type="email"`), `contact_phone` — `div + onClick`, **kein `<form>`**, gespeichert über den **bestehenden** Settings-`PATCH` (ein Save für die ganze Seite, kein separater Button). Client-Validierung = Server-Validierung (`CONTENT_LIMITS`/`isEmailFormat`); `maxLength` an den Feldern referenziert dieselben Limits.
+
+### i18n
+
+Neuer Block `settings.content.*` in [lib/i18n/de.ts](lib/i18n/de.ts): `sectionTitle`, `introTagline`, `introTaglineHint`, `outroMessage`, `contactEmail`, `contactPhone`, `emailInvalid`, `tooLong`.
+
+---
+
 ## Schritt-8/9-Vorgaben (Render: Web-Story + Reel)
 
 Verbindlich für Schritt 8 (Web-Story-Render) und Schritt 9 (Reel/FFmpeg + Auslieferung).

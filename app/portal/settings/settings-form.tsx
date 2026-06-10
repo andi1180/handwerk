@@ -12,11 +12,13 @@ import {
   type PreparedLogo,
 } from "@/lib/media/logo";
 import {
+  CONTENT_LIMITS,
   DELIVERY_MODES,
   FONT_OPTIONS,
   RETENTION_MONTHS,
   VIDEO_SECONDS,
   isDeliveryMode,
+  isEmailFormat,
   isFontOption,
   isHexColor,
   type DeliveryMode,
@@ -87,6 +89,18 @@ export function SettingsForm({
     business.settings.delivery_mode,
   );
   const [retentionMonths, setRetentionMonths] = useState(business.retention_months);
+  const [introTagline, setIntroTagline] = useState(
+    business.settings.intro_tagline ?? "",
+  );
+  const [outroMessage, setOutroMessage] = useState(
+    business.settings.outro_message ?? "",
+  );
+  const [contactEmail, setContactEmail] = useState(
+    business.settings.contact_email ?? "",
+  );
+  const [contactPhone, setContactPhone] = useState(
+    business.settings.contact_phone ?? "",
+  );
 
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -141,6 +155,18 @@ export function SettingsForm({
       );
       return;
     }
+    if (
+      introTagline.trim().length > CONTENT_LIMITS.introTagline ||
+      outroMessage.trim().length > CONTENT_LIMITS.outroMessage ||
+      contactPhone.trim().length > CONTENT_LIMITS.contactPhone
+    ) {
+      fail(t(DEFAULT_LOCALE, "settings.content.tooLong"));
+      return;
+    }
+    if (contactEmail.trim().length > 0 && !isEmailFormat(contactEmail.trim())) {
+      fail(t(DEFAULT_LOCALE, "settings.content.emailInvalid"));
+      return;
+    }
 
     setSaveState("saving");
     setErrorMsg(null);
@@ -161,6 +187,10 @@ export function SettingsForm({
           website_url: websiteUrl,
           delivery_mode: deliveryMode,
           retention_months: retentionMonths,
+          intro_tagline: introTagline,
+          outro_message: outroMessage,
+          contact_email: contactEmail,
+          contact_phone: contactPhone,
         }),
       });
 
@@ -297,6 +327,52 @@ export function SettingsForm({
         />
       </div>
 
+      {/* Booklet-Inhalt (Intro & Outro) */}
+      <div className="card" style={cardStyle}>
+        <h2 style={groupTitleStyle}>
+          {t(DEFAULT_LOCALE, "settings.content.sectionTitle")}
+        </h2>
+        <TextField
+          label={t(DEFAULT_LOCALE, "settings.content.introTagline")}
+          value={introTagline}
+          maxLength={CONTENT_LIMITS.introTagline}
+          hint={t(DEFAULT_LOCALE, "settings.content.introTaglineHint")}
+          onChange={(v) => {
+            markDirty();
+            setIntroTagline(v);
+          }}
+        />
+        <TextAreaField
+          label={t(DEFAULT_LOCALE, "settings.content.outroMessage")}
+          value={outroMessage}
+          maxLength={CONTENT_LIMITS.outroMessage}
+          onChange={(v) => {
+            markDirty();
+            setOutroMessage(v);
+          }}
+        />
+        <TextField
+          label={t(DEFAULT_LOCALE, "settings.content.contactEmail")}
+          type="email"
+          value={contactEmail}
+          placeholder="kontakt@meinbetrieb.de"
+          onChange={(v) => {
+            markDirty();
+            setContactEmail(v);
+          }}
+        />
+        <TextField
+          label={t(DEFAULT_LOCALE, "settings.content.contactPhone")}
+          value={contactPhone}
+          maxLength={CONTENT_LIMITS.contactPhone}
+          placeholder="+49 …"
+          onChange={(v) => {
+            markDirty();
+            setContactPhone(v);
+          }}
+        />
+      </div>
+
       {/* Auslieferung */}
       <div className="card" style={cardStyle}>
         <h2 style={groupTitleStyle}>{t(DEFAULT_LOCALE, "settings.groupDelivery")}</h2>
@@ -374,13 +450,15 @@ function TextField({
   placeholder,
   hint,
   type = "text",
+  maxLength,
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
   placeholder?: string;
   hint?: string;
-  type?: "text" | "url";
+  type?: "text" | "url" | "email";
+  maxLength?: number;
 }) {
   return (
     <label style={labelStyle}>
@@ -390,8 +468,42 @@ function TextField({
         className="form-input"
         value={value}
         placeholder={placeholder}
+        maxLength={maxLength}
         autoComplete="off"
         onChange={(e) => onChange(e.target.value)}
+      />
+      {hint ? <span style={hintStyle}>{hint}</span> : null}
+    </label>
+  );
+}
+
+/** Beschriftetes mehrzeiliges Textfeld (Textarea). */
+function TextAreaField({
+  label,
+  value,
+  onChange,
+  placeholder,
+  hint,
+  maxLength,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+  hint?: string;
+  maxLength?: number;
+}) {
+  return (
+    <label style={labelStyle}>
+      <span style={captionStyle}>{label}</span>
+      <textarea
+        className="form-input"
+        value={value}
+        placeholder={placeholder}
+        maxLength={maxLength}
+        rows={3}
+        onChange={(e) => onChange(e.target.value)}
+        style={{ resize: "vertical", minHeight: 76, fontFamily: "inherit" }}
       />
       {hint ? <span style={hintStyle}>{hint}</span> : null}
     </label>
