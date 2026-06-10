@@ -7,3 +7,4 @@ Technische Doku: siehe [TECH.md](TECH.md).
 ## Build-History
 
 - **Schritt 1 ✅ DB-Fundament (Migration 0001)** — 7 Tabellen, RLS, explizite GRANTs, Mandanten-Isolation, i18n-Felder, Verify-Gate.
+- **Schritt 2a ✅ App-Scaffold + Supabase-Clients + i18n + CSS-Tokens** — Next.js 15 (App Router, React 19, TS strict), 3 Supabase-Clients (Browser/Server via `@supabase/ssr`, `service_role` via `@supabase/supabase-js`), typsicherer i18n-Layer (`de`), Valooro-Token-System in `globals.css`. Noch ohne Auth/Features.

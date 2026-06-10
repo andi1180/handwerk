@@ -49,4 +49,57 @@ Das DB-Fundament besteht aus 7 Tabellen (alle im Schema `public`). Datei: [supab
 
 ---
 
+## App-Scaffold (Schritt 2a)
+
+Next.js 15 (App Router), React 19, TypeScript `strict` + `noUncheckedIndexedAccess`. Paketmanager: **pnpm**. Noch ohne Auth (Schritt 2b) und ohne Feature-/Portal-Seiten — eine baubare, lauffähige leere App.
+
+### Struktur
+
+```
+app/
+  layout.tsx     Root-Layout: lädt globals.css + Plus Jakarta Sans (next/font/google,
+                 Gewichte 400/500/600/700 als --font-sans), html lang="de".
+  page.tsx       Platzhalter-Startseite ("Valooro Handwerk", zentriert).
+  globals.css    Token-System + Utility-Klassen (s. u.).
+lib/
+  supabase/      Drei Supabase-Clients (s. u.).
+  i18n/          Typsicherer i18n-Layer (s. u.).
+next.config.ts   reactStrictMode.
+tsconfig.json    strict, noUncheckedIndexedAccess, Pfad-Alias @/* → ./*.
+.env.example     Vorlage der drei benötigten Env-Variablen (ohne Werte).
+```
+
+### Supabase-Clients (`lib/supabase/`)
+
+Wir nutzen **`@supabase/ssr`** (nicht das deprecated `auth-helpers`-Paket) für die RLS-gebundenen Clients und **`@supabase/supabase-js`** für den `service_role`-Client.
+
+| Datei | Factory | Paket | Zweck |
+| --- | --- | --- | --- |
+| `client.ts` | `createClient()` | `@supabase/ssr` → `createBrowserClient` | Browser/Client Components. anon-Key, RLS. |
+| `server.ts` | `async createClient()` | `@supabase/ssr` → `createServerClient` | Server Components / Route Handlers / Server Actions. Liest Session-Cookies über das Next.js-15-`await cookies()`-API. anon-Key, RLS, authentifizierter Kontext. |
+| `service.ts` | `createServiceClient()` | `@supabase/supabase-js` → `createClient` | **Nur server-seitig.** `service_role`-Key, umgeht RLS. Für öffentliche Booklet-Reads (server-seitige `access_token`-Validierung) und serverseitige Inserts/Deletes. **Niemals in Client Components importieren, niemals mit `NEXT_PUBLIC_` prefixen.** |
+
+Env-Variablen: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` (Browser + Server), `SUPABASE_SERVICE_ROLE_KEY` (nur `service.ts`). Die Clients werden erst zur Laufzeit instanziiert — die App baut auch ohne echte Env-Werte.
+
+### i18n-Layer (`lib/i18n/`)
+
+Minimal, aber vollständig typsicher. MVP: nur `de`.
+
+- `types.ts` — `Locale` (`'de'`) sowie generische Pfad-Helfer `DictKey`/`DictValue` (punktseparierte, getypte Schlüsselpfade).
+- `de.ts` — deutsches Dictionary (`as const`); seine Struktur ist die **kanonische Form** aller Sprachen.
+- `index.ts` — `DEFAULT_LOCALE`, `Dictionary` (= `typeof de`), `getDictionary(locale)` und der typsichere Helfer `t(locale, key)` (z. B. `t("de", "app.name")` → autocompletet den Schlüssel, der Rückgabetyp folgt dem Pfad).
+
+**Neue Sprache = neue Dict-Datei** (muss `Dictionary` erfüllen) + Eintrag in der `dictionaries`-Registry. Kein Refactor.
+
+### CSS-Token-System (`app/globals.css`)
+
+Design-Tokens als CSS-Custom-Properties unter `:root` (Farben, Gold-Akzente, `--radius: 8px`). Body nutzt `var(--font-sans)`, `--text-primary`, `--bg`. Utility-Klassen: `.btn-dark`, `.btn-gold`, `.btn-outline` (Gold-Hover), `.card`, `.divider-gold`, `.form-input` (Gold-Focus-Border).
+
+### Routen-Konvention (noch nicht gebaut)
+
+- **Portal** (eingeloggte Betriebe) später unter `/portal/*` — **desktop-first**.
+- **Öffentliches Booklet** (Endkunden ohne Login) unter `/b/[token]` — **mobile-first**, Daten ausschließlich über die `service_role`-API mit server-seitiger `access_token`-Validierung.
+
+---
+
 > Nächste Migration: **0002**.
