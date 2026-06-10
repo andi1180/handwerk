@@ -233,10 +233,7 @@ export function Capture({
     }
     if (duration > MAX_VIDEO_SECONDS) {
       setNotice(
-        t(DEFAULT_LOCALE, "capture.videoTooLong").replace(
-          "{max}",
-          String(MAX_VIDEO_SECONDS),
-        ),
+        t(DEFAULT_LOCALE, "capture.videoTooLong", { max: MAX_VIDEO_SECONDS }),
       );
       return;
     }
@@ -296,13 +293,12 @@ export function Capture({
         onChange={(e) => void handleVideoFile(e)}
       />
 
-      {/* Große, klar tappbare Aufnahme-Buttons (Foto + Video). */}
-      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      {/* Große, klar tappbare Aufnahme-Buttons (Foto + Video) — Kern-Aktion. */}
+      <div className="capture-actions">
         <div
           role="button"
           tabIndex={0}
-          className="btn-dark"
-          style={{ width: "100%", padding: "16px", fontSize: 16, gap: 10 }}
+          className="btn-dark capture-btn"
           onClick={openPhoto}
           onKeyDown={(e) => {
             if (e.key === "Enter" || e.key === " ") openPhoto();
@@ -314,8 +310,7 @@ export function Capture({
         <div
           role="button"
           tabIndex={0}
-          className="btn-outline"
-          style={{ width: "100%", padding: "16px", fontSize: 16, gap: 10 }}
+          className="btn-outline capture-btn"
           onClick={openVideo}
           onKeyDown={(e) => {
             if (e.key === "Enter" || e.key === " ") openVideo();
@@ -343,15 +338,16 @@ export function Capture({
         </div>
       ) : null}
 
-      {/* Entwurf: Vorschau + Stichwort + Tag + Speichern/Verwerfen. */}
+      {/* Entwurf: Vorschau + Stichwort + Tag + Speichern/Verwerfen.
+          Inline-Card auf Desktop, bildschirmfüllender Dialog auf Mobile
+          (`.capture-draft` schaltet per Media Query um). */}
       {draft ? (
         <div
-          className="card"
+          className="card capture-draft"
           style={{
             display: "flex",
             flexDirection: "column",
             gap: 14,
-            marginTop: 12,
           }}
         >
           {draft.mediaType === "video" ? (
@@ -442,7 +438,7 @@ export function Capture({
               role="button"
               tabIndex={0}
               className="btn-dark"
-              style={{ flex: 1, padding: "14px" }}
+              style={{ flex: 1, padding: "16px", fontSize: 15 }}
               onClick={saveDraft}
               onKeyDown={(e) => {
                 if (e.key === "Enter" || e.key === " ") saveDraft();
@@ -454,7 +450,7 @@ export function Capture({
               role="button"
               tabIndex={0}
               className="btn-outline"
-              style={{ flex: 1, padding: "14px" }}
+              style={{ flex: 1, padding: "16px", fontSize: 15 }}
               onClick={discardDraft}
               onKeyDown={(e) => {
                 if (e.key === "Enter" || e.key === " ") discardDraft();

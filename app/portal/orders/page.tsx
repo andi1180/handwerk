@@ -43,20 +43,11 @@ export default async function OrdersPage() {
 
   return (
     <div style={{ maxWidth: 720, margin: "0 auto" }}>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: 12,
-          flexWrap: "wrap",
-          marginBottom: 20,
-        }}
-      >
+      <div className="orders-toolbar">
         <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700 }}>
           {t(DEFAULT_LOCALE, "orders.title")}
         </h1>
-        <Link href="/portal/orders/new" className="btn-dark">
+        <Link href="/portal/orders/new" className="btn-dark orders-new-btn">
           {t(DEFAULT_LOCALE, "orders.new")}
         </Link>
       </div>

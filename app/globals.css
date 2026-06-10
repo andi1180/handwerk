@@ -19,6 +19,12 @@
   --btn-gold-bg: #C4A95B;
 
   --radius: 8px;
+
+  /* Höhe der mobilen Top-Bar; 0 auf Desktop (Top-Bar ausgeblendet), damit
+     sticky-Köpfe (z. B. Auftrags-Detail) ihren Offset daraus ableiten können. */
+  --portal-topbar-h: 0px;
+  /* Höhe der mobilen Bottom-Tab-Nav (für Content-Bottom-Padding). */
+  --portal-tabnav-h: 60px;
 }
 
 * {
@@ -138,4 +144,207 @@ body {
 
 .form-input::placeholder {
   color: var(--text-secondary);
+}
+
+/* --- Portal-Shell (responsive, Schritt 4d) --- */
+
+/* Desktop-Standard (> 768px): 220px-Sidebar links, Content rechts. */
+.portal-shell {
+  display: flex;
+  min-height: 100vh;
+}
+
+.portal-sidebar {
+  width: 220px;
+  flex-shrink: 0;
+  background: var(--sidebar-bg);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  padding: 20px 0;
+}
+
+.portal-sidebar-brand {
+  padding: 0 20px 16px;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.portal-sidebar-logout {
+  padding: 0 18px;
+}
+
+.portal-main {
+  flex: 1;
+  min-width: 0;
+  padding: 32px;
+}
+
+/* Mobile-Chrome ist auf Desktop ausgeblendet. */
+.portal-topbar,
+.portal-tabnav {
+  display: none;
+}
+
+/* --- Mobile (≤ 768px): kein Sidebar, dafür Top-Bar + Bottom-Tab-Nav --- */
+@media (max-width: 768px) {
+  :root {
+    --portal-topbar-h: 52px;
+  }
+
+  .portal-shell {
+    display: block;
+  }
+
+  .portal-sidebar {
+    display: none;
+  }
+
+  .portal-main {
+    padding: 16px;
+    /* Platz für die fixierte Bottom-Tab-Nav. */
+    padding-bottom: calc(var(--portal-tabnav-h) + 16px);
+  }
+
+  /* Schlanke, sticky Top-Bar: Betriebsname links, Logout rechts. */
+  .portal-topbar {
+    display: flex;
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    height: var(--portal-topbar-h);
+    padding: 0 16px;
+    background: var(--bg);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .portal-topbar-brand {
+    min-width: 0;
+    overflow: hidden;
+    font-size: 15px;
+    font-weight: 700;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* App-artige Bottom-Tab-Nav, daumenreichbar fixiert. */
+  .portal-tabnav {
+    display: flex;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 20;
+    height: var(--portal-tabnav-h);
+    background: var(--bg);
+    border-top: 1px solid var(--border);
+    /* Safe-Area iOS (Home-Indicator). */
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+}
+
+/* Ein Tab-Eintrag — immer im DOM (Layout teilt die Items), aber nur in der
+   Bottom-Nav sichtbar (die selbst nur auf Mobile angezeigt wird). */
+.portal-tab {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  padding: 8px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  text-decoration: none;
+  color: var(--text-secondary);
+}
+
+.portal-tab[data-active="true"] {
+  color: var(--gold);
+}
+
+/* --- Auftrags-Detail: sticky Kopf (Kundenname + Status) --- */
+.order-detail-head {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: var(--bg);
+  padding-bottom: 12px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+@media (max-width: 768px) {
+  /* Unter der mobilen Top-Bar einklinken, nicht dahinter verschwinden. */
+  .order-detail-head {
+    top: var(--portal-topbar-h);
+    padding-bottom: 10px;
+    margin-bottom: 14px;
+  }
+}
+
+/* --- Capture: große, prominente Aufnahme-Buttons (mobil-first) --- */
+.capture-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.capture-btn {
+  width: 100%;
+  gap: 10px;
+  padding: 16px;
+  font-size: 16px;
+}
+
+@media (max-width: 768px) {
+  /* Kern-Aktion am Tresen: möglichst groß und daumenfreundlich. */
+  .capture-btn {
+    min-height: 64px;
+    font-size: 17px;
+  }
+}
+
+/* --- Auftragsliste: Kopfzeile mit „Neuer Auftrag" --- */
+.orders-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+}
+
+@media (max-width: 768px) {
+  /* „Neuer Auftrag" mobil prominent über volle Breite. */
+  .orders-new-btn {
+    width: 100%;
+  }
+}
+
+/* --- Capture-Entwurf: Inline-Card auf Desktop, Vollbild-Dialog auf Mobile --- */
+.capture-draft {
+  margin-top: 12px;
+}
+
+@media (max-width: 768px) {
+  .capture-draft {
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    margin-top: 0;
+    padding: 16px;
+    padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+    background: var(--bg);
+    overflow-y: auto;
+  }
+
+  /* Größere Eingaben am Handy (verhindert iOS-Auto-Zoom bei Fokus). */
+  .form-input {
+    font-size: 16px;
+    padding: 12px 14px;
+  }
 }

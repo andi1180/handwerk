@@ -267,4 +267,34 @@ Detailseite ([app/portal/orders/[id]/page.tsx](app/portal/orders/[id]/page.tsx))
 
 ---
 
+## Responsive Portal (Schritt 4d)
+
+Das Portal wird **mobil-optimiert** — Mitarbeiter erfassen Medien am Handy. `/portal` bleibt **eine App** (kein eigener mobiler URL); das Chrome schaltet ausschließlich per **Media Query** um. **Breakpoint: `max-width: 768px` = Mobile.** Keine neuen Features, keine Migration. Tailwind wird weiterhin nicht verwendet — das Responsive-Verhalten lebt im CSS-Token-System ([app/globals.css](app/globals.css)).
+
+### Shell-Umschaltung (Desktop ↔ Mobile)
+
+[app/portal/layout.tsx](app/portal/layout.tsx) rendert **alle** Chrome-Varianten gleichzeitig ins DOM; CSS-Klassen blenden je Viewport das Passende ein/aus (kein User-Agent-Sniffing, eine einzige App):
+
+- **Desktop (> 768px):** unverändert — 220px-Sidebar links (`.portal-sidebar` mit Betriebs-/App-Name, `<PortalNav />`, vollbreitem Logout), Content rechts (`.portal-main`, Padding 32). Top-Bar und Tab-Nav sind `display: none`.
+- **Mobile (≤ 768px):** `.portal-shell` wird `display: block`, die Sidebar `display: none`. Stattdessen:
+  - **Schlanke Top-Bar** (`.portal-topbar`, `position: sticky; top: 0`): links der **gekürzte Betriebsname** (Ellipsis), rechts der **kompakte Logout-Icon-Button** ([logout-button.tsx](app/portal/logout-button.tsx) mit `compact`-Prop). Feste Höhe über das Token `--portal-topbar-h`.
+  - **Bottom-Tab-Nav** (`.portal-tabnav`, `position: fixed; bottom: 0`, app-artig, daumenreichbar): zwei Tabs „Dashboard" (`/portal`) und „Aufträge" (`/portal/orders`) mit Inline-SVG-Icon + Label. **Aktiver Tab = `--gold`** (Icon + Text via `data-active`), inaktiv `--text-secondary`. Aktiv-Erkennung über `usePathname` — dieselbe `ITEMS`-Definition wie die Sidebar ([portal-nav.tsx](app/portal/portal-nav.tsx) exportiert `PortalNav` für Desktop und `PortalTabNav` für Mobile).
+  - **Content** (`.portal-main`) nimmt die volle Breite; `padding-bottom` (`--portal-tabnav-h` + Safe-Area) hält die Tab-Nav frei.
+
+### Mobil-first Capture & Listen
+
+- **Auftrags-Detail/Capture** ([app/portal/orders/[id]/page.tsx](app/portal/orders/[id]/page.tsx), [capture.tsx](app/portal/orders/[id]/capture.tsx)): Der sticky Kopf (Kundenname + Status) klinkt auf Mobile **unter** die Portal-Top-Bar ein (`.order-detail-head` mit `top: var(--portal-topbar-h)`). Die Aufnahme-Buttons „Foto"/„Video" sind die Kern-Aktion am Tresen — `.capture-btn` macht sie vollbreit und mobil besonders groß (`min-height: 64px`). Der Vorschau-/Stichwort-/Tag-Dialog ist auf Mobile **bildschirmfüllend**: `.capture-draft` schaltet von Inline-Card (Desktop) auf `position: fixed; inset: 0` (Vollbild-Sheet, scrollbar) um.
+- **Auftragsliste** ([app/portal/orders/page.tsx](app/portal/orders/page.tsx)): Zeilen bleiben großflächige Tap-Targets (`.card`/`.card-link`); „Neuer Auftrag" wird auf Mobile prominent **über die volle Breite** (`.orders-new-btn`).
+- **Anlage-Formular** ([new-order-form.tsx](app/portal/orders/new/new-order-form.tsx)) bleibt einspaltig; Eingaben werden mobil größer — `.form-input` bekommt unter dem Breakpoint `font-size: 16px` (verhindert iOS-Auto-Zoom) + mehr Padding.
+
+### t()-Interpolation (i18n)
+
+Der Übersetzungs-Helfer [lib/i18n/index.ts](lib/i18n/index.ts) hat jetzt echte, **typsichere Platzhalter-Interpolation**: `t(locale, key, params?)` ersetzt `{name}`, `{max}` etc. via `String.replace(/\{(\w+)\}/g, …)`; `params` ist `Record<string, string | number>` (kein `any`). Über **Funktions-Overloads** bleibt der Rückgabetyp ohne `params` das exakte Dictionary-Leaf-Literal (`DictValue`), mit `params` ein `string`. Die bisherigen `.replace()`-Aufrufstellen sind umgestellt: `portal.welcome` (`{name}`) in [app/portal/page.tsx](app/portal/page.tsx) und `capture.videoTooLong` (`{max}`) in [capture.tsx](app/portal/orders/[id]/capture.tsx).
+
+### Video-Default
+
+[lib/media/constants.ts](lib/media/constants.ts): `MAX_VIDEO_SECONDS` von 30 auf **20** gesenkt (Default 20s; später pro Betrieb konfigurierbar via Settings, Ceiling 30s).
+
+---
+
 > Nächste Migration: **0003**.

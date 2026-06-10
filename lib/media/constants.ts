@@ -11,5 +11,8 @@ export const MAX_IMAGE_DIM = 1500;
 /** JPEG-Qualität beim Export der komprimierten Fotos (0…1). */
 export const JPEG_QUALITY = 0.8;
 
-/** Maximale erlaubte Video-Länge (Sekunden). Später via Settings konfigurierbar. */
-export const MAX_VIDEO_SECONDS = 30;
+/**
+ * Maximale erlaubte Video-Länge (Sekunden).
+ * Default 20s; später pro Betrieb konfigurierbar (Settings), Ceiling 30s.
+ */
+export const MAX_VIDEO_SECONDS = 20;

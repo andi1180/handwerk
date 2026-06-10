@@ -53,18 +53,9 @@ export default async function OrderDetailPage({
 
   return (
     <div style={{ maxWidth: 720, margin: "0 auto" }}>
-      {/* Dauerhaft sichtbarer Kopf: Kundenname + Status (sticky für mobil). */}
-      <div
-        style={{
-          position: "sticky",
-          top: 0,
-          zIndex: 1,
-          background: "var(--bg)",
-          paddingBottom: 12,
-          marginBottom: 16,
-          borderBottom: "1px solid var(--border)",
-        }}
-      >
+      {/* Dauerhaft sichtbarer Kopf: Kundenname + Status. Sticky; klinkt auf
+          Mobile unter die Portal-Top-Bar ein (CSS-Offset --portal-topbar-h). */}
+      <div className="order-detail-head">
         <Link
           href="/portal/orders"
           style={{

@@ -3,12 +3,14 @@ import { createClient } from "@/lib/supabase/server";
 import { getCurrentBusiness } from "@/lib/auth/current-business";
 import { DEFAULT_LOCALE, t } from "@/lib/i18n";
 import LogoutButton from "./logout-button";
-import PortalNav from "./portal-nav";
+import PortalNav, { PortalTabNav } from "./portal-nav";
 
 /**
- * Geschützte Portal-Shell (Server Component, desktop-first).
+ * Geschützte Portal-Shell (Server Component, responsive — Schritt 4d).
  * Auth-Check (kein User → /login), Betriebs-Auflösung (kein Betrieb →
- * freundlicher Hinweis), sonst Sidebar-Shell mit Inhalt rendern.
+ * freundlicher Hinweis), sonst die Shell rendern: EINE App, deren Chrome per
+ * Media Query umschaltet — Desktop (> 768px) zeigt die 220px-Sidebar, Mobile
+ * (≤ 768px) eine schlanke Top-Bar + app-artige Bottom-Tab-Nav.
  */
 export default async function PortalLayout({
   children,
@@ -40,36 +42,28 @@ export default async function PortalLayout({
   }
 
   return (
-    <div style={{ display: "flex", minHeight: "100vh" }}>
-      <aside
-        style={{
-          width: 220,
-          flexShrink: 0,
-          background: "var(--sidebar-bg)",
-          borderRight: "1px solid var(--border)",
-          display: "flex",
-          flexDirection: "column",
-          padding: "20px 0",
-        }}
-      >
-        <div
-          style={{
-            padding: "0 20px 16px",
-            fontSize: 16,
-            fontWeight: 700,
-          }}
-        >
+    <div className="portal-shell">
+      {/* Desktop: Sidebar links (auf Mobile per CSS ausgeblendet). */}
+      <aside className="portal-sidebar">
+        <div className="portal-sidebar-brand">
           {t(DEFAULT_LOCALE, "app.name")}
         </div>
-
         <PortalNav />
-
-        <div style={{ padding: "0 18px" }}>
+        <div className="portal-sidebar-logout">
           <LogoutButton />
         </div>
       </aside>
 
-      <main style={{ flex: 1, padding: 32 }}>{children}</main>
+      {/* Mobile: schlanke Top-Bar (auf Desktop per CSS ausgeblendet). */}
+      <header className="portal-topbar">
+        <span className="portal-topbar-brand">{business.name}</span>
+        <LogoutButton compact />
+      </header>
+
+      <main className="portal-main">{children}</main>
+
+      {/* Mobile: app-artige Bottom-Tab-Nav (auf Desktop per CSS ausgeblendet). */}
+      <PortalTabNav />
     </div>
   );
 }
