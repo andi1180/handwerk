@@ -109,6 +109,18 @@ export const de = {
       typeError: "Nur PNG, JPEG oder WebP sind erlaubt.",
       tooLarge: "Die Datei ist zu groß (max. 5 MB).",
     },
+    background: {
+      sectionTitle: "Hintergründe",
+      intro: "Intro-Hintergrund",
+      outro: "Outro-Hintergrund",
+      upload: "Hintergrund hochladen",
+      uploading: "Lädt hoch…",
+      remove: "Entfernen",
+      preview: "Hintergrund-Vorschau",
+      typeError: "Nur PNG, JPEG oder WebP sind erlaubt.",
+      tooLarge: "Die Datei ist zu groß (max. 10 MB).",
+      error: "Hintergrund konnte nicht gespeichert werden. Bitte erneut versuchen.",
+    },
   },
   capture: {
     photo: "Foto aufnehmen",

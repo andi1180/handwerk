@@ -19,6 +19,10 @@ export type BusinessBranding = {
   logo_per_page: boolean;
   /** Storage-Pfad des Logos im privaten Bucket `branding` (Schritt 7a), sonst null. */
   logo_url: string | null;
+  /** Storage-Pfad des Intro-Hintergrunds (privater Bucket `branding`, 7c), sonst null. */
+  intro_bg_url: string | null;
+  /** Storage-Pfad des Outro-Hintergrunds (privater Bucket `branding`, 7c), sonst null. */
+  outro_bg_url: string | null;
 };
 
 /** Betriebs-Einstellungen (aus `businesses.settings` jsonb). */
@@ -87,6 +91,8 @@ function normalizeBranding(raw: unknown): BusinessBranding {
         ? b.logo_per_page
         : DEFAULT_BRANDING.logo_per_page,
     logo_url: asTrimmedOrNull(b.logo_url),
+    intro_bg_url: asTrimmedOrNull(b.intro_bg_url),
+    outro_bg_url: asTrimmedOrNull(b.outro_bg_url),
   };
 }
 

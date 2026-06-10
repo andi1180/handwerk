@@ -609,6 +609,98 @@ Neuer Block `settings.content.*` in [lib/i18n/de.ts](lib/i18n/de.ts): `sectionTi
 
 ---
 
+## Intro/Outro-Hintergründe (Schritt 7c)
+
+Dritte Slice der Desktop-Business-Config: je **ein** Hintergrundbild für die
+Intro- und die Outro-Seite des Booklets. **Keine** Migration, **kein** neuer
+Bucket — der bestehende private `branding`-Bucket (0003) wird wiederverwendet.
+Dessen Policies binden `bucket_id = 'branding'` **+ das erste Pfad-Segment** an
+die `business_id` (Dateiname egal) — `intro-bg.jpg`/`outro-bg.jpg` sind damit
+ohne Policy-Änderung abgedeckt.
+
+**Bewusst schmal:** genau ein Bild pro Seite. **Kein** Per-Item-/Slot-Editor
+(renderer-gekoppelt) und **keine** Aspect-/Crop-Logik hier — der Renderer
+(Step 8) covert/croppt das Bild später auf 9:16 bzw. Portrait. Der **Slot-Editor
+ist bis nach Step 8 deferred**.
+
+### Client-Aufbereitung ([lib/media/background.ts](lib/media/background.ts), NEU)
+
+`prepareLogo` wird **nicht** wiederverwendet (anderes Ziel: PNG/512 fürs Logo
+vs. JPEG/1920 für den opaken full-bleed-Hintergrund). `prepareBackground(file)`:
+akzeptiert nur `image/png|jpeg|webp` (sonst `BackgroundPrepareError("type")`),
+lehnt > **10 MB** am Input ab (`"tooLarge"`), skaliert seitenverhältnis-treu auf
+max. **1920 px** (längste Kante) via Canvas und exportiert als **JPEG q0.85**
+(kleiner als PNG, Alpha hier irrelevant) → `{ blob }`. Der typisierte
+`BackgroundPrepareError` (`type`/`tooLarge`/`decode`) wird in der Form auf i18n
+gemappt; `BACKGROUND_ACCEPT_ATTR` speist das `accept`-Attribut.
+
+### Datenmodell (`businesses.branding`, neue Keys)
+
+Zwei neue Keys im bestehenden branding-jsonb, beide `string | null`, Default
+`null`: `intro_bg_url`, `outro_bg_url`. Sie speichern — wie `logo_url` — den
+**Storage-Pfad** (nicht die URL); die Signed-URL entsteht erst beim Rendern bzw.
+für die Settings-Vorschau. [lib/auth/current-business.ts](lib/auth/current-business.ts):
+`BusinessBranding` um beide Keys ergänzt, `normalizeBranding` liest sie via
+`asTrimmedOrNull` (jsonb `unknown` → Default `null`), typsicher, **kein `any`**;
+`DEFAULT_BRANDING` ([lib/settings/options.ts](lib/settings/options.ts)) ergänzt.
+
+### Zweistufiger Upload (isolations-sicher wie 7a)
+
+1. **Datei → Storage (direkt, BROWSER-Client):** die aufbereitete JPEG geht in
+   den Bucket `branding` unter dem **fixen** Pfad `${business_id}/${slot}-bg.jpg`
+   mit `upsert = true`. Die Storage-RLS aus 0003 bindet das erste Segment an die
+   `business_id`. Der Pfad kommt aus dem geteilten `backgroundStoragePath(businessId, slot)`
+   (options.ts) — eine Quelle für Client-Upload **und** Server-Validierung, kein Drift.
+2. **Metadaten → Route Handler:** `POST /api/portal/settings/background` mit
+   `{ storage_path, slot }` — **ohne `business_id`**.
+
+### Route Handler ([app/api/portal/settings/background/route.ts](app/api/portal/settings/background/route.ts), NEU)
+
+AUTHENTICATED Client, `getCurrentBusiness` → 401/403. `business_id` **aus der
+Session**, `slot ∈ {'intro','outro'}` (geteilter Guard `isBackgroundSlot`, sonst
+**400 `invalid_slot`**).
+
+- **`POST`:** validiert `storage_path === ${business_id}/${slot}-bg.jpg` (sonst
+  **400 `invalid_path`**). **READ-MERGE-WRITE:** setzt **nur** `intro_bg_url`
+  **oder** `outro_bg_url` (je Slot); `logo_url`, Farben, font, logo_per_page und
+  der andere Slot bleiben unangetastet. Gibt das neue `branding`.
+- **`DELETE`:** `slot` aus dem JSON-Body; `storage.remove([…])` (Remove-Fehler
+  werden geloggt, brechen nicht hart ab), danach den Slot-Key per
+  READ-MERGE-WRITE auf `null`.
+
+### DRY: geteilter branding-Merge ([lib/settings/branding-store.ts](lib/settings/branding-store.ts), NEU)
+
+Der READ-MERGE-WRITE des branding-jsonb lag bisher inline im Logo-Handler
+(`writeLogoUrl`). Mit 7c wäre er ein zweites Mal nötig → extrahiert nach
+`mergeBranding(supabase, businessId, patch)` (server-only, `import type` auf den
+Server-Client → keine Bundle-Leakage). Genutzt von **beiden** Branding-Endpoints
+(Logo 7a + Hintergründe 7c); der Logo-Handler delegiert jetzt an `mergeBranding`,
+sein Verhalten ist unverändert. Jeder Endpoint fasst weiterhin **nur** seine
+eigenen Keys an (symmetrische Trennung, kein Wegschreiben fremder Werte).
+
+### Seite & UI
+
+- [app/portal/settings/page.tsx](app/portal/settings/page.tsx) (Server
+  Component): signiert Logo, Intro- und Outro-Pfad über einen gemeinsamen
+  `sign(path)`-Helfer (`createSignedUrl(path, 3600)`, `Promise.all`) und reicht
+  `introBgPreviewUrl`/`outroBgPreviewUrl` als Props an die Form.
+- [app/portal/settings/settings-form.tsx](app/portal/settings/settings-form.tsx):
+  neue `.card`-Gruppe „Hintergründe" mit **zwei** `<ImageUploadField>` (Intro/
+  Outro). Die Komponente ist aus dem 7a-`LogoField` **generalisiert**, aber
+  **einmal** definiert und für beide Slots verwendet (keine Intro/Outro-
+  Duplikation); das **7a-Logo-Feld bleibt unverändert**. Eigene Mutations-Logik
+  (getrennt vom „Speichern" der Form): `prepareBackground` → Direktupload →
+  `POST` → `router.refresh()`; Vorschau (signierte URL bzw. optimistische
+  `objectURL`) + „Entfernen" → `DELETE`. `div + onClick`, **kein `<form>`**.
+
+### i18n
+
+Neuer Block `settings.background.*` in [lib/i18n/de.ts](lib/i18n/de.ts):
+`sectionTitle`, `intro`, `outro`, `upload`, `uploading`, `remove`, `preview`,
+`typeError`, `tooLarge`, `error`.
+
+---
+
 ## Schritt-8/9-Vorgaben (Render: Web-Story + Reel)
 
 Verbindlich für Schritt 8 (Web-Story-Render) und Schritt 9 (Reel/FFmpeg + Auslieferung).

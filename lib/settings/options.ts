@@ -19,6 +19,10 @@ export type FontOption = (typeof FONT_OPTIONS)[number];
 export const DELIVERY_MODES = ["manual", "auto"] as const;
 export type DeliveryMode = (typeof DELIVERY_MODES)[number];
 
+/** Hintergrund-Slots im Booklet (Schritt 7c): Intro- und Outro-Seite. */
+export const BACKGROUND_SLOTS = ["intro", "outro"] as const;
+export type BackgroundSlot = (typeof BACKGROUND_SLOTS)[number];
+
 /** Grenzen + Default für die maximale Videolänge (Sekunden), Ceiling 30. */
 export const VIDEO_SECONDS = { min: 5, max: 30, default: 20 } as const;
 
@@ -68,6 +72,27 @@ export function isDeliveryMode(value: unknown): value is DeliveryMode {
   );
 }
 
+/** Typ-Guard: gültiger Hintergrund-Slot (intro/outro)? */
+export function isBackgroundSlot(value: unknown): value is BackgroundSlot {
+  return (
+    typeof value === "string" &&
+    (BACKGROUND_SLOTS as readonly string[]).includes(value)
+  );
+}
+
+/**
+ * Fixer Storage-Pfad eines Hintergrunds im Bucket `branding` (Schritt 7c).
+ * Erstes Segment = `business_id` = Isolations-Grenze (Storage-RLS aus 0003).
+ * Geteilt von Client-Upload und Route-Handler-Validierung, damit der Pfad nicht
+ * driftet. `upsert = true` überschreibt das vorige Bild unter demselben Pfad.
+ */
+export function backgroundStoragePath(
+  businessId: string,
+  slot: BackgroundSlot,
+): string {
+  return `${businessId}/${slot}-bg.jpg`;
+}
+
 /** Standard-Branding, falls der Betrieb (noch) nichts gesetzt hat. */
 export const DEFAULT_BRANDING = {
   primary_color: "#C4A95B",
@@ -75,6 +100,8 @@ export const DEFAULT_BRANDING = {
   font: FONT_OPTIONS[0],
   logo_per_page: false,
   logo_url: null,
+  intro_bg_url: null,
+  outro_bg_url: null,
 } as const;
 
 /**

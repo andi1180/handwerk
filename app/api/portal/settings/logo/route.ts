@@ -1,44 +1,11 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentBusiness } from "@/lib/auth/current-business";
-import { asRecord } from "@/lib/settings/options";
-
-/** AUTHENTICATED Server-Client (RLS), wie ihn dieser Handler durchgängig nutzt. */
-type ServerClient = Awaited<ReturnType<typeof createClient>>;
+import { mergeBranding } from "@/lib/settings/branding-store";
 
 /** Fixer Storage-Pfad des Logos (erstes Segment = business_id = Isolations-Grenze). */
 function logoStoragePath(businessId: string): string {
   return `${businessId}/logo.png`;
-}
-
-/**
- * READ-MERGE-WRITE des branding-jsonb: fasst NUR `logo_url` an, der Rest des
- * Objekts bleibt unangetastet (symmetrisch zu PATCH /api/portal/settings, das
- * `logo_url` nie schreibt). AUTHENTICATED Client (RLS-Policy `businesses_update`).
- * Gibt das neue branding zurück oder `null` bei DB-Fehler.
- */
-async function writeLogoUrl(
-  supabase: ServerClient,
-  businessId: string,
-  value: string | null,
-) {
-  const { data: current, error: readError } = await supabase
-    .from("businesses")
-    .select("branding")
-    .eq("id", businessId)
-    .single<{ branding: unknown }>();
-  if (readError || !current) return null;
-
-  const branding = { ...asRecord(current.branding), logo_url: value };
-
-  const { data, error } = await supabase
-    .from("businesses")
-    .update({ branding })
-    .eq("id", businessId)
-    .select("branding")
-    .single();
-  if (error || !data) return null;
-  return data;
 }
 
 /**
@@ -78,11 +45,13 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "invalid_path" }, { status: 400 });
   }
 
-  const branding = await writeLogoUrl(supabase, business.id, expected);
-  if (!branding) {
+  const result = await mergeBranding(supabase, business.id, {
+    logo_url: expected,
+  });
+  if (!result) {
     return NextResponse.json({ error: "update_failed" }, { status: 500 });
   }
-  return NextResponse.json(branding, { status: 200 });
+  return NextResponse.json(result, { status: 200 });
 }
 
 /**
@@ -118,9 +87,9 @@ export async function DELETE() {
     );
   }
 
-  const branding = await writeLogoUrl(supabase, business.id, null);
-  if (!branding) {
+  const result = await mergeBranding(supabase, business.id, { logo_url: null });
+  if (!result) {
     return NextResponse.json({ error: "update_failed" }, { status: 500 });
   }
-  return NextResponse.json(branding, { status: 200 });
+  return NextResponse.json(result, { status: 200 });
 }

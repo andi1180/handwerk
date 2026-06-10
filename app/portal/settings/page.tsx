@@ -13,15 +13,31 @@ export default async function SettingsPage() {
   const business = await getCurrentBusiness();
   if (!business) notFound();
 
-  // Privater Bucket → Logo-Vorschau über eine server-seitig signierte URL (1 h).
-  let logoPreviewUrl: string | null = null;
-  if (business.branding.logo_url) {
-    const supabase = await createClient();
+  // Privater Bucket `branding` → Vorschauen über server-seitig signierte URLs
+  // (1 h). Logo (7a) + Intro-/Outro-Hintergrund (7c) teilen sich denselben
+  // Signier-Helfer; ohne gesetzten Pfad bleibt die jeweilige Vorschau null.
+  const supabase = await createClient();
+  const sign = async (path: string | null): Promise<string | null> => {
+    if (!path) return null;
     const { data } = await supabase.storage
       .from("branding")
-      .createSignedUrl(business.branding.logo_url, 3600);
-    logoPreviewUrl = data?.signedUrl ?? null;
-  }
+      .createSignedUrl(path, 3600);
+    return data?.signedUrl ?? null;
+  };
 
-  return <SettingsForm business={business} logoPreviewUrl={logoPreviewUrl} />;
+  const [logoPreviewUrl, introBgPreviewUrl, outroBgPreviewUrl] =
+    await Promise.all([
+      sign(business.branding.logo_url),
+      sign(business.branding.intro_bg_url),
+      sign(business.branding.outro_bg_url),
+    ]);
+
+  return (
+    <SettingsForm
+      business={business}
+      logoPreviewUrl={logoPreviewUrl}
+      introBgPreviewUrl={introBgPreviewUrl}
+      outroBgPreviewUrl={outroBgPreviewUrl}
+    />
+  );
 }

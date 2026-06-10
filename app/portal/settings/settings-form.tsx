@@ -12,15 +12,22 @@ import {
   type PreparedLogo,
 } from "@/lib/media/logo";
 import {
+  BACKGROUND_ACCEPT_ATTR,
+  BackgroundPrepareError,
+  prepareBackground,
+} from "@/lib/media/background";
+import {
   CONTENT_LIMITS,
   DELIVERY_MODES,
   FONT_OPTIONS,
   RETENTION_MONTHS,
   VIDEO_SECONDS,
+  backgroundStoragePath,
   isDeliveryMode,
   isEmailFormat,
   isFontOption,
   isHexColor,
+  type BackgroundSlot,
   type DeliveryMode,
   type FontOption,
 } from "@/lib/settings/options";
@@ -63,10 +70,16 @@ const groupTitleStyle: React.CSSProperties = {
 export function SettingsForm({
   business,
   logoPreviewUrl,
+  introBgPreviewUrl,
+  outroBgPreviewUrl,
 }: {
   business: CurrentBusiness;
   /** Server-seitig signierte Logo-Vorschau (privater Bucket), sonst null. */
   logoPreviewUrl: string | null;
+  /** Server-seitig signierte Intro-Hintergrund-Vorschau, sonst null. */
+  introBgPreviewUrl: string | null;
+  /** Server-seitig signierte Outro-Hintergrund-Vorschau, sonst null. */
+  outroBgPreviewUrl: string | null;
 }) {
   const router = useRouter();
 
@@ -271,6 +284,25 @@ export function SettingsForm({
       <div className="card" style={cardStyle}>
         <h2 style={groupTitleStyle}>{t(DEFAULT_LOCALE, "settings.logo.title")}</h2>
         <LogoField businessId={business.id} initialPreviewUrl={logoPreviewUrl} />
+      </div>
+
+      {/* Hintergründe (Intro/Outro) — je eigene Speicher-/Lösch-Logik wie das Logo */}
+      <div className="card" style={cardStyle}>
+        <h2 style={groupTitleStyle}>
+          {t(DEFAULT_LOCALE, "settings.background.sectionTitle")}
+        </h2>
+        <ImageUploadField
+          businessId={business.id}
+          slot="intro"
+          label={t(DEFAULT_LOCALE, "settings.background.intro")}
+          initialPreviewUrl={introBgPreviewUrl}
+        />
+        <ImageUploadField
+          businessId={business.id}
+          slot="outro"
+          label={t(DEFAULT_LOCALE, "settings.background.outro")}
+          initialPreviewUrl={outroBgPreviewUrl}
+        />
       </div>
 
       {/* Aufnahme */}
@@ -863,6 +895,209 @@ function LogoField({
           {busy === "uploading"
             ? t(DEFAULT_LOCALE, "settings.logo.uploading")
             : t(DEFAULT_LOCALE, "settings.logo.upload")}
+        </div>
+      )}
+
+      {error ? (
+        <span style={{ fontSize: 13, color: "#B23B3B" }}>{error}</span>
+      ) : null}
+    </div>
+  );
+}
+
+/** Mappt einen Hintergrund-Aufbereitungsfehler auf die passende i18n-Meldung. */
+function backgroundErrorMessage(err: unknown): string {
+  if (err instanceof BackgroundPrepareError) {
+    if (err.code === "type")
+      return t(DEFAULT_LOCALE, "settings.background.typeError");
+    if (err.code === "tooLarge")
+      return t(DEFAULT_LOCALE, "settings.background.tooLarge");
+  }
+  return t(DEFAULT_LOCALE, "settings.background.error");
+}
+
+/**
+ * Hintergrund-Feld für einen Slot (Intro/Outro) — bewusst aus dem 7a-LogoField
+ * generalisiert, aber **einmal** definiert und für beide Slots verwendet (keine
+ * Intro/Outro-Duplikation; das Logo-Feld bleibt unverändert). Eigene Mutations-
+ * Logik, getrennt vom „Speichern" der Form. Hat ein Bild → Vorschau (signierte
+ * URL bzw. optimistische objectURL) + „Entfernen"; sonst Upload-Control. Upload
+ * zweistufig & isolations-sicher wie das Logo: `prepareBackground` (JPEG) →
+ * Direktupload in den privaten Bucket `branding` unter `${businessId}/${slot}-bg.jpg`
+ * (Storage-RLS bindet das erste Segment an die business_id) → POST (ohne
+ * `business_id`, nur `{ storage_path, slot }`) → `router.refresh()`.
+ */
+function ImageUploadField({
+  businessId,
+  slot,
+  label,
+  initialPreviewUrl,
+}: {
+  businessId: string;
+  slot: BackgroundSlot;
+  label: string;
+  initialPreviewUrl: string | null;
+}) {
+  const router = useRouter();
+  const supabase = useMemo(() => createClient(), []);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const [previewUrl, setPreviewUrl] = useState<string | null>(initialPreviewUrl);
+  const [busy, setBusy] = useState<LogoBusy>("idle");
+  const [error, setError] = useState<string | null>(null);
+
+  // Lokale objectURL der optimistischen Vorschau — beim Server-Refresh/Unmount frei.
+  const localUrlRef = useRef<string | null>(null);
+  const revokeLocal = () => {
+    if (localUrlRef.current) {
+      URL.revokeObjectURL(localUrlRef.current);
+      localUrlRef.current = null;
+    }
+  };
+
+  // Server-Refresh liefert eine frische Signed-URL (oder null) → übernehmen,
+  // die optimistische objectURL wird damit überflüssig und freigegeben.
+  useEffect(() => {
+    revokeLocal();
+    setPreviewUrl(initialPreviewUrl);
+  }, [initialPreviewUrl]);
+
+  // Unmount-Bereinigung.
+  useEffect(() => () => revokeLocal(), []);
+
+  const path = backgroundStoragePath(businessId, slot);
+
+  const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // erlaubt erneute Auswahl derselben Datei
+    if (!file) return;
+    setError(null);
+
+    let blob: Blob;
+    try {
+      ({ blob } = await prepareBackground(file));
+    } catch (err) {
+      setError(backgroundErrorMessage(err));
+      return;
+    }
+
+    setBusy("uploading");
+    try {
+      const { error: upErr } = await supabase.storage
+        .from("branding")
+        .upload(path, blob, { contentType: "image/jpeg", upsert: true });
+      if (upErr) throw upErr;
+
+      const res = await fetch("/api/portal/settings/background", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ storage_path: path, slot }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+      // Optimistische Vorschau bis der Refresh die Signed-URL nachliefert.
+      revokeLocal();
+      const localUrl = URL.createObjectURL(blob);
+      localUrlRef.current = localUrl;
+      setPreviewUrl(localUrl);
+      router.refresh();
+    } catch (err) {
+      console.error(
+        `[background] Upload fehlgeschlagen (business ${businessId}, slot ${slot}):`,
+        err,
+      );
+      setError(t(DEFAULT_LOCALE, "settings.background.error"));
+    } finally {
+      setBusy("idle");
+    }
+  };
+
+  const handleRemove = async () => {
+    setError(null);
+    setBusy("removing");
+    try {
+      const res = await fetch("/api/portal/settings/background", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ slot }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      revokeLocal();
+      setPreviewUrl(null);
+      router.refresh();
+    } catch (err) {
+      console.error(
+        `[background] Entfernen fehlgeschlagen (business ${businessId}, slot ${slot}):`,
+        err,
+      );
+      setError(t(DEFAULT_LOCALE, "settings.background.error"));
+    } finally {
+      setBusy("idle");
+    }
+  };
+
+  const disabled = busy !== "idle";
+  const disabledStyle: React.CSSProperties = {
+    opacity: disabled ? 0.7 : 1,
+    pointerEvents: disabled ? "none" : "auto",
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <span style={captionStyle}>{label}</span>
+      <input
+        ref={inputRef}
+        type="file"
+        accept={BACKGROUND_ACCEPT_ATTR}
+        style={{ display: "none" }}
+        onChange={(e) => void handleFile(e)}
+      />
+
+      {previewUrl ? (
+        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+          {/* eslint-disable-next-line @next/next/no-img-element -- Signed-URL/objectURL, keine next/image-Optimierung. */}
+          <img
+            src={previewUrl}
+            alt={t(DEFAULT_LOCALE, "settings.background.preview")}
+            style={{
+              width: 160,
+              height: 90,
+              flexShrink: 0,
+              objectFit: "cover",
+              borderRadius: "var(--radius)",
+              border: "1px solid var(--border)",
+              background: "var(--surface-2)",
+            }}
+          />
+          <div
+            role="button"
+            tabIndex={0}
+            aria-disabled={disabled}
+            className="btn-outline"
+            style={disabledStyle}
+            onClick={() => void handleRemove()}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") void handleRemove();
+            }}
+          >
+            {t(DEFAULT_LOCALE, "settings.background.remove")}
+          </div>
+        </div>
+      ) : (
+        <div
+          role="button"
+          tabIndex={0}
+          aria-disabled={disabled}
+          className="btn-outline"
+          style={{ ...disabledStyle, alignSelf: "flex-start" }}
+          onClick={() => inputRef.current?.click()}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") inputRef.current?.click();
+          }}
+        >
+          {busy === "uploading"
+            ? t(DEFAULT_LOCALE, "settings.background.uploading")
+            : t(DEFAULT_LOCALE, "settings.background.upload")}
         </div>
       )}
 
