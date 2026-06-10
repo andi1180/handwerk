@@ -39,11 +39,13 @@ const NOTICE_TIMEOUT_MS = 4000;
  * Booklet-Assemblers**: quadratisches Kachel-Raster (Fotos und Videos gleich
  * groß), Reorder per Long-Press (dnd-kit), Löschen und **KI-Captions (6b)**.
  *
- * Captions: „Captions generieren" (Batch) füllt Medien OHNE Caption — sind
- * Kacheln ausgewählt, nur diese, sonst alle (6b.2). Das Bearbeiten/Neu-Generieren
- * pro Item läuft im Vollbild-Viewer (nicht in den engen Kacheln). Jede Kachel
- * trägt oben links **einen** Indikator: hat-Caption ⇒ Caption-Icon (Status);
- * fehlt ⇒ tappbarer Auswahl-Kreis (leer/gold) zum Vormerken für die Generierung.
+ * Captions: „Captions generieren" (Batch) beschriftet die **explizit
+ * ausgewählten** (unbeschrifteten) Kacheln (6b.3) — ohne Auswahl ist der Button
+ * deaktiviert. „Alle auswählen" merkt alle Medien ohne Caption vor, sodass „alle
+ * captionen" zwei Taps bleibt. Das Bearbeiten/Neu-Generieren pro Item läuft im
+ * Vollbild-Viewer (nicht in den engen Kacheln). Jede Kachel trägt oben links
+ * **einen** Indikator: hat-Caption ⇒ Caption-Icon (Status); fehlt ⇒ tappbarer
+ * Auswahl-Kreis (leer/gold) zum Vormerken für die Generierung.
  *
  * Daten kommen server-seitig (RLS, `sort_order` ASC, Signed-URLs) als Props; der
  * lokale State erlaubt optimistische Mutationen. Wechselt die Prop-Liste (z. B.
@@ -136,6 +138,14 @@ export function MediaList({
     });
   }, []);
 
+  /** Alle Kacheln OHNE Caption vormerken (ein Tap vor „Captions generieren"). */
+  const selectAll = useCallback(() => {
+    setSelectedIds(new Set(items.filter((m) => !m.caption).map((m) => m.id)));
+  }, [items]);
+
+  /** Auswahl komplett aufheben. */
+  const clearSelection = useCallback(() => setSelectedIds(new Set()), []);
+
   const handleDragEnd = useCallback(
     (event: DragEndEvent) => {
       setTimeout(() => {
@@ -205,20 +215,23 @@ export function MediaList({
   );
 
   /**
-   * Batch: Captions generieren. Sind unbeschriftete Kacheln ausgewählt, nur
-   * diese; sonst alle ohne Caption. Nach Erfolg wird die Auswahl zurückgesetzt.
+   * Batch: Captions generieren — beschriftet **ausschließlich** die ausgewählten
+   * (unbeschrifteten) Kacheln. Die Auswahl ist explizit (kein „leer ⇒ alle" mehr
+   * im UI); der Button ist ohne Auswahl deaktiviert. Nach Erfolg wird die Auswahl
+   * zurückgesetzt. Es werden immer konkrete `ids` gesendet.
    */
   const handleGenerate = useCallback(() => {
-    setGenerating(true);
     const ids = items
       .filter((m) => !m.caption && selectedIds.has(m.id))
       .map((m) => m.id);
+    if (ids.length === 0) return; // nichts ausgewählt → kein Request
+    setGenerating(true);
     void (async () => {
       try {
         const res = await fetch(`/api/portal/orders/${orderId}/captions`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(ids.length > 0 ? { ids } : {}),
+          body: JSON.stringify({ ids }),
         });
         if (!res.ok) throw new Error("captions_failed");
         const data = (await res.json()) as {
@@ -258,12 +271,13 @@ export function MediaList({
 
   const missingCount = items.filter((m) => !m.caption).length;
   const selectedCount = selectedIds.size;
-  const disableGenerate = generating || missingCount === 0;
+  // Generieren nur mit expliziter Auswahl (kein „leer ⇒ alle" mehr).
+  const disableGenerate = generating || selectedCount === 0;
 
   return (
     <div>
-      {/* Mutations-Kopf (Reorder-/Auswahl-Hinweis + Batch-Captions) — im
-          Abgeschlossen-Modus ausgeblendet. */}
+      {/* Mutations-Kopf (Reorder-/Auswahl-Hinweis + Alle-auswählen + Batch-Captions)
+          — im Abgeschlossen-Modus ausgeblendet. */}
       {!readOnly ? (
         <div
           style={{
@@ -279,25 +293,50 @@ export function MediaList({
               ? t(DEFAULT_LOCALE, "captions.selected", { count: selectedCount })
               : t(DEFAULT_LOCALE, "assembler.reorderHint")}
           </p>
-          <button
-            type="button"
-            className="btn-dark"
-            onClick={handleGenerate}
-            disabled={disableGenerate}
-            style={{
-              flexShrink: 0,
-              opacity: disableGenerate ? 0.6 : 1,
-              cursor: disableGenerate ? "default" : "pointer",
-            }}
+          <div
+            style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}
           >
-            {generating
-              ? t(DEFAULT_LOCALE, "captions.generating")
-              : selectedCount > 0
-                ? t(DEFAULT_LOCALE, "captions.generateSelected", {
-                    count: selectedCount,
-                  })
-                : t(DEFAULT_LOCALE, "captions.generate")}
-          </button>
+            {/* Toggle: nichts ausgewählt ⇒ „Alle auswählen" (alle ohne Caption);
+                etwas ausgewählt ⇒ „Auswahl aufheben". So bleibt „alle captionen"
+                = zwei Taps. Versteckt, wenn nichts zu beschriften ist. */}
+            {missingCount > 0 ? (
+              <button
+                type="button"
+                onClick={selectedCount > 0 ? clearSelection : selectAll}
+                style={{
+                  padding: "8px 10px",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  color: "var(--text-secondary)",
+                  background: "transparent",
+                  border: "none",
+                  cursor: "pointer",
+                }}
+              >
+                {selectedCount > 0
+                  ? t(DEFAULT_LOCALE, "captions.deselectAll")
+                  : t(DEFAULT_LOCALE, "captions.selectAll")}
+              </button>
+            ) : null}
+            <button
+              type="button"
+              className="btn-dark"
+              onClick={handleGenerate}
+              disabled={disableGenerate}
+              style={{
+                opacity: disableGenerate ? 0.6 : 1,
+                cursor: disableGenerate ? "default" : "pointer",
+              }}
+            >
+              {generating
+                ? t(DEFAULT_LOCALE, "captions.generating")
+                : selectedCount > 0
+                  ? t(DEFAULT_LOCALE, "captions.generateSelected", {
+                      count: selectedCount,
+                    })
+                  : t(DEFAULT_LOCALE, "captions.generate")}
+            </button>
+          </div>
         </div>
       ) : null}
 

@@ -101,6 +101,7 @@ export const de = {
     discard: "Verwerfen",
     uploading: "lädt…",
     error: "Fehler",
+    uploadError: "Upload fehlgeschlagen. Bitte erneut.",
     retry: "Erneut",
   },
   assembler: {
@@ -123,6 +124,8 @@ export const de = {
     empty: "Keine Bildunterschrift",
     select: "Für Caption auswählen",
     selected: "{count} ausgewählt",
+    selectAll: "Alle auswählen",
+    deselectAll: "Auswahl aufheben",
     error: "Aktion fehlgeschlagen. Bitte erneut versuchen.",
   },
   finalize: {

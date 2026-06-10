@@ -78,13 +78,18 @@ export async function POST(
   let body: unknown;
   try {
     body = await request.json();
-  } catch {
+  } catch (err) {
+    console.error(`[media POST] invalid_body (order ${orderId}):`, err);
     return NextResponse.json({ error: "invalid_body" }, { status: 400 });
   }
   const payload = (body ?? {}) as Record<string, unknown>;
 
   // media_type — 'photo' (4b) oder 'video' (4c).
   if (payload.media_type !== "photo" && payload.media_type !== "video") {
+    console.error(
+      `[media POST] invalid_media_type (order ${orderId}):`,
+      payload.media_type,
+    );
     return NextResponse.json({ error: "invalid_media_type" }, { status: 400 });
   }
   const mediaType = payload.media_type;
@@ -93,6 +98,10 @@ export async function POST(
   const durationSeconds =
     mediaType === "video" ? positiveNumberOrNull(payload.duration_seconds) : null;
   if (mediaType === "video" && durationSeconds === null) {
+    console.error(
+      `[media POST] invalid_duration (order ${orderId}):`,
+      payload.duration_seconds,
+    );
     return NextResponse.json({ error: "invalid_duration" }, { status: 400 });
   }
 
@@ -101,6 +110,9 @@ export async function POST(
     typeof payload.storage_path === "string" ? payload.storage_path : "";
   const requiredPrefix = `${businessId}/${order.id}/`;
   if (!storagePath.startsWith(requiredPrefix)) {
+    console.error(
+      `[media POST] invalid_path (order ${orderId}): got "${storagePath}", expected prefix "${requiredPrefix}"`,
+    );
     return NextResponse.json({ error: "invalid_path" }, { status: 400 });
   }
 
@@ -133,6 +145,10 @@ export async function POST(
     .single<InsertedMedia>();
 
   if (error || !data) {
+    console.error(
+      `[media POST] insert_failed (order ${orderId}, path ${storagePath}):`,
+      error,
+    );
     return NextResponse.json({ error: "insert_failed" }, { status: 500 });
   }
 

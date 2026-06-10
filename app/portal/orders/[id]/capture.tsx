@@ -53,6 +53,12 @@ function delay(ms: number): Promise<void> {
 }
 
 /**
+ * Dauerhafter (nicht erneut versuchbarer) Fehler — z. B. HTTP 4xx vom Metadaten-
+ * POST (ungültiger Body/Pfad). Ein Retry würde nichts ändern, daher sofort werfen.
+ */
+class PermanentError extends Error {}
+
+/**
  * Lädt den Blob direkt in den privaten Bucket `order-media` (BROWSER-Client,
  * authenticated → Storage-RLS bindet das erste Pfad-Segment an die business_id).
  * Bei Fehlern bis zu 2 Retries mit kurzem Backoff; danach wirft die Funktion.
@@ -76,6 +82,44 @@ async function uploadWithRetry(
     }
   }
   throw lastError ?? new Error("upload_failed");
+}
+
+/**
+ * Schickt die Metadaten an den Route Handler — **zweiter** Schritt des Uploads.
+ * Transiente Fehler (Netzwerk-Ausfall, HTTP 5xx) werden bis zu 2× mit Backoff
+ * wiederholt; dauerhafte 4xx (ungültiger Body/Pfad) werfen sofort `PermanentError`
+ * (Retry zwecklos). Nach Ausschöpfen der Versuche wirft die Funktion.
+ */
+async function postMetadataWithRetry(
+  orderId: string,
+  metadata: Record<string, unknown>,
+): Promise<void> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < UPLOAD_MAX_ATTEMPTS; attempt++) {
+    try {
+      const res = await fetch(`/api/portal/orders/${orderId}/media`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(metadata),
+      });
+      if (res.ok) return;
+      // 4xx ⇒ dauerhaft (Body/Pfad), nicht erneut versuchen.
+      if (res.status >= 400 && res.status < 500) {
+        const detail = await res.text().catch(() => "");
+        throw new PermanentError(
+          `HTTP ${res.status}${detail ? `: ${detail}` : ""}`,
+        );
+      }
+      lastError = new Error(`HTTP ${res.status}`); // 5xx → transient
+    } catch (err) {
+      if (err instanceof PermanentError) throw err;
+      lastError = err; // Netzwerkfehler → transient
+    }
+    if (attempt < UPLOAD_MAX_ATTEMPTS - 1) {
+      await delay(UPLOAD_BACKOFF_MS * (attempt + 1));
+    }
+  }
+  throw lastError ?? new Error("metadata_post_failed");
 }
 
 /**
@@ -133,17 +177,23 @@ export function Capture({
           it.id === item.id ? { ...it, status: "uploading" } : it,
         ),
       );
+      const markError = () =>
+        setItems((prev) =>
+          prev.map((it) =>
+            it.id === item.id ? { ...it, status: "error" } : it,
+          ),
+        );
+      const ctx = `order ${orderId}, ${item.storagePath}`;
+
+      // Schritt 0 — Body je Medientyp aufbereiten: Foto wird komprimiert (Maße),
+      // Video unverändert hochgeladen (Dauer als Metadatum).
+      let blob: Blob;
+      let contentType: string;
+      let metadata: Record<string, unknown>;
       try {
-        // Body je Medientyp: Foto wird komprimiert (Maße), Video unverändert
-        // hochgeladen (Dauer als Metadatum). Storage-Upload zweistufig wie 4b.
-        let metadata: Record<string, unknown>;
         if (item.mediaType === "video") {
-          await uploadWithRetry(
-            supabase,
-            item.storagePath,
-            item.file,
-            item.file.type || "video/mp4",
-          );
+          blob = item.file;
+          contentType = item.file.type || "video/mp4";
           metadata = {
             storage_path: item.storagePath,
             media_type: "video",
@@ -152,12 +202,8 @@ export function Capture({
           };
         } else {
           const compressed = await compressImage(item.file);
-          await uploadWithRetry(
-            supabase,
-            item.storagePath,
-            compressed.blob,
-            "image/jpeg",
-          );
+          blob = compressed.blob;
+          contentType = "image/jpeg";
           metadata = {
             storage_path: item.storagePath,
             media_type: "photo",
@@ -166,28 +212,49 @@ export function Capture({
             height: compressed.height,
           };
         }
-
-        const res = await fetch(`/api/portal/orders/${orderId}/media`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(metadata),
-        });
-        if (!res.ok) throw new Error("metadata_failed");
-
-        // Erfolg: optimistisches Item entfernen, Server-Liste neu laden.
-        setItems((prev) => {
-          const done = prev.find((it) => it.id === item.id);
-          if (done) URL.revokeObjectURL(done.objectUrl);
-          return prev.filter((it) => it.id !== item.id);
-        });
-        router.refresh();
-      } catch {
-        setItems((prev) =>
-          prev.map((it) =>
-            it.id === item.id ? { ...it, status: "error" } : it,
-          ),
-        );
+      } catch (err) {
+        console.error(`[capture] Bildaufbereitung fehlgeschlagen (${ctx}):`, err);
+        markError();
+        return;
       }
+
+      // Schritt 1 — Storage-Upload (Retry in uploadWithRetry). Schlägt das fehl,
+      // liegt KEINE Datei verlässlich im Bucket ⇒ kein Cleanup nötig.
+      try {
+        await uploadWithRetry(supabase, item.storagePath, blob, contentType);
+      } catch (err) {
+        console.error(`[capture] Storage-Upload fehlgeschlagen (${ctx}):`, err);
+        markError();
+        return;
+      }
+
+      // Schritt 2 — Metadaten-POST (eigener Retry für transiente Fehler).
+      // Endgültiger Fehler ⇒ die bereits hochgeladene Datei wieder entfernen,
+      // damit kein verwaistes File bleibt und ein erneuter Versuch sauber startet.
+      try {
+        await postMetadataWithRetry(orderId, metadata);
+      } catch (err) {
+        console.error(`[capture] Metadaten-POST fehlgeschlagen (${ctx}):`, err);
+        const { error: removeError } = await supabase.storage
+          .from("order-media")
+          .remove([item.storagePath]);
+        if (removeError) {
+          console.error(
+            `[capture] Orphan-Cleanup fehlgeschlagen (${ctx}):`,
+            removeError,
+          );
+        }
+        markError();
+        return;
+      }
+
+      // Erfolg: optimistisches Item entfernen, Server-Liste neu laden.
+      setItems((prev) => {
+        const done = prev.find((it) => it.id === item.id);
+        if (done) URL.revokeObjectURL(done.objectUrl);
+        return prev.filter((it) => it.id !== item.id);
+      });
+      router.refresh();
     },
     [supabase, orderId, router],
   );
@@ -556,7 +623,7 @@ function PendingRow({
           }}
         >
           {isError
-            ? t(DEFAULT_LOCALE, "capture.error")
+            ? t(DEFAULT_LOCALE, "capture.uploadError")
             : t(DEFAULT_LOCALE, "capture.uploading")}
         </div>
       </div>

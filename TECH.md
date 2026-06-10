@@ -502,4 +502,32 @@ Neu: `captions.select` (Auswahl-Aria-Label), `captions.selected` ({count}), `cap
 
 ---
 
+## Caption-Auswahl explizit + Upload-Härtung (Schritt 6b.3)
+
+Zwei kleine Robustheits-/UX-Fixes — **keine neuen Konzepte, keine Migration**.
+
+### Caption-Auswahl jetzt explizit ([media-list.tsx](app/portal/orders/[id]/media-list.tsx))
+
+Das in 6b.2 noch enthaltene „leer ⇒ alle"-Verhalten **entfällt im UI**: „Captions generieren" ist **deaktiviert (grau, nicht klickbar)**, solange keine Kachel ausgewählt ist (`disableGenerate = generating || selectedCount === 0`), und `handleGenerate` sendet **immer** konkrete `ids` (bei leerer Auswahl gar kein Request).
+
+- Neuer **„Alle auswählen"**-Toggle neben dem Generieren-Button: ohne Auswahl markiert er alle Medien **ohne** Caption (`selectAll`), mit Auswahl heißt er **„Auswahl aufheben"** (`clearSelection`). So bleibt „alle captionen" = **zwei Taps** (Alle auswählen → generieren). Der Toggle ist versteckt, wenn nichts zu beschriften ist (`missingCount === 0`).
+- Der **Batch-Endpoint** ([captions/route.ts](app/api/portal/orders/[id]/captions/route.ts)) bleibt **unverändert**; sein „leer/fehlend ⇒ alle"-Fallback wird vom UI nicht mehr getriggert (harmlos, als Sicherheitsnetz belassen).
+
+### Upload-Härtung ([capture.tsx](app/portal/orders/[id]/capture.tsx))
+
+`runUpload` ist in **drei klar getrennte Schritte** zerlegt — Aufbereitung (Foto komprimieren), **Storage-Upload**, **Metadaten-POST** —, jeder mit eigenem `try/catch` und präzisem `console.error` (welcher Schritt + echte Fehlermeldung + `order_id`/`storage_path`). Der Fehlerhinweis im Listen-Item ist konkreter (`capture.uploadError` „Upload fehlgeschlagen. Bitte erneut.").
+
+- **Retry auf beiden Wegen:** Nicht nur der Storage-Upload (`uploadWithRetry`), auch der Metadaten-POST hat jetzt eigenes Retry (`postMetadataWithRetry`) — bis zu **2 Retries mit Backoff** (`UPLOAD_MAX_ATTEMPTS`/`UPLOAD_BACKOFF_MS`, geteilt). Transient sind Netzwerk-Ausfälle und **HTTP 5xx**; **HTTP 4xx** (ungültiger Body/Pfad) werfen sofort `PermanentError` (Retry zwecklos).
+- **Orphan-Cleanup:** War der Storage-Upload erfolgreich, der Metadaten-POST aber **endgültig** fehlgeschlagen, wird die hochgeladene Datei per `storage.remove([path])` wieder entfernt — kein verwaistes File, ein erneuter Versuch (`Erneut`) startet sauber (zudem `upsert: true` auf dem Upload).
+
+### Server-Logging ([media/route.ts](app/api/portal/orders/[id]/media/route.ts))
+
+`console.error` mit Kontext (`order_id`, Schritt, bei `invalid_path` zusätzlich erwarteter/erhaltener Pfad, bei `insert_failed` das Supabase-`error`) an allen Fehler-Ausgängen → erscheint in den Vercel-Logs und macht den vorher stillen `metadata_failed`-Pfad diagnostizierbar.
+
+### i18n
+
+Neu: `captions.selectAll`, `captions.deselectAll`, `capture.uploadError`.
+
+---
+
 > Nächste Migration: **0003**.
