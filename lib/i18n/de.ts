@@ -61,4 +61,16 @@ export const de = {
     nachher: "Nachher",
     prozess: "Prozess",
   },
+  capture: {
+    photo: "Foto aufnehmen",
+    keyword: "Stichwort",
+    keywordOptional: "Stichwort (optional)",
+    tag: "Markierung",
+    tagOptional: "Markierung (optional)",
+    save: "Speichern",
+    discard: "Verwerfen",
+    uploading: "lädt…",
+    error: "Fehler",
+    retry: "Erneut",
+  },
 } as const;

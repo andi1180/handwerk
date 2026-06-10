@@ -206,6 +206,37 @@ Datei: [supabase/migrations/0002_storage.sql](supabase/migrations/0002_storage.s
 
 Neue Schlüssel in [lib/i18n/de.ts](lib/i18n/de.ts): `orderDetail.back`/`.media`/`.noMedia` und `mediaTag.vorher`/`.nachher`/`.prozess`. Keine Inline-Strings in der UI.
 
+## Foto-Capture + Upload (Schritt 4b)
+
+Aufnahme und Upload von **Fotos** auf der Detailseite. **Nur Foto** — Video folgt in 4c. **Mobile-first**: native Kamera, große Tap-Targets, Hände am Werkstück.
+
+### Zweistufiger Upload (isolations-sicher)
+
+Der Upload ist bewusst zweigeteilt, damit die große Binärdatei **nicht** durch einen Route Handler fließt, die Mandanten-Isolation aber dennoch erzwungen bleibt:
+
+1. **Datei → Storage (direkt, BROWSER-Client).** Die komprimierte JPEG wird vom Client direkt in den privaten Bucket `order-media` geladen, unter dem Pfad `{business_id}/{order_id}/{uuid}.jpg`. Die Storage-RLS aus [0002](supabase/migrations/0002_storage.sql) bindet das **erste Pfad-Segment an die `business_id`** des Nutzers — ein fremder Pfad wird vom Storage abgelehnt.
+2. **Metadaten → Route Handler.** Erst nach erfolgreichem Storage-Upload geht ein `POST` an [app/api/portal/orders/[id]/media/route.ts](app/api/portal/orders/[id]/media/route.ts) mit `{ storage_path, media_type, keyword, tag, width, height }` — **ohne `business_id`**.
+
+**ISOLATION (mehrstufig) im Route Handler:** `getCurrentBusiness` (Session) → kein User/Betrieb ⇒ 401/403. Die Order wird über den **AUTHENTICATED Server-Client** (RLS) geladen; fremde/fehlende `order_id` ⇒ 404. Die `business_id` stammt **aus der geladenen Order** (= Session-Betrieb), nie aus dem Body. Validiert wird: `media_type ∈ {'photo'}`, `storage_path` beginnt mit `${business_id}/${order_id}/`, `tag ∈ {vorher,nachher,prozess}` (oder null). `sort_order = coalesce(max(sort_order),0)+1` je Order. Insert über den AUTHENTICATED Client (RLS-Policy `order_media_all`), kein `service_role`.
+
+### Client-Kompression ([lib/media/](lib/media/))
+
+- [constants.ts](lib/media/constants.ts): `MAX_IMAGE_DIM = 1500` (längste Kante), `JPEG_QUALITY = 0.8`. Video-Limit + Konfigurierbarkeit später.
+- [compress.ts](lib/media/compress.ts): `compressImage(file)` dekodiert (EXIF-Orientierung via `createImageBitmap({ imageOrientation: "from-image" })`), skaliert seitenverhältnis-treu auf `MAX_IMAGE_DIM`, zeichnet auf ein Canvas und exportiert als JPEG → `{ blob, width, height }`. Spart Upload-Volumen.
+
+### Capture-Komponente ([app/portal/orders/[id]/capture.tsx](app/portal/orders/[id]/capture.tsx), Client)
+
+Props `businessId` + `orderId`. „Foto aufnehmen" löst ein verstecktes `<input type="file" accept="image/*" capture="environment">` (Ref). Danach: Vorschau (lokale `objectURL`), optionales **Stichwort** (`.form-input`), optionaler **Tag** (Vorher/Nachher/Prozess, Toggle), „Speichern"/„Verwerfen". Kein `<form>` — alles `div + onClick`.
+
+- **Optimistische Liste + `router.refresh()`:** „Speichern" legt sofort ein optimistisches Item (lokales Thumbnail, Status „lädt…") an und gibt die UI frei (nächste Aufnahme sofort möglich). Im Hintergrund: komprimieren → Storage-Upload → Metadaten-POST. Bei 2xx wird das Item entfernt und `router.refresh()` überführt es in die server-gerenderte Liste (Signed-URLs wie 4a).
+- **In-Memory-Retry-Queue:** mehrere Items parallel (kein IndexedDB). Der Storage-Upload macht bei Fehlern bis zu **2 Retries mit kurzem Backoff** (`upsert: true` überschreibt einen halb geladenen Pfad); danach Status „Fehler" + „Erneut"-Button, der denselben Pfad erneut versucht. `objectURL`s werden bei Erfolg/Verwerfen sowie beim Unmount freigegeben.
+
+Die **Detailseite bleibt Server Component**; sie bindet `<Capture>` in der Medien-Sektion oberhalb der server-gerenderten Liste ein.
+
+### i18n
+
+Neuer Block `capture.*` in [lib/i18n/de.ts](lib/i18n/de.ts): `photo`, `keyword`, `keywordOptional`, `tag`, `tagOptional`, `save`, `discard`, `uploading`, `error`, `retry`.
+
 ---
 
 > Nächste Migration: **0003**.

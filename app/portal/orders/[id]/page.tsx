@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { DEFAULT_LOCALE, t } from "@/lib/i18n";
 import { OrderStatusBadge } from "@/components/order-status-badge";
+import { Capture } from "./capture";
 import {
   getOrderById,
   getOrderMedia,
@@ -147,6 +148,11 @@ export default async function OrderDetailPage({
         <h2 style={{ margin: "0 0 12px", fontSize: 16, fontWeight: 700 }}>
           {t(DEFAULT_LOCALE, "orderDetail.media")}
         </h2>
+
+        {/* Foto-Capture (Client): zeigt Pending-Items, bis router.refresh()
+            sie in die unten server-gerenderte Liste überführt. */}
+        <Capture businessId={order.business_id} orderId={order.id} />
+
         {mediaWithUrls.length === 0 ? (
           <div
             className="card"
