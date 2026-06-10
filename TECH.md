@@ -530,6 +530,52 @@ Neu: `captions.selectAll`, `captions.deselectAll`, `capture.uploadError`.
 
 ---
 
+## Logo-Upload (Schritt 7a)
+
+Erste Slice der **Desktop-Business-Config** (Schritt 7): ein Betrieb lädt sein Logo hoch, sieht eine Vorschau und kann es entfernen. **Desktop-first** (Settings = einmalige Einrichtung pro Betrieb). **Erste neue Migration seit 0002** (`0003`). KEIN Intro/Outro (7b), KEINE Backgrounds (7c).
+
+### Storage-Bucket & Policies (Migration 0003)
+
+Datei: [supabase/migrations/0003_branding.sql](supabase/migrations/0003_branding.sql) — **manuell** im SQL-Editor anwenden.
+
+- **Bucket `branding`** (`public = false`): privat, `on conflict do nothing` (idempotent).
+- **Warum privat + Signed-URL statt public-read** (als Kommentar in der Migration): Architektur-Konsistenz mit `order-media` — **ein** Zugriffsmodell, **eine** Isolations-Grenze (erstes Pfad-Segment = `business_id`). Das öffentliche Booklet `/b/[token]` rendert server-seitig über `service_role` und signiert das Logo bei **jedem** Request frisch, der Ablauf ist also irrelevant. Public-read würde einen zweiten Bucket-Typ einführen, den man bei jeder Isolations-Frage mitdenken müsste; der Logo-Wert rechtfertigt das nicht.
+- **Tenant-skopierte Policies auf `storage.objects`** (nur `authenticated`, Muster exakt wie 0002): `branding_select`/`_insert`/`_update`/`_delete`, erlaubt wenn `bucket_id = 'branding'` **und** der Nutzer Mitglied des Betriebs im ersten Pfad-Segment ist (`(storage.foldername(name))[1] = bu.business_id::text`). Die **`_update`-Policy ist nötig**, weil der Upload mit `upsert = true` ein vorhandenes Objekt überschreibt. **Kein `anon`, kein PUBLIC**; `service_role` umgeht RLS (für das spätere Booklet-Rendering) → keine Policy nötig.
+- **Keine Schema-Änderung:** `logo_url` lebt im bestehenden `businesses.branding`-jsonb (keine neue Spalte).
+- Verifikation: [supabase/verify/0003_branding_checks.sql](supabase/verify/0003_branding_checks.sql) — (1) Bucket existiert + privat, (2) genau 4 `branding_*`-Policies, alle nur `authenticated`, (3) keine `anon`-Policy auf dem Bucket (0 Zeilen).
+
+### Client-Aufbereitung ([lib/media/logo.ts](lib/media/logo.ts), NEU)
+
+`compressImage` wird **nicht** wiederverwendet (JPEG-Export verlöre den Alpha-Kanal). `prepareLogo(file)`: akzeptiert nur `image/png|jpeg|webp` (sonst `LogoPrepareError("type")`), lehnt > 5 MB am Input ab (`"tooLarge"`), skaliert seitenverhältnis-treu auf max. **512 px** (längste Kante) via Canvas und exportiert als **PNG** (Alpha bleibt) → `{ blob }`. Der typisierte `LogoPrepareError` (`type`/`tooLarge`/`decode`) wird in der Form auf i18n gemappt; `LOGO_ACCEPT_ATTR` (aus `ACCEPTED_LOGO_TYPES`) speist das `accept`-Attribut, damit es nicht driftet.
+
+### Zweistufiger Upload (isolations-sicher wie 4b)
+
+1. **Datei → Storage (direkt, BROWSER-Client):** die aufbereitete PNG geht direkt in den Bucket `branding` unter dem **fixen** Pfad `${business_id}/logo.png` mit `upsert = true` (überschreibt das vorige Logo). Die Storage-RLS aus 0003 bindet das erste Segment an die `business_id`.
+2. **Metadaten → Route Handler:** `POST /api/portal/settings/logo` mit `{ storage_path }` — **ohne `business_id`**.
+
+### Route Handler ([app/api/portal/settings/logo/route.ts](app/api/portal/settings/logo/route.ts))
+
+AUTHENTICATED Client, `getCurrentBusiness` → 401/403. `business_id` **aus der Session**.
+
+- **`POST`:** validiert `storage_path === ${business_id}/logo.png` (sonst **400 `invalid_path`**). **READ-MERGE-WRITE:** lädt das aktuelle `branding`-jsonb, setzt **nur** `logo_url = storage_path`, schreibt es über `businesses_update` (RLS) zurück; gibt das neue `branding`.
+- **`DELETE`:** `storage.remove(['${business_id}/logo.png'])` (Remove-Fehler werden geloggt, brechen aber nicht hart ab — die `branding`-Referenz ist die UI-Quelle der Wahrheit), danach `branding.logo_url` per READ-MERGE-WRITE auf `null`.
+
+### KRITISCH: Settings-PATCH logo-sicher ([app/api/portal/settings/route.ts](app/api/portal/settings/route.ts))
+
+Der 5a-`PATCH` überschrieb `branding` vollständig und hätte `logo_url` damit **weggeschrieben**. Jetzt **READ-MERGE-WRITE**: aktuelles `branding` laden, die vier 5a-Form-Felder (`primary_color`/`secondary_color`/`font`/`logo_per_page`) mergen, `logo_url` (und evtl. weitere Keys) **beibehalten**. **Symmetrisch:** die Logo-Endpoints fassen **nur** `logo_url` an, der Settings-`PATCH` **nur** seine Felder. Der jsonb-Guard `asRecord` liegt jetzt geteilt in [lib/settings/options.ts](lib/settings/options.ts) (genutzt von `getCurrentBusiness` + beiden Route-Handlern, keine Duplikate).
+
+### Typen & Seite
+
+- [lib/auth/current-business.ts](lib/auth/current-business.ts): `BusinessBranding` um `logo_url: string | null` (Default `null` via `asTrimmedOrNull`), `DEFAULT_BRANDING` ergänzt — typsicher, kein `any`.
+- [app/portal/settings/page.tsx](app/portal/settings/page.tsx) (Server Component): erzeugt bei gesetztem `logo_url` eine `createSignedUrl(path, 3600)` und reicht sie als Prop `logoPreviewUrl` an die Form.
+- [app/portal/settings/settings-form.tsx](app/portal/settings/settings-form.tsx): neue `.card`-Gruppe „Logo" mit `<LogoField>` (eigene Mutations-Logik, **getrennt** vom „Speichern" der Form). Vorschau (signierte URL bzw. optimistische `objectURL` bis zum Refresh) + „Entfernen", sonst Upload-Control (verstecktes `<input type="file">`, `div + onClick`, **kein `<form>`**). Upload → `prepareLogo` → Storage-Upload → `POST` → `router.refresh()`. Der `logo_per_page`-Toggle (5a) bleibt unverändert in der Branding-Gruppe.
+
+### i18n
+
+Neuer Block `settings.logo.*` in [lib/i18n/de.ts](lib/i18n/de.ts): `title`, `upload`, `uploading`, `remove`, `removing`, `preview`, `error`, `typeError`, `tooLarge`.
+
+---
+
 ## Schritt-8/9-Vorgaben (Render: Web-Story + Reel)
 
 Verbindlich für Schritt 8 (Web-Story-Render) und Schritt 9 (Reel/FFmpeg + Auslieferung).
@@ -559,4 +605,4 @@ NEU (steht in keiner MD — hier verbindlich):
 
 ---
 
-> Nächste Migration: **0003**.
+> Nächste Migration: **0004**.

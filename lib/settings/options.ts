@@ -49,10 +49,22 @@ export function isDeliveryMode(value: unknown): value is DeliveryMode {
   );
 }
 
-/** Standard-Branding, falls der Betrieb (noch) nichts gesetzt hat (logo_url folgt in 5b). */
+/** Standard-Branding, falls der Betrieb (noch) nichts gesetzt hat. */
 export const DEFAULT_BRANDING = {
   primary_color: "#C4A95B",
   secondary_color: "#3A3A3A",
   font: FONT_OPTIONS[0],
   logo_per_page: false,
+  logo_url: null,
 } as const;
+
+/**
+ * jsonb-Wert → Record (alles andere → leeres Objekt). Geteilt von
+ * `getCurrentBusiness` (Normalisierung) und den Settings-Route-Handlern
+ * (READ-MERGE-WRITE des branding-jsonb), damit jsonb-Zugriffe sicher sind.
+ */
+export function asRecord(value: unknown): Record<string, unknown> {
+  return typeof value === "object" && value !== null
+    ? (value as Record<string, unknown>)
+    : {};
+}

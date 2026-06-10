@@ -87,6 +87,17 @@ export const de = {
     errColor: "Bitte gültige Hex-Farben angeben (z. B. #C4A95B).",
     errVideo: "Die Videolänge muss zwischen {min} und {max} Sekunden liegen.",
     errRetention: "Die Aufbewahrung muss zwischen {min} und {max} Monaten liegen.",
+    logo: {
+      title: "Logo",
+      upload: "Logo hochladen",
+      uploading: "Lädt hoch…",
+      remove: "Entfernen",
+      removing: "Entferne…",
+      preview: "Logo-Vorschau",
+      error: "Logo konnte nicht gespeichert werden. Bitte erneut versuchen.",
+      typeError: "Nur PNG, JPEG oder WebP sind erlaubt.",
+      tooLarge: "Die Datei ist zu groß (max. 5 MB).",
+    },
   },
   capture: {
     photo: "Foto aufnehmen",

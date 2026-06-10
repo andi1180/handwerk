@@ -4,6 +4,7 @@ import { getCurrentBusiness } from "@/lib/auth/current-business";
 import {
   RETENTION_MONTHS,
   VIDEO_SECONDS,
+  asRecord,
   isDeliveryMode,
   isFontOption,
   isHexColor,
@@ -96,9 +97,21 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: "invalid_retention" }, { status: 400 });
   }
 
-  // jsonb-Spalten werden vollständig überschrieben (in 5a gibt es keine weiteren
-  // Keys; logo_url folgt in 5b und wird dann hier einbezogen).
+  // READ-MERGE-WRITE des branding-jsonb: nur die 5a-Form-Felder schreiben,
+  // `logo_url` (und evtl. weitere Keys) BEIBEHALTEN. Das Logo wird ausschließlich
+  // über /api/portal/settings/logo gepflegt — symmetrische Trennung, dieser
+  // Handler fasst logo_url NIE an (sonst würde Speichern das Logo wegschreiben).
+  const { data: current, error: readError } = await supabase
+    .from("businesses")
+    .select("branding")
+    .eq("id", business.id)
+    .single<{ branding: unknown }>();
+  if (readError || !current) {
+    return NextResponse.json({ error: "update_failed" }, { status: 500 });
+  }
+
   const branding = {
+    ...asRecord(current.branding),
     primary_color: payload.primary_color,
     secondary_color: payload.secondary_color,
     font: payload.font,

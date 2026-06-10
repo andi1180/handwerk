@@ -3,6 +3,7 @@ import {
   DEFAULT_BRANDING,
   RETENTION_MONTHS,
   VIDEO_SECONDS,
+  asRecord,
   isDeliveryMode,
   isFontOption,
   isHexColor,
@@ -10,12 +11,14 @@ import {
   type FontOption,
 } from "@/lib/settings/options";
 
-/** Branding eines Betriebs (aus `businesses.branding` jsonb; logo_url folgt 5b). */
+/** Branding eines Betriebs (aus `businesses.branding` jsonb). */
 export type BusinessBranding = {
   primary_color: string;
   secondary_color: string;
   font: FontOption;
   logo_per_page: boolean;
+  /** Storage-Pfad des Logos im privaten Bucket `branding` (Schritt 7a), sonst null. */
+  logo_url: string | null;
 };
 
 /** Betriebs-Einstellungen (aus `businesses.settings` jsonb). */
@@ -53,13 +56,6 @@ type BusinessRow = {
   retention_months: number | null;
 };
 
-/** jsonb → Objekt (alles andere → leeres Objekt), damit Zugriffe sicher sind. */
-function asRecord(value: unknown): Record<string, unknown> {
-  return typeof value === "object" && value !== null
-    ? (value as Record<string, unknown>)
-    : {};
-}
-
 /** Getrimmter String oder `null` (für optionale Link-/Handle-Felder). */
 function asTrimmedOrNull(value: unknown): string | null {
   if (typeof value !== "string") return null;
@@ -82,6 +78,7 @@ function normalizeBranding(raw: unknown): BusinessBranding {
       typeof b.logo_per_page === "boolean"
         ? b.logo_per_page
         : DEFAULT_BRANDING.logo_per_page,
+    logo_url: asTrimmedOrNull(b.logo_url),
   };
 }
 

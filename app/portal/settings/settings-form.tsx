@@ -1,9 +1,16 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { DEFAULT_LOCALE, t } from "@/lib/i18n";
+import { createClient } from "@/lib/supabase/client";
 import type { CurrentBusiness } from "@/lib/auth/current-business";
+import {
+  LOGO_ACCEPT_ATTR,
+  LogoPrepareError,
+  prepareLogo,
+  type PreparedLogo,
+} from "@/lib/media/logo";
 import {
   DELIVERY_MODES,
   FONT_OPTIONS,
@@ -51,7 +58,14 @@ const groupTitleStyle: React.CSSProperties = {
  * Felder sind in `.card`-Blöcke gruppiert; Client-Validierung deckt sich mit
  * der Server-Validierung (Ranges, Hex, nicht-leerer Name).
  */
-export function SettingsForm({ business }: { business: CurrentBusiness }) {
+export function SettingsForm({
+  business,
+  logoPreviewUrl,
+}: {
+  business: CurrentBusiness;
+  /** Server-seitig signierte Logo-Vorschau (privater Bucket), sonst null. */
+  logoPreviewUrl: string | null;
+}) {
   const router = useRouter();
 
   const [name, setName] = useState(business.name);
@@ -221,6 +235,12 @@ export function SettingsForm({ business }: { business: CurrentBusiness }) {
             setLogoPerPage(v);
           }}
         />
+      </div>
+
+      {/* Logo (eigene Speicher-/Lösch-Logik, unabhängig vom „Speichern" oben) */}
+      <div className="card" style={cardStyle}>
+        <h2 style={groupTitleStyle}>{t(DEFAULT_LOCALE, "settings.logo.title")}</h2>
+        <LogoField businessId={business.id} initialPreviewUrl={logoPreviewUrl} />
       </div>
 
       {/* Aufnahme */}
@@ -548,6 +568,195 @@ function Toggle({
           }}
         />
       </div>
+    </div>
+  );
+}
+
+/** Aktueller Vorgang des Logo-Felds (für Button-Label + Deaktivierung). */
+type LogoBusy = "idle" | "uploading" | "removing";
+
+/** Mappt einen Aufbereitungsfehler auf die passende i18n-Meldung. */
+function logoErrorMessage(err: unknown): string {
+  if (err instanceof LogoPrepareError) {
+    if (err.code === "type") return t(DEFAULT_LOCALE, "settings.logo.typeError");
+    if (err.code === "tooLarge") return t(DEFAULT_LOCALE, "settings.logo.tooLarge");
+  }
+  return t(DEFAULT_LOCALE, "settings.logo.error");
+}
+
+/**
+ * Logo-Feld (eigene Mutations-Logik, getrennt vom „Speichern" der Form).
+ * Hat ein Logo → Vorschau (signierte URL bzw. optimistische objectURL) +
+ * „Entfernen"; sonst Upload-Control. Upload zweistufig & isolations-sicher wie
+ * der Capture-Flow: `prepareLogo` → Direktupload in den privaten Bucket
+ * `branding` unter `${businessId}/logo.png` (Storage-RLS bindet das erste Segment
+ * an die business_id) → POST (ohne `business_id`) → `router.refresh()`.
+ */
+function LogoField({
+  businessId,
+  initialPreviewUrl,
+}: {
+  businessId: string;
+  initialPreviewUrl: string | null;
+}) {
+  const router = useRouter();
+  const supabase = useMemo(() => createClient(), []);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const [previewUrl, setPreviewUrl] = useState<string | null>(initialPreviewUrl);
+  const [busy, setBusy] = useState<LogoBusy>("idle");
+  const [error, setError] = useState<string | null>(null);
+
+  // Lokale objectURL der optimistischen Vorschau — beim Server-Refresh/Unmount frei.
+  const localUrlRef = useRef<string | null>(null);
+  const revokeLocal = () => {
+    if (localUrlRef.current) {
+      URL.revokeObjectURL(localUrlRef.current);
+      localUrlRef.current = null;
+    }
+  };
+
+  // Server-Refresh liefert eine frische Signed-URL (oder null) → übernehmen,
+  // die optimistische objectURL wird damit überflüssig und freigegeben.
+  useEffect(() => {
+    revokeLocal();
+    setPreviewUrl(initialPreviewUrl);
+  }, [initialPreviewUrl]);
+
+  // Unmount-Bereinigung.
+  useEffect(() => () => revokeLocal(), []);
+
+  const path = `${businessId}/logo.png`;
+
+  const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // erlaubt erneute Auswahl derselben Datei
+    if (!file) return;
+    setError(null);
+
+    let prepared: PreparedLogo;
+    try {
+      prepared = await prepareLogo(file);
+    } catch (err) {
+      setError(logoErrorMessage(err));
+      return;
+    }
+
+    setBusy("uploading");
+    try {
+      const { error: upErr } = await supabase.storage
+        .from("branding")
+        .upload(path, prepared.blob, { contentType: "image/png", upsert: true });
+      if (upErr) throw upErr;
+
+      const res = await fetch("/api/portal/settings/logo", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ storage_path: path }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+      // Optimistische Vorschau bis der Refresh die Signed-URL nachliefert.
+      revokeLocal();
+      const localUrl = URL.createObjectURL(prepared.blob);
+      localUrlRef.current = localUrl;
+      setPreviewUrl(localUrl);
+      router.refresh();
+    } catch (err) {
+      console.error(`[logo] Upload fehlgeschlagen (business ${businessId}):`, err);
+      setError(t(DEFAULT_LOCALE, "settings.logo.error"));
+    } finally {
+      setBusy("idle");
+    }
+  };
+
+  const handleRemove = async () => {
+    setError(null);
+    setBusy("removing");
+    try {
+      const res = await fetch("/api/portal/settings/logo", { method: "DELETE" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      revokeLocal();
+      setPreviewUrl(null);
+      router.refresh();
+    } catch (err) {
+      console.error(`[logo] Entfernen fehlgeschlagen (business ${businessId}):`, err);
+      setError(t(DEFAULT_LOCALE, "settings.logo.error"));
+    } finally {
+      setBusy("idle");
+    }
+  };
+
+  const disabled = busy !== "idle";
+  const disabledStyle: React.CSSProperties = {
+    opacity: disabled ? 0.7 : 1,
+    pointerEvents: disabled ? "none" : "auto",
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <input
+        ref={inputRef}
+        type="file"
+        accept={LOGO_ACCEPT_ATTR}
+        style={{ display: "none" }}
+        onChange={(e) => void handleFile(e)}
+      />
+
+      {previewUrl ? (
+        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+          {/* eslint-disable-next-line @next/next/no-img-element -- Signed-URL/objectURL, keine next/image-Optimierung. */}
+          <img
+            src={previewUrl}
+            alt={t(DEFAULT_LOCALE, "settings.logo.preview")}
+            style={{
+              width: 96,
+              height: 96,
+              flexShrink: 0,
+              objectFit: "contain",
+              padding: 8,
+              borderRadius: "var(--radius)",
+              border: "1px solid var(--border)",
+              background: "var(--surface-2)",
+            }}
+          />
+          <div
+            role="button"
+            tabIndex={0}
+            aria-disabled={disabled}
+            className="btn-outline"
+            style={disabledStyle}
+            onClick={() => void handleRemove()}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") void handleRemove();
+            }}
+          >
+            {busy === "removing"
+              ? t(DEFAULT_LOCALE, "settings.logo.removing")
+              : t(DEFAULT_LOCALE, "settings.logo.remove")}
+          </div>
+        </div>
+      ) : (
+        <div
+          role="button"
+          tabIndex={0}
+          aria-disabled={disabled}
+          className="btn-outline"
+          style={{ ...disabledStyle, alignSelf: "flex-start" }}
+          onClick={() => inputRef.current?.click()}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") inputRef.current?.click();
+          }}
+        >
+          {busy === "uploading"
+            ? t(DEFAULT_LOCALE, "settings.logo.uploading")
+            : t(DEFAULT_LOCALE, "settings.logo.upload")}
+        </div>
+      )}
+
+      {error ? (
+        <span style={{ fontSize: 13, color: "#B23B3B" }}>{error}</span>
+      ) : null}
     </div>
   );
 }
