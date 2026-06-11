@@ -1034,6 +1034,31 @@ verifiziert über den Build-Trace (`.next/…/render-reel-test/route.js.nft.json
 enthält genau `ffmpeg-static/ffmpeg`, die anderen Order-API-Functions **nicht** —
 die ~45 MB bleiben dort raus).
 
+### KRITISCH: `__dirname`-Verbiegung + read-only-FS (8b-0-Fix)
+
+Trotz korrektem Tracing schlug der erste Lauf auf Vercel mit `spawn … ENOENT`
+fehl: `ffmpeg-static` leitet den Binary-Pfad aus `__dirname` ab, **webpack
+schreibt `__dirname` beim Bündeln aber auf den Routen-Ordner um** → der Pfad
+zeigte auf `.next/server/app/api/portal/orders/[id]/render-reel-test/ffmpeg`
+(dort liegt nichts), nicht auf `node_modules/ffmpeg-static/ffmpeg`. Das Binary
+**war** im Bundle (Trace bestätigt), nur der Pfad war falsch. Zweiteiliger Fix:
+
+1. **`serverExternalPackages: ["ffmpeg-static"]`** ([next.config.ts](next.config.ts),
+   Top-Level-Key, Next 15): nimmt ffmpeg-static aus dem webpack-Bundle, `__dirname`
+   bleibt korrekt (Laufzeit-`require` aus `node_modules`) → ffmpeg-static liefert
+   wieder den richtigen Pfad. `outputFileTracingIncludes` **bleibt erhalten** —
+   externalisieren verhindert nur das Bündeln, nicht das Fehlen der Binärdatei;
+   ohne Tracing läge sie gar nicht in der Function.
+2. **Binary nach `/tmp` kopieren + von dort spawnen** (im Route Handler): Das
+   Bundle-FS ist auf Vercel **read-only** (kein `chmod` aufs getracte Binary), nur
+   `/tmp` ist beschreibbar. `resolveFfmpegSource()` probiert defensiv mehrere
+   Kandidaten (ffmpeg-static-Pfad zuerst, dann `path.join(process.cwd(),
+   "node_modules/ffmpeg-static/ffmpeg")`), nimmt den ersten existierenden
+   (`fs.access`) und **loggt** ihn; keiner gefunden ⇒ **500 `ffmpeg_binary_missing`**
+   + Log (kein Hängen). Das gefundene Binary wird per `fs.copyFile` nach
+   `/tmp/ffmpeg` kopiert, `fs.chmod(…, 0o755)`, und ffmpeg wird **von `/tmp/ffmpeg`**
+   gespawnt (Copy/chmod-Fehler ⇒ ebenfalls 500 `ffmpeg_binary_missing`).
+
 ### Route Handler ([…/render-reel-test/route.ts](app/api/portal/orders/[id]/render-reel-test/route.ts), `POST`)
 
 `export const runtime = "nodejs"` (Edge kann kein `child_process`/Binary) +
@@ -1042,15 +1067,14 @@ AUTHENTICATED Client, kein User ⇒ 401, kein Betrieb ⇒ 403, Order über RLS
 (fremde/fehlende id ⇒ 404). ffmpeg erzeugt in `/tmp` ein triviales **1080×1920**-
 mp4 (~2 s, `lavfi color`, h264, `-pix_fmt yuv420p` für maximale Player-
 Kompatibilität, `-movflags +faststart`, **kein** Audio) — Prozess-Timeout 120 s,
-nie ein Hänger. Defensives `chmod 0o755` aufs Binary (non-fatal — Tracing kann das
-Ausführbar-Bit strippen; schlägt es fehl, zeigt der exec-Versuch das echte
-Problem). Output → Bucket `order-media` per **`service_role`** (umgeht RLS) unter
+nie ein Hänger. Das Binary wird vor dem Spawn nach `/tmp` kopiert + ausführbar
+gemacht (s. **8b-0-Fix** oben). Output → Bucket `order-media` per **`service_role`** (umgeht RLS) unter
 `{business_id}/{order_id}/reel-test.mp4` — `business_id` **aus der geladenen
 Order**, nie aus dem Body; erstes Pfad-Segment = `business_id` deckt die
 0002-Policy ab. `contentType video/mp4`, `upsert: true`. Antwort
 `createSignedUrl(path, 3600)` → `{ ok: true, url }`. **Alle** Fehlerpfade:
 `console.error` mit `order_id` + Schritt + echter Message (Vercel-Logs) und
-JSON-Fehlercode (`ffmpeg_unavailable`/`ffmpeg_failed`/`upload_failed`/
+JSON-Fehlercode (`ffmpeg_binary_missing`/`ffmpeg_failed`/`upload_failed`/
 `sign_failed`); `try/catch` pro Schritt, `finally` löscht die Temp-Datei. Es wird
 **kein** `order_media`-Row angelegt (Spike, kein Schema).
 

@@ -13,6 +13,21 @@ const nextConfig: NextConfig = {
   reactStrictMode: true,
 
   /**
+   * KRITISCH (8b-0-Fix): ffmpeg-static NICHT von webpack bundlen lassen. Bei der
+   * Bündelung schreibt webpack `__dirname` auf den Routen-Ordner um — und genau
+   * daraus leitet ffmpeg-static seinen Binary-Pfad ab. Folge: zur Laufzeit zeigt
+   * der Pfad auf `.next/server/app/api/.../render-reel-test/ffmpeg` (dort liegt
+   * NICHTS) statt auf `node_modules/ffmpeg-static/ffmpeg` ⇒ `spawn … ENOENT`,
+   * obwohl das Binary via outputFileTracingIncludes IM Bundle liegt.
+   *
+   * Als externes Server-Paket markiert bleibt `__dirname` korrekt (require zur
+   * Laufzeit aus node_modules), und ffmpeg-static liefert wieder den richtigen
+   * Pfad. outputFileTracingIncludes MUSS erhalten bleiben, damit die Binärdatei
+   * überhaupt in die Function kopiert wird.
+   */
+  serverExternalPackages: ["ffmpeg-static"],
+
+  /**
    * KRITISCH (8b-0, bekannter Stolperstein): Next.js tracet das ffmpeg-Binary
    * NICHT automatisch in die Serverless-Function — es wird zur Laufzeit über
    * einen berechneten Pfad geladen (kein `require` der Binärdatei), bleibt der

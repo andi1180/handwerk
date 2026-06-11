@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { chmod, readFile, unlink } from "node:fs/promises";
+import { access, chmod, copyFile, readFile, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -38,6 +38,31 @@ const FFMPEG_TIMEOUT_MS = 120_000;
 
 /** Signed-URL-Lebensdauer (privater Bucket gibt nichts dauerhaft frei). */
 const SIGNED_URL_TTL_SECONDS = 3600;
+
+/**
+ * Das tatsächliche ffmpeg-Binary auffinden (8b-0-Fix). `ffmpeg-static` leitet den
+ * Pfad aus `__dirname` ab; trotz `serverExternalPackages` defensiv mehrere
+ * Kandidaten probieren, falls die Bundle-Topologie den Default-Pfad verbiegt.
+ * Reihenfolge: der vom Paket gelieferte Pfad zuerst, danach der explizite
+ * node_modules-Pfad relativ zum CWD (Vercel: Function-Root mit getracten
+ * node_modules). Erster existierender Pfad gewinnt; keiner ⇒ null.
+ */
+async function resolveFfmpegSource(): Promise<string | null> {
+  const candidates = [
+    ffmpegPath,
+    join(process.cwd(), "node_modules", "ffmpeg-static", "ffmpeg"),
+  ].filter((p): p is string => typeof p === "string" && p.length > 0);
+
+  for (const candidate of candidates) {
+    try {
+      await access(candidate);
+      return candidate;
+    } catch {
+      // Kandidat existiert nicht — nächsten probieren.
+    }
+  }
+  return null;
+}
 
 /**
  * POST /api/portal/orders/[id]/render-reel-test
@@ -83,31 +108,51 @@ export async function POST(
     return NextResponse.json({ error: "not_found" }, { status: 404 });
   }
 
-  // ffmpeg-static liefert den Binary-Pfad (null nur auf nicht unterstützten
-  // Plattformen). Fehlt er, hat das Bundling nicht gegriffen ⇒ klarer 500.
-  if (!ffmpegPath) {
-    console.error("render-reel-test: ffmpeg binary unavailable", {
+  // Das echte Binary auffinden (8b-0-Fix). Fehlt es überall, hat weder das
+  // ffmpeg-static-postinstall noch das Tracing gegriffen ⇒ klarer 500.
+  const ffmpegSource = await resolveFfmpegSource();
+  if (!ffmpegSource) {
+    console.error("render-reel-test: ffmpeg binary missing", {
       order_id: order.id,
       step: "ffmpeg_resolve",
+      provided_path: ffmpegPath ?? "(null)",
+      cwd: process.cwd(),
     });
-    return NextResponse.json({ error: "ffmpeg_unavailable" }, { status: 500 });
+    return NextResponse.json(
+      { error: "ffmpeg_binary_missing" },
+      { status: 500 },
+    );
   }
+  console.log("render-reel-test: ffmpeg source resolved", {
+    order_id: order.id,
+    source: ffmpegSource,
+  });
 
   const storagePath = `${order.business_id}/${order.id}/reel-test.mp4`;
   const tmpPath = join(tmpdir(), `reel-test-${randomUUID()}.mp4`);
+  // ffmpeg aus /tmp ausführen: das Bundle-FS ist auf Vercel read-only (kein
+  // chmod aufs getracte Binary möglich), /tmp ist beschreibbar. Wir kopieren das
+  // Binary einmal her, setzen das Exec-Bit und spawnen von dort.
+  const ffmpegBin = join(tmpdir(), "ffmpeg");
 
   try {
-    // Ausführbar-Bit defensiv setzen — Tracing/Bundling kann es auf manchen
-    // Plattformen strippen. Nicht fatal: schlägt es fehl (z. B. read-only FS,
-    // Bit schon gesetzt), zeigt der eigentliche exec-Versuch das echte Problem.
+    // Binary nach /tmp kopieren + ausführbar machen. Schlägt das fehl, kann
+    // ffmpeg nicht laufen ⇒ klarer 500 (kein stiller Folgefehler beim exec).
     try {
-      await chmod(ffmpegPath, 0o755);
+      await copyFile(ffmpegSource, ffmpegBin);
+      await chmod(ffmpegBin, 0o755);
     } catch (error) {
-      console.error("render-reel-test: chmod failed (non-fatal)", {
+      console.error("render-reel-test: ffmpeg copy/chmod failed", {
         order_id: order.id,
-        step: "chmod",
+        step: "ffmpeg_prepare",
+        source: ffmpegSource,
+        target: ffmpegBin,
         message: errMessage(error),
       });
+      return NextResponse.json(
+        { error: "ffmpeg_binary_missing" },
+        { status: 500 },
+      );
     }
 
     // Triviales 1080x1920-mp4, ~2s, einfarbig. -pix_fmt yuv420p für maximale
@@ -115,7 +160,7 @@ export async function POST(
     // -an kein Audio. Timeout killt einen hängenden Prozess (kein Dauer-Hänger).
     try {
       await execFileAsync(
-        ffmpegPath,
+        ffmpegBin,
         [
           "-y",
           "-nostdin",
