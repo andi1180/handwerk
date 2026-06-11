@@ -275,12 +275,28 @@ const REEL_POLL_MS = 3000;
 
 /**
  * Rein kosmetische Fortschritts-Stufen während des Renders (keine echte
- * Telemetrie) — sie wechseln alle REEL_STAGE_MS und folgen grob der Pipeline
- * (Bilder → Intro/Outro → Zusammensetzen → fast fertig). Die letzte Stufe bleibt
- * stehen (kein Zurückspringen), bis der Poll `ready`/`failed` meldet.
+ * Telemetrie) — sie laufen sequenziell alle REEL_STAGE_MS durch und folgen der
+ * Pipeline (Vorbereiten → Medien → Intro/Logo → Fotos/Captions → Clips →
+ * Assembly → Outro → Feinschliff). Die letzte Stufe bleibt stehen (kein
+ * Zurückspringen, kein Wiederholen), bis der Poll `ready`/`failed` meldet.
  */
-const REEL_STAGE_MS = 3500;
-const REEL_STAGES = ["reel.stage1", "reel.stage2", "reel.stage3", "reel.stage4"] as const;
+const REEL_STAGE_MS = 4000;
+const REEL_STAGES = [
+  "reel.stage1",
+  "reel.stage2",
+  "reel.stage3",
+  "reel.stage4",
+  "reel.stage5",
+  "reel.stage6",
+  "reel.stage7",
+  "reel.stage8",
+  "reel.stage9",
+  "reel.stage10",
+  "reel.stage11",
+  "reel.stage12",
+  "reel.stage13",
+  "reel.stage14",
+] as const;
 
 /** Server-Fehlercode des Render-Starts → i18n-Hinweis (+ technischer Detail-Teil). */
 async function noticeForReelStart(res: Response): Promise<string> {

@@ -198,11 +198,22 @@ export const de = {
     starting: "Starte…",
     rendering: "Reel wird erstellt…",
     // Rotierende, rein kosmetische Fortschritts-Stufen während des Renders
-    // (keine echte Telemetrie) — grob an der Pipeline-Reihenfolge orientiert.
-    stage1: "Bilder werden vorbereitet…",
-    stage2: "Intro & Outro werden gestaltet…",
-    stage3: "Reel wird zusammengesetzt…",
-    stage4: "Fast fertig…",
+    // (keine echte Telemetrie) — sequenziell an der Pipeline-Reihenfolge
+    // orientiert; die letzte Stufe bleibt stehen, bis der Poll fertig meldet.
+    stage1: "Auftrag wird vorbereitet…",
+    stage2: "Medien werden geladen…",
+    stage3: "Intro wird gestaltet…",
+    stage4: "Logo wird platziert…",
+    stage5: "Fotos werden aufbereitet…",
+    stage6: "Bildunterschriften werden gesetzt…",
+    stage7: "Video-Clips werden zugeschnitten…",
+    stage8: "Clips werden ins Hochformat gebracht…",
+    stage9: "Ton wird entfernt…",
+    stage10: "Szenen werden aneinandergereiht…",
+    stage11: "Outro wird angefügt…",
+    stage12: "Reel wird zusammengefügt…",
+    stage13: "Letzter Feinschliff…",
+    stage14: "Fast fertig…",
     watch: "Reel ansehen",
     recreate: "Neu erstellen",
     retry: "Erneut",
