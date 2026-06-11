@@ -46,16 +46,14 @@ export default async function PortalLayout({
       {/* Desktop: Sidebar links (auf Mobile per CSS ausgeblendet). */}
       <aside className="portal-sidebar">
         {/* Valooro-Logo (getracktes App-Branding unter /public/valooro.png).
-            Fehlt die Datei, bricht nur das Bild — der Brand-Text bleibt. */}
+            Fehlt die Datei, bricht nur das Bild. */}
         {/* eslint-disable-next-line @next/next/no-img-element -- statisches Branding-Asset, keine next/image-Optimierung nötig. */}
         <img
           className="portal-sidebar-logo"
           src="/valooro.png"
           alt={t(DEFAULT_LOCALE, "app.name")}
         />
-        <div className="portal-sidebar-brand">
-          {t(DEFAULT_LOCALE, "app.name")}
-        </div>
+        <hr className="portal-sidebar-divider" />
         <PortalNav />
         <div className="portal-sidebar-logout">
           <LogoutButton />
