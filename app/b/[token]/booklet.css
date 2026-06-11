@@ -94,8 +94,8 @@
 /* --- Intro / Outro Typo --- */
 
 .booklet-logo {
-  max-height: 64px;
-  max-width: 56%;
+  max-height: 128px;
+  max-width: 90%;
   width: auto;
   object-fit: contain;
   margin-bottom: 30px;
@@ -202,8 +202,8 @@
   top: calc(env(safe-area-inset-top, 0px) + 18px);
   left: 18px;
   z-index: 3;
-  max-height: 34px;
-  max-width: 42%;
+  max-height: 68px;
+  max-width: 84%;
   object-fit: contain;
   filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.55));
   pointer-events: none;
