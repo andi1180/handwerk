@@ -1506,6 +1506,74 @@ render-reel-Function.
 
 ---
 
+## Clip-Captions/Wasserzeichen (Schritt 8b-2b)
+
+Die in 8b-2a noch **nackten** Clip-Segmente bekommen jetzt **dieselbe** Overlay-
+Behandlung wie die Foto-Segmente (8b-1b/8b-1c): **Caption-Scrim + Branding-Akzentbalken
++ Caption-drawtext** und das **optionale Logo-Wasserzeichen** (`logo_per_page`) — über
+den **Video-Stream** gebrannt. Fotos, Intro, Outro und die gesamte Assembly/Orchestrierung
+(`concatSegments`, `after()`, `reel_status`, `render-reel`/`reel-status`, Output-Pfad,
+UI/Poll) bleiben **unverändert**. **Keine Migration. NUR FFmpeg, KEIN Sharp.** **KEIN**
+Ken-Burns (8b-3).
+
+### Geteilte Overlay-Kette (Foto + Clip, kein Drift)
+
+Verifiziert: die Foto-Captions rendern via **ffmpeg `drawtext`** im `filter_complex`
+(Scrim-PNG per `overlay`, Akzent per `drawbox`, Text per `drawtext=textfile=…:fontfile=…`)
+— **nicht** Sharp/Canvas. Die Overlay-Erzeugung ist deshalb in einen gemeinsamen Helfer
+[`buildCaptionOverlay`](lib/reel/frames.ts) gezogen, den **Foto- (`bakePhotoFrame`) UND
+Clip-Pfad (`normalizeClip`)** nutzen — **nicht dupliziert**. Der Helfer nimmt ein
+Basis-Stream-Label + den ersten freien Input-Index und liefert `{ extraInputs, parts,
+outLabel }` (die `-i`-Inputs Scrim→Logo in genau dieser Reihenfolge, die filter_complex-
+Teile, das End-Label). `bakePhotoFrame` erzeugt damit **byte-identische** Filtergraph-
+Strings wie zuvor (reines Refactoring, kein Verhaltensänderung); `normalizeClip` hängt
+dieselbe Kette an den Video-Stream.
+
+### `normalizeClip`-Erweiterung ([lib/reel/frames.ts](lib/reel/frames.ts))
+
+`normalizeClip` bekommt drei neue Parameter (analog `bakePhotoFrame`): `caption`,
+`logoPath`, `primaryColor`.
+
+- **Caption-Text:** `displayCaption(media)` (`caption ?? keyword`; beide leer/Whitespace
+  ⇒ `null`) aus [lib/booklet/caption.ts](lib/booklet/caption.ts) — **dieselbe** Quelle
+  wie Web-Story und Foto-Frames (kein Drift). `null` ⇒ **kein** Caption-Overlay (wie beim
+  Foto: sauberer Clip, kein Scrim).
+- **Logo-Wasserzeichen:** wird nur durchgereicht, wenn `branding.logo_per_page` gesetzt
+  ist (Gate in der Route, identisch zum Foto), oben links, gleiche Box/Position wie das
+  Foto (`WATERMARK_BOX_*`/`WATERMARK_MARGIN`).
+- **Schneller Pfad bleibt:** ohne Caption **und** ohne Logo ⇒ das unveränderte 8b-2a-`-vf`
+  (`COVER,fps=30,format=yuv420p`). Erst wenn ein Overlay nötig ist, wird der
+  `filter_complex`-Pfad genommen.
+- **Overlay-Pfad:** `[0:v]COVER,fps=30[base]` → `buildCaptionOverlay` (Scrim/Caption/Logo)
+  → `[…]format=yuv420p[v]`, `-map [v]`, `…CANON_ENCODE`. Das `-t maxSeconds` bleibt
+  **INPUT-Option** **vor** `-i input` (cappt nur den Clip); Scrim/Logo sind Einzelbild-
+  Inputs danach.
+- **Statisch über die volle Clip-Dauer** (kein `enable=`): die Scrim-/Logo-PNGs sind
+  Einzelbilder, `overlay` (`eof_action=repeat`, Default) hält sie für jeden Frame;
+  `drawtext` ohne `enable=` rendert auf jedem Frame. Mute-safe (`-an`).
+- **6.0.1-sicher** (wie die Foto-Caption seit 8b-1b/1c, nicht neu erfunden): **literales**
+  `x`, **links-bündig**, **keine** zentrierten `(…)/2`-Ausdrücke (der 8b-1c-Crash); Text
+  via `textfile`/`fontfile` (**kein** fontconfig), Escaping erledigt die `textfile`
+  (`expansion=none`). Reines Anwenden derselben, auf 6.0.1 bewährten drawtext-Bausteine
+  auf einen Video- statt Still-Stream.
+
+### Kanonische Form unverändert → concat bleibt heil
+
+Der Overlay-Pfad ändert die **Encode-Parameter nicht**: 1080×1920, yuv420p, h264, 30 fps
+CFR, SAR 1:1, **stumm** — `format=yuv420p` als letzter Filter, `CANON_ENCODE` als Output-
+Optionen. Damit bleiben Clip-Segmente **format-identisch** zu den Still-Segmenten, und der
+**concat-Demuxer (`-c copy`)** fügt weiter verlustfrei. Die Route ([render-reel](app/api/portal/orders/[id]/render-reel/route.ts))
+reicht im Video-Zweig `caption: displayCaption(item)`, `logoPath: logoPerPage ? logoLocal
+: null` und `primaryColor` durch — exakt wie der Foto-Zweig.
+
+Lokal mit ffmpeg-full 8.1.1 verifiziert: Landscape-Clip-mit-Audio → Overlay-Pfad → 1080×1920,
+SAR 1:1, yuv420p, 30 fps, **exakt 6 s, 0 Audio-Spuren**, Caption (inkl. Umlaute/`—`) +
+Akzentbalken + Logo sichtbar eingebrannt; `-c copy`-concat Still+Clip-Overlay+Still →
+**12 s**, durchgängig 1080×1920/yuv420p/30 fps. `pnpm typecheck` + `pnpm build` grün;
+Tracing (Font + beide Scrims) unverändert.
+
+---
+
 ## Medien-Anzahl-Limit (Schritt 8c)
 
 Pro-Betrieb-Limit für die **Anzahl** Fotos/Videos je Auftrag, unter einem harten

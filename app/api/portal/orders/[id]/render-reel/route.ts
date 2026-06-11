@@ -19,7 +19,7 @@ import {
 } from "@/lib/reel/frames";
 
 /**
- * SCHRITT 8b-2a — Video-Clips ins Reel (Assembly, OHNE Clip-Captions).
+ * SCHRITT 8b-2b — Captions + Logo-Wasserzeichen auf den Video-Clips.
  *
  * Baut aus einem generierten Booklet ein 9:16-Reel (1080x1920, HARTE Schnitte,
  * KEIN Audio): Intro-Frame (~4 s) → die MEDIEN in sort_order (Foto-Stills je 3 s
@@ -33,7 +33,8 @@ import {
  *            dezentes Logo-Wasserzeichen (8b-1c). UNVERÄNDERT.
  *  - Clips:  auf die KANONISCHE Form normalisiert (cover 9:16, 30 fps, yuv420p,
  *            STUMM, auf 6 s gecappt) — IDENTISCH zu den Foto-Segmenten, sonst bricht
- *            der concat-Demuxer. NOCH KEINE Clip-Caption/Wasserzeichen (8b-2b).
+ *            der concat-Demuxer; jetzt mit DERSELBEN Overlay-Kette wie die Fotos
+ *            (Caption + optionales Wasserzeichen) über den Video-Stream (8b-2b).
  *  - Outro:  outro_bg/Verlauf, Logo, Betriebsname + Nachricht + Kontakt
  *            (Telefon/Website). KEINE Share-/Review-Elemente (Step 9).
  *
@@ -46,7 +47,7 @@ import {
  * KEIN Sharp. Schrift + Scrims sind MITGELIEFERT und EXPLIZIT per Pfad referenziert
  * (kein fontconfig — der ist auf Vercel leer).
  *
- * KEINE Clip-Captions/Wasserzeichen (8b-2b), KEIN Ken-Burns (8b-3).
+ * KEIN Ken-Burns (8b-3).
  *
  * Node-Runtime erzwingen (Edge kann kein child_process / Binary ausführen) und
  * maxDuration anheben (Fluid Compute) — Download + ffmpeg + Upload dürfen dauern.
@@ -136,8 +137,8 @@ export async function POST(
   }
 
   // ALLE Medien in Reihenfolge laden (RLS): Fotos UND Video-Clips, gemischt nach
-  // sort_order (8b-2a). caption/keyword für die Foto-Overlays (8b-1b); Clips
-  // bekommen in 8b-2a noch kein Overlay. Ohne jedes Medium kein Reel.
+  // sort_order (8b-2a). caption/keyword für die Overlays — jetzt auf Fotos UND
+  // Clips (8b-1b/8b-2b). Ohne jedes Medium kein Reel.
   const { data: mediaRows } = await supabase
     .from("order_media")
     .select("storage_path, media_type, caption, keyword")
@@ -395,7 +396,8 @@ async function renderReel({
     // 5) Pro Item EIN formatgleiches Segment, in sort_order (interleaved):
     //    Foto → Frame backen (cover + Caption + optionales Wasserzeichen) → Still-
     //    Segment (3 s); Video → Clip normalisieren (cover, 30 fps, yuv420p, stumm,
-    //    6 s-Cap). NOCH KEINE Clip-Caption/Wasserzeichen (8b-2b).
+    //    6 s-Cap) MIT derselben Caption/Wasserzeichen-Overlay-Kette wie das Foto
+    //    (8b-2b, über den Video-Stream, statisch über die volle Clip-Dauer).
     try {
       for (let i = 0; i < media.length; i++) {
         const item = media[i]!;
@@ -408,6 +410,11 @@ async function renderReel({
               input: local,
               maxSeconds: MAX_CLIP_SECONDS,
               output: segment,
+              // DIESELBE Overlay-Behandlung wie das Foto (8b-2b): Caption
+              // (caption ?? keyword) + optionales Wasserzeichen (logo_per_page).
+              caption: displayCaption(item),
+              logoPath: logoPerPage ? logoLocal : null,
+              primaryColor,
             });
           } else {
             const framePath = join(tmpDir, `frame-${randomUUID()}.png`);

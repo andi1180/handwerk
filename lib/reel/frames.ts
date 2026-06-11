@@ -21,7 +21,11 @@ import { DEFAULT_BRANDING, isHexColor } from "@/lib/settings/options";
  *                         Betriebsname + Nachricht + Kontakt (Telefon/Website).
  *  - encodeStillSegment — gebackenes PNG → normalisiertes mp4-Segment (8b-2a).
  *  - normalizeClip      — Video-Clip → KANONISCHES mp4-Segment (8b-2a): cover 9:16,
- *                         30 fps, yuv420p, STUMM, auf min(Clip, maxSeconds) gecappt.
+ *                         30 fps, yuv420p, STUMM, auf min(Clip, maxSeconds) gecappt;
+ *                         mit DERSELBEN Caption/Wasserzeichen-Overlay-Kette wie das
+ *                         Foto über den Video-Stream gebrannt (8b-2b).
+ *  - buildCaptionOverlay— GETEILTE Overlay-Kette (Scrim + Caption-drawtext +
+ *                         optionales Logo-Wasserzeichen) für Foto UND Clip (8b-2b).
  *  - concatSegments     — formatgleiche Segmente → 9:16-Reel (concat-Demuxer,
  *                         -c copy, harte Schnitte; Intro → Items (sort_order) → Outro).
  *
@@ -255,9 +259,85 @@ function backgroundInput(
 }
 
 /**
+ * GETEILTE Overlay-Kette für Foto-Frames UND Video-Clips (8b-1b/1c/2b): erzeugt
+ * über einem bestehenden Video-Stream-Label (`baseLabel`) den Caption-Scrim (unten)
+ * + Branding-Akzentbalken + Caption-drawtext, wenn `caption` gesetzt ist, und/oder
+ * ein dezentes Logo-Wasserzeichen (obere Ecke), wenn `logoPath` gesetzt ist. Sind
+ * beide null ⇒ leeres Ergebnis (kein Overlay, `outLabel === baseLabel`).
+ *
+ * Liefert die zusätzlichen `-i`-Inputs (Scrim, dann Logo — ab `firstExtraInputIdx`
+ * in GENAU dieser Reihenfolge), die filter_complex-Teile und das End-Label. Der
+ * Foto- (`bakePhotoFrame`) und der Video-Pfad (`normalizeClip`) teilen sich damit
+ * EXAKT dieselbe Overlay-Logik (kein Drift, keine Duplikation); der einzige
+ * Unterschied bleibt der Basis-Stream (Foto-Still vs. normalisierter Clip) und das
+ * anschließende Encoding.
+ *
+ * Über einem Video-Stream zeigt das Overlay STATISCH über die volle Clip-Dauer:
+ * die Scrim-/Logo-PNGs sind Einzelbilder, `overlay` (eof_action=repeat, Default)
+ * hält sie für jeden Frame; `drawtext` ohne `enable=` rendert auf jedem Frame.
+ *
+ * 6.0.1-sicher (wie die Foto-Caption seit 8b-1b/1c): literales `x`, links-bündig,
+ * KEINE zentrierten `(…)/2`-Ausdrücke; Text via `textfile`/`fontfile` (kein
+ * fontconfig), Escaping erledigt die textfile (`expansion=none`).
+ */
+async function buildCaptionOverlay({
+  caption,
+  logoPath,
+  accent,
+  baseLabel,
+  firstExtraInputIdx,
+  textfiles,
+}: {
+  caption: string | null;
+  logoPath: string | null;
+  accent: string;
+  baseLabel: string;
+  firstExtraInputIdx: number;
+  textfiles: string[];
+}): Promise<{ extraInputs: string[]; parts: string[]; outLabel: string }> {
+  const extraInputs: string[] = [];
+  const parts: string[] = [];
+  let idx = firstExtraInputIdx;
+  let cur = baseLabel;
+
+  if (caption !== null) {
+    extraInputs.push("-i", CAPTION_SCRIM_PATH);
+    const scrimIdx = idx++;
+    const capFile = await writeTmpText(wrapText(caption, CAPTION_MAX_CHARS), textfiles);
+    parts.push(`[${cur}][${scrimIdx}:v]overlay=0:0[scr]`);
+    parts.push(
+      `[scr]` +
+        `drawbox=x=${SIDE_MARGIN}:y=${REEL_H - BOTTOM_MARGIN}:` +
+        `w=${ACCENT_W}:h=${ACCENT_H}:color=${accent}@1.0:t=fill,` +
+        drawText({
+          textfile: capFile,
+          fontcolor: "white",
+          fontsize: CAPTION_FONT_SIZE,
+          lineSpacing: CAPTION_LINE_SPACING,
+          x: String(SIDE_MARGIN),
+          y: `h-${BOTTOM_MARGIN + CAPTION_GAP}-text_h`,
+        }) +
+        `[cap]`,
+    );
+    cur = "cap";
+  }
+
+  if (logoPath) {
+    extraInputs.push("-i", logoPath);
+    const logoIdx = idx++;
+    parts.push(scaleLogo(`[${logoIdx}:v]`, WATERMARK_BOX_W, WATERMARK_BOX_H, "[wm]"));
+    parts.push(`[${cur}][wm]overlay=${WATERMARK_MARGIN}:${WATERMARK_MARGIN}[out]`);
+    cur = "out";
+  }
+
+  return { extraInputs, parts, outLabel: cur };
+}
+
+/**
  * Ein Foto-Frame (1080x1920) backen: cover-crop; optional Caption-Overlay
  * (Scrim + Akzentbalken + drawtext, 8b-1b) und/oder Logo-Wasserzeichen oben links
  * (8b-1c, nur bei logo_per_page). Ohne beides bleibt das Foto sauber (kein Scrim).
+ * Die Overlay-Kette teilt sich `buildCaptionOverlay` mit dem Clip-Pfad (8b-2b).
  */
 export async function bakePhotoFrame({
   ffmpegBin,
@@ -288,48 +368,17 @@ export async function bakePhotoFrame({
   }
 
   try {
-    // Inputs: Foto (0), Caption-Scrim (falls Caption), Logo (falls Wasserzeichen).
-    const inputs: string[] = ["-i", input];
-    let idx = 1;
-    let scrimIdx = -1;
-    let logoIdx = -1;
-    if (caption !== null) {
-      inputs.push("-i", CAPTION_SCRIM_PATH);
-      scrimIdx = idx++;
-    }
-    if (logoPath) {
-      inputs.push("-i", logoPath);
-      logoIdx = idx++;
-    }
-
-    const parts: string[] = [`[0:v]${COVER}[base]`];
-    let cur = "base";
-
-    if (caption !== null) {
-      const capFile = await writeTmpText(wrapText(caption, CAPTION_MAX_CHARS), textfiles);
-      parts.push(`[${cur}][${scrimIdx}:v]overlay=0:0[scr]`);
-      parts.push(
-        `[scr]` +
-          `drawbox=x=${SIDE_MARGIN}:y=${REEL_H - BOTTOM_MARGIN}:` +
-          `w=${ACCENT_W}:h=${ACCENT_H}:color=${accent}@1.0:t=fill,` +
-          drawText({
-            textfile: capFile,
-            fontcolor: "white",
-            fontsize: CAPTION_FONT_SIZE,
-            lineSpacing: CAPTION_LINE_SPACING,
-            x: String(SIDE_MARGIN),
-            y: `h-${BOTTOM_MARGIN + CAPTION_GAP}-text_h`,
-          }) +
-          `[cap]`,
-      );
-      cur = "cap";
-    }
-
-    if (logoPath) {
-      parts.push(scaleLogo(`[${logoIdx}:v]`, WATERMARK_BOX_W, WATERMARK_BOX_H, "[wm]"));
-      parts.push(`[${cur}][wm]overlay=${WATERMARK_MARGIN}:${WATERMARK_MARGIN}[out]`);
-      cur = "out";
-    }
+    // Foto = Input 0; Scrim/Logo folgen ab Index 1. Die Overlay-Kette ist mit dem
+    // Clip-Pfad geteilt (buildCaptionOverlay) — identische Filtergraph-Strings.
+    const { extraInputs, parts: overlayParts, outLabel } = await buildCaptionOverlay({
+      caption,
+      logoPath,
+      accent,
+      baseLabel: "base",
+      firstExtraInputIdx: 1,
+      textfiles,
+    });
+    const parts = [`[0:v]${COVER}[base]`, ...overlayParts];
 
     await execFileAsync(
       ffmpegBin,
@@ -338,11 +387,13 @@ export async function bakePhotoFrame({
         "-nostdin",
         "-loglevel",
         "error",
-        ...inputs,
+        "-i",
+        input,
+        ...extraInputs,
         "-filter_complex",
         parts.join(";"),
         "-map",
-        `[${cur}]`,
+        `[${outLabel}]`,
         "-frames:v",
         "1",
         output,
@@ -642,7 +693,7 @@ export async function encodeStillSegment({
 }
 
 /**
- * Video-Clip → KANONISCHES mp4-Segment (8b-2a), IDENTISCH zu den Foto-Segmenten:
+ * Video-Clip → KANONISCHES mp4-Segment (8b-2a/2b), IDENTISCH zu den Foto-Segmenten:
  *  - cover-crop auf 1080×1920 (`COVER`; autorotate greift VOR den Filtern → auch
  *    Hochformat-Handyclips werden korrekt aufgerichtet),
  *  - 30 fps (CFR via `fps`-Filter), yuv420p, libx264,
@@ -651,38 +702,102 @@ export async function encodeStillSegment({
  *    das Lesen nach maxSeconds (kürzere Clips laufen bis EOF). Tempo; in 8b-3
  *    konfigurierbar.
  *
- * NOCH KEINE Caption/Wasserzeichen auf dem Clip (das ist 8b-2b). Die kanonische
- * Form ist die Voraussetzung fürs concat-Demuxer-Zusammenfügen.
+ * 8b-2b: trägt jetzt DIESELBE Overlay-Kette wie das Foto (`buildCaptionOverlay`) —
+ * Caption (`displayCaption` ⇒ caption ?? keyword; beide leer ⇒ KEIN Overlay) plus
+ * optionales Logo-Wasserzeichen (logo_per_page), STATISCH über die volle Clip-Dauer
+ * (kein `enable=`) in den Video-Stream gebrannt. Ohne beides bleibt der schnelle
+ * 8b-2a-Pfad (nacktes `-vf`). Die kanonische Form ändert sich NICHT (1080×1920,
+ * 30 fps CFR, yuv420p, h264, SAR 1:1, stumm) — Voraussetzung fürs concat-Fügen.
  */
 export async function normalizeClip({
   ffmpegBin,
   input,
   maxSeconds,
   output,
+  caption,
+  logoPath,
+  primaryColor,
 }: {
   ffmpegBin: string;
   input: string;
   maxSeconds: number;
   output: string;
+  caption: string | null;
+  logoPath: string | null;
+  primaryColor: string;
 }): Promise<void> {
-  await execFileAsync(
-    ffmpegBin,
-    [
-      "-y",
-      "-nostdin",
-      "-loglevel",
-      "error",
-      "-t",
-      String(maxSeconds),
-      "-i",
-      input,
-      "-vf",
-      `${COVER},fps=${REEL_FPS},format=yuv420p`,
-      ...CANON_ENCODE,
-      output,
-    ],
-    { timeout: SEGMENT_TIMEOUT_MS, maxBuffer: FFMPEG_MAX_BUFFER },
-  );
+  const accent = ffmpegColor(primaryColor, DEFAULT_BRANDING.primary_color);
+  const textfiles: string[] = [];
+
+  // Schneller Pfad: nackter Clip ohne Caption/Wasserzeichen → einfaches -vf
+  // (Verhalten von 8b-2a unverändert).
+  if (caption === null && !logoPath) {
+    await execFileAsync(
+      ffmpegBin,
+      [
+        "-y",
+        "-nostdin",
+        "-loglevel",
+        "error",
+        "-t",
+        String(maxSeconds),
+        "-i",
+        input,
+        "-vf",
+        `${COVER},fps=${REEL_FPS},format=yuv420p`,
+        ...CANON_ENCODE,
+        output,
+      ],
+      { timeout: SEGMENT_TIMEOUT_MS, maxBuffer: FFMPEG_MAX_BUFFER },
+    );
+    return;
+  }
+
+  // Overlay-Pfad (8b-2b): cover-crop + 30 fps auf dem Clip, dann die GETEILTE
+  // Overlay-Kette (Scrim + Caption + optionales Wasserzeichen) über den Video-
+  // Stream, zuletzt format=yuv420p. Identische kanonische Form wie der schnelle
+  // Pfad und die Foto-Segmente — sonst bricht der concat-Demuxer (-c copy).
+  try {
+    const { extraInputs, parts: overlayParts, outLabel } = await buildCaptionOverlay({
+      caption,
+      logoPath,
+      accent,
+      baseLabel: "base",
+      firstExtraInputIdx: 1,
+      textfiles,
+    });
+    const parts = [
+      `[0:v]${COVER},fps=${REEL_FPS}[base]`,
+      ...overlayParts,
+      `[${outLabel}]format=yuv420p[v]`,
+    ];
+
+    await execFileAsync(
+      ffmpegBin,
+      [
+        "-y",
+        "-nostdin",
+        "-loglevel",
+        "error",
+        // `-t` VOR `-i input` → cappt nur den Clip; Scrim/Logo sind Standbilder
+        // (overlay eof_action=repeat hält sie über die volle Dauer).
+        "-t",
+        String(maxSeconds),
+        "-i",
+        input,
+        ...extraInputs,
+        "-filter_complex",
+        parts.join(";"),
+        "-map",
+        "[v]",
+        ...CANON_ENCODE,
+        output,
+      ],
+      { timeout: SEGMENT_TIMEOUT_MS, maxBuffer: FFMPEG_MAX_BUFFER },
+    );
+  } finally {
+    await unlinkAll(textfiles);
+  }
 }
 
 /**
