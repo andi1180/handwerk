@@ -87,6 +87,8 @@ Technische Doku: siehe [TECH.md](TECH.md).
 
 - **Schritt 10b.1 ✅ Sidebar-Header aufgeräumt (Logo statt Text + Trennlinie + Abstand)** — reines Layout, **keine Migration, keine Logik**. Im Desktop-Sidebar-Header (`app/portal/layout.tsx`) den `.portal-sidebar-brand`-Brand-Text („Valooro Handwerk") **entfernt** — nur noch das `<img src="/valooro.png">`-Logo (kein Text-Fallback mehr); darunter eine dezente **Trennlinie** (`<hr className="portal-sidebar-divider">`, 1px `var(--border)`, volle Sidebar-Breite minus 20px-Padding) + Abstand zu den `PortalNav`-Menüpunkten. CSS (`globals.css`): `.portal-sidebar-brand` gelöscht, `.portal-sidebar-logo`-`margin-bottom` entfernt (Divider trägt jetzt den Abstand: `margin: 16px 20px 20px`). **Mobile Top-Bar unverändert** (zeigt weiter `business.name`). `pnpm typecheck` + `pnpm build` grün.
 
+- **Root-Route Redirect ✅** — `app/page.tsx` leitet per `redirect('/portal')` (next/navigation, Server Component) sofort auf `/portal` weiter. `handwerk.valooro.com` landet damit direkt im Portal (eingeloggt) bzw. wird von der Middleware auf `/login` umgeleitet (nicht eingeloggt).
+
 ## Roadmap / Offene Schritte
 
 **Architektur — zwei Bühnen statt eines Desktop-Sequenz-Builders:** Der ursprünglich geplante **Desktop-Sequenz-Builder entfällt**. Stattdessen mobiler Assembler:
@@ -102,3 +104,5 @@ Technische Doku: siehe [TECH.md](TECH.md).
 
 - `Logo.png` im Repo-Root bleibt dauerhaft **untracked** — nie in Feature-Commits ziehen, nicht nachfragen.
 - `HANDWERK_PFLICHTENHEFT.md` bleibt untracked (interne Strategie, public Repo) — nie committen, nicht nachfragen.
+- `b.valooro.com` = öffentliche Kunden-Booklets (`/b/[token]`). DNS: CNAME auf `b0a70b96f4f2cb9e.vercel-dns-016.com`. Kein Portal, kein Login.
+- `handwerk.valooro.com` = Betriebsportal. DNS: CNAME auf `b0a70b96f4f2cb9e.vercel-dns-016.com`. Supabase Auth: Site URL + Redirect URLs auf `https://handwerk.valooro.com/**` gesetzt.
