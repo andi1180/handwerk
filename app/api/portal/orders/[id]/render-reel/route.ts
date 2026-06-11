@@ -20,12 +20,13 @@ import {
  * SCHRITT 8b-1c — Intro/Outro-Frames im Reel (+ optionales Logo-Wasserzeichen).
  *
  * Baut aus einem generierten Booklet ein 9:16-Reel (1080x1920, HARTE Schnitte,
- * KEIN Audio): ein Intro-Frame (~2,5 s) → die Foto-Frames (je 3 s, 8b-1a/1b) →
+ * KEIN Audio): ein Intro-Frame (~4 s) → die Foto-Frames (je 3 s, 8b-1a/1b) →
  * ein Outro-Frame (~2,5 s). Der eigentliche Render läuft in `after()` (Hintergrund
  * nach der Response, innerhalb maxDuration); der Fortschritt ist über
  * `booklets.reel_status` persistent (Poll + Reload).
  *
- *  - Intro:  intro_bg (Bild) oder Verlauf, Logo prominent oben, KI-Titel + Tagline.
+ *  - Intro:  intro_bg (Bild) oder Verlauf, Logo prominent oben, KI-Titel +
+ *            persönliche Ich-Beschreibung (FIX 8b-1c) + Tagline.
  *  - Fotos:  Caption-Overlay (8b-1b); ZUSÄTZLICH bei logo_per_page ein dezentes
  *            Logo-Wasserzeichen in der oberen Ecke (analog Web-Story).
  *  - Outro:  outro_bg/Verlauf, Logo, Betriebsname + Nachricht + Kontakt
@@ -46,12 +47,17 @@ export const maxDuration = 300;
 
 /** Anzeigedauer je Foto im Reel (harte Schnitte, kein Übergang). */
 const SECONDS_PER_PHOTO = 3;
-/** Intro/Outro kürzer als die Fotos — sie tragen nur Marke + ein paar Zeilen. */
-const INTRO_SECONDS = 2.5;
+/** Intro länger (FIX 8b-1c): die persönliche Ich-Story (Titel + Beschreibung)
+ *  muss lesbar sein. Outro bleibt knapp (nur Marke + ein paar Zeilen). */
+const INTRO_SECONDS = 4;
 const OUTRO_SECONDS = 2.5;
 
 type OrderRow = { id: string; business_id: string; status: string };
-type BookletRow = { id: string; intro_title: string | null };
+type BookletRow = {
+  id: string;
+  intro_title: string | null;
+  intro_description: string | null;
+};
 type PhotoItem = {
   storage_path: string;
   caption: string | null;
@@ -136,7 +142,7 @@ export async function POST(
   const service = createServiceClient();
   const { data: booklet, error: bookletError } = await service
     .from("booklets")
-    .select("id, intro_title")
+    .select("id, intro_title, intro_description")
     .eq("order_id", order.id)
     .eq("business_id", order.business_id)
     .maybeSingle<BookletRow>();
@@ -180,8 +186,10 @@ export async function POST(
       businessId: order.business_id,
       bookletId: booklet.id,
       photos,
-      // Intro: KI-Titel (Fallback Betriebsname, wie die Web-Story) + Tagline.
+      // Intro: KI-Titel (Fallback Betriebsname, wie die Web-Story) + die
+      // persönliche Ich-Beschreibung (FIX 8b-1c) + Tagline.
       introTitle: booklet.intro_title?.trim() || business.name,
+      introDescription: booklet.intro_description?.trim() || null,
       introTagline: business.settings.intro_tagline,
       // Outro: Betriebsname + Nachricht + Kontakt.
       businessName: business.name,
@@ -235,6 +243,7 @@ async function renderReel({
   bookletId,
   photos,
   introTitle,
+  introDescription,
   introTagline,
   businessName,
   outroMessage,
@@ -251,6 +260,7 @@ async function renderReel({
   bookletId: string;
   photos: PhotoItem[];
   introTitle: string;
+  introDescription: string | null;
   introTagline: string | null;
   businessName: string;
   outroMessage: string | null;
@@ -348,6 +358,7 @@ async function renderReel({
         ffmpegBin,
         output: introFrame,
         title: introTitle,
+        description: introDescription,
         tagline: introTagline,
         bgPath: introBgLocal,
         logoPath: logoLocal,

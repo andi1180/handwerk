@@ -76,16 +76,26 @@ const WATERMARK_MARGIN = 44;
 /** Branding-Akzentbalken (links-bündig am SIDE_MARGIN) unter Titel/Name. */
 const CENTER_ACCENT_W = 120;
 const CENTER_ACCENT_H = 6;
-/** Intro: Titel-Unterkante (Block wächst nach oben), Akzent + Tagline darunter. */
-const TITLE_FONT_SIZE = 76;
+/** Intro (FIX 8b-1c): Logo oben → Titel → Beschreibung → Tagline (top-down).
+ *  Der Titel ist bottom-anchored (Block wächst zum Logo hoch, hält Titel↔Akzent
+ *  eng, egal ob 1 oder 2 Zeilen); Beschreibung + Tagline darunter top-anchored an
+ *  festen y. Die Beschreibung ist die persönliche 1–2-Satz-Ich-Story — das Herz
+ *  des Intros (war in 8b-1c bewusst weg, kommt jetzt zurück; Intro-Dauer ~4 s). */
+const TITLE_FONT_SIZE = 72;
 const TITLE_LINE_SPACING = 14;
 const TITLE_MAX_CHARS = 18;
-const TITLE_BOTTOM = 1000;
-const INTRO_ACCENT_Y = 1032;
+const TITLE_BOTTOM = 860;
+const INTRO_ACCENT_Y = 896;
+/** Beschreibung: kleiner als der Titel, weiß, links-bündig, top-anchored unter
+ *  dem Akzent. Großzügige Reserve nach unten (1–2 Sätze ≈ 3–5 Zeilen). */
+const DESCRIPTION_FONT_SIZE = 38;
+const DESCRIPTION_LINE_SPACING = 12;
+const DESCRIPTION_MAX_CHARS = 36;
+const DESCRIPTION_TOP = 952;
 const TAGLINE_FONT_SIZE = 34;
 const TAGLINE_LINE_SPACING = 8;
 const TAGLINE_MAX_CHARS = 32;
-const TAGLINE_TOP = 1086;
+const TAGLINE_TOP = 1240;
 /** Outro: Name oben, Nachricht darunter, Kontakt unten in der Safe-Zone. */
 const NAME_FONT_SIZE = 64;
 const NAME_LINE_SPACING = 12;
@@ -218,12 +228,17 @@ function backgroundInput(
   if (bgPath) return ["-i", bgPath];
   // gradients ist eine reine libavfilter-Quelle (keine externe Lib) → in jedem
   // vollständigen Build vorhanden. Diagonaler Verlauf wie .booklet-bg--fallback.
+  //
+  // FIX 8b-1c: KEIN `:type=linear`. Die `type`-Option kam erst mit ffmpeg 6.1;
+  // auf dem Production-Build (6.0.1, s. scripts/upload-ffmpeg.ts) crasht sie den
+  // Filter → Intro/Outro scheiterte für Betriebe OHNE Hintergrundbild. `linear`
+  // ist ohnehin der Default, das Weglassen ändert die Optik nicht.
   return [
     "-f",
     "lavfi",
     "-i",
     `gradients=s=${REEL_W}x${REEL_H}:c0=${primary}:c1=${secondary}:` +
-      `x0=0:y0=0:x1=${REEL_W}:y1=${REEL_H}:type=linear`,
+      `x0=0:y0=0:x1=${REEL_W}:y1=${REEL_H}`,
   ];
 }
 
@@ -328,15 +343,18 @@ export async function bakePhotoFrame({
 }
 
 /**
- * Intro-Frame (1080x1920) backen (8b-1c): Hintergrund (Bild cover-crop oder
+ * Intro-Frame (1080x1920) backen (8b-1c, FIX): Hintergrund (Bild cover-crop oder
  * Verlauf) → Vollflächen-Scrim → Logo prominent oben (zentriert) → Titel (groß,
- * links-bündig) → Akzentbalken → Tagline darunter. Description bewusst weg
- * (zu viel für ~2,5 s; lebt in der Web-Story).
+ * links-bündig) → Akzentbalken → Beschreibung (1–2 Sätze, die persönliche
+ * Ich-Story) → Tagline darunter. Die Beschreibung war in 8b-1c bewusst weg, ist
+ * aber das Herz der Personalisierung — sie kommt mit längerer Intro-Dauer (~4 s)
+ * zurück. Alle drawtext links-bündig mit literalem x (auf 6.0.1 bewährt).
  */
 export async function bakeIntroFrame({
   ffmpegBin,
   output,
   title,
+  description,
   tagline,
   bgPath,
   logoPath,
@@ -346,6 +364,7 @@ export async function bakeIntroFrame({
   ffmpegBin: string;
   output: string;
   title: string;
+  description: string | null;
   tagline: string | null;
   bgPath: string | null;
   logoPath: string | null;
@@ -387,6 +406,23 @@ export async function bakeIntroFrame({
         shadowAlpha: 0.6,
       }),
     ];
+    if (description) {
+      const descriptionFile = await writeTmpText(
+        wrapText(description, DESCRIPTION_MAX_CHARS),
+        textfiles,
+      );
+      draws.push(
+        drawText({
+          textfile: descriptionFile,
+          fontcolor: "white",
+          fontsize: DESCRIPTION_FONT_SIZE,
+          lineSpacing: DESCRIPTION_LINE_SPACING,
+          x: String(SIDE_MARGIN),
+          y: String(DESCRIPTION_TOP),
+          shadowAlpha: 0.55,
+        }),
+      );
+    }
     if (tagline) {
       const taglineFile = await writeTmpText(
         wrapText(tagline.toUpperCase(), TAGLINE_MAX_CHARS),

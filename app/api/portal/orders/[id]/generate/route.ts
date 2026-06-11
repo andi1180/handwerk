@@ -106,6 +106,8 @@ export async function POST(
     intro = await generateIntro({
       itemDescription: order.item_description,
       captions,
+      // Betriebsname für die Ich-Perspektive (FIX 8b-1c): „… bei {Name} …".
+      businessName: business.name,
       language: order.language,
       // Betriebs-KI-Kontext (8a-1b) — erdet Ton/Fachsprache, KONTEXT keine Anweisung.
       businessContext: business.settings.ai_context ?? undefined,

@@ -721,10 +721,11 @@ Migration** (`booklets` existiert aus 0001).
   werden **wiederverwendet** (gleicher gecachter Client, Key nur aus
   `ANTHROPIC_API_KEY`, server-only).
 - [lib/ai/intro.ts](lib/ai/intro.ts) (NEU): `generateIntro({ itemDescription,
-  captions, language })` → `{ title, description }`. System-Prompt DE („erster
-  Eindruck, hochwertig"): kurzer Titel (≤ ~6 Wörter) + 1–2 Sätze zur
-  Transformation des Stücks, aus `item_description` + den vorhandenen Captions;
-  kein Marketing-Sprech, keine Emojis. Sonnet liefert **nur JSON** `{"title":
+  captions, businessName, language })` → `{ title, description }`. System-Prompt DE,
+  **aus der Ich-Perspektive des teilenden Kunden** (FIX 8b-1c, s. u.): kurzer,
+  persönlicher Titel (≤ ~6 Wörter) + 1–2 Sätze Ich-Story zur Transformation des
+  Stücks, aus `item_description` + den vorhandenen Captions, der Betrieb beim Namen
+  (`businessName`) als Erlebnis; kein Marketing-Sprech, keine Emojis. Sonnet liefert **nur JSON** `{"title":
   …,"description": …}` (kein Markdown/Backticks); **defensives Parsen**
   (Fence-Strip + Eingrenzung auf das erste `{…}` + `try/catch`) → bei
   Parse-Fehler `IntroParseError` (Route ⇒ **502**). `max_tokens: 300`.
@@ -1324,13 +1325,17 @@ Orchestrierung (Auth/Status/Downloads/Upload/Cleanup). Exporte: `bakePhotoFrame`
 - **Intro-Frame:** Hintergrund = `intro_bg_url` (Bucket `branding`, `service_role`
   download) cover-crop 1080×1920; **fehlt er** ⇒ diagonaler Verlauf aus
   `primary→secondary` über die `gradients`-lavfi-Quelle (reine libavfilter-Quelle,
-  in jedem vollständigen Build vorhanden) — spiegelt `.booklet-bg--fallback`. Darüber
+  in jedem vollständigen Build vorhanden) — spiegelt `.booklet-bg--fallback`.
+  **FIX 8b-1c:** der Verlauf nutzt **kein** `:type=linear` mehr (s. u.). Darüber
   der **Vollflächen-Scrim**, dann (falls `logo_url`) das **Logo prominent oben**
   (`overlay`, in **960×340**-Box skaliert — vergrößert ggü. anfangs 720×200, Alpha
   bleibt, weiterhin zentriert), dann **KI-`intro_title`** groß **links-bündig**
-  (Fallback Betriebsname), Branding-**Akzentbalken** und **`intro_tagline`** (uppercase,
-  `primary_color`) darunter. `intro_description` bewusst **weg** (zu viel für 2,5 s;
-  lebt in der Web-Story).
+  (Fallback Betriebsname), Branding-**Akzentbalken**, die **`intro_description`**
+  (1–2 Sätze, links-bündig, kleiner) und **`intro_tagline`** (uppercase,
+  `primary_color`) darunter — Reihenfolge **Logo → Titel → Beschreibung → Tagline**.
+  **FIX 8b-1c:** `intro_description` ist **zurück im Reel** (war anfangs bewusst weg)
+  — sie trägt die persönliche Ich-Story und ist das Herz der Personalisierung; die
+  Intro-Frame-Dauer ist dafür **2,5 s → 4 s** angehoben.
 - **Outro-Frame:** Hintergrund `outro_bg_url`/Verlauf, Scrim, Logo, **Betriebsname**,
   Akzentbalken, **`outro_message`** und unten in der Safe-Zone **Kontakt** (Telefon
   `contact_phone` + Website `website_url` als Host ohne Protokoll). **KEINE** Share-/
@@ -1374,6 +1379,38 @@ kein Deploy-Größenproblem; Trace verifiziert).
   geändert: Assembly, Reihenfolge, Scrim, Job/Status/Poll.
 - **drawtext-Optionsreihenfolge:** `fontfile` steht **nicht** an erster Stelle
   (`textfile` zuerst) — unverändert.
+
+### FIX 8b-1c (2): Verlauf-Fallback (6.0.1) + Intro-Beschreibung zurück + Kunden-Ich-Perspektive
+
+Drei zusammenhängende Korrekturen, **keine** Pipeline-/Assembly-/Reihenfolge-Änderung,
+keine Migration.
+
+1. **Verlauf-Fallback auf 6.0.1** ([lib/reel/frames.ts](lib/reel/frames.ts),
+   `backgroundInput`): die `gradients`-lavfi-Quelle nutzt **kein** `:type=linear` mehr.
+   Die `type`-Option kam erst mit **ffmpeg 6.1**; auf dem Production-Build (6.0.1) crashte
+   sie den Filter → Intro/Outro scheiterte für Betriebe **ohne** Intro/Outro-Hintergrundbild
+   (das war die in der vorigen FIX-Notiz offen gelassene Baustelle). `linear` ist ohnehin
+   der Default, das Weglassen ändert die Optik nicht.
+2. **`intro_description` zurück im Reel-Intro** (`bakeIntroFrame`): war in 8b-1c bewusst
+   weg, ist aber das Herz der Personalisierung — kommt zurück, Reihenfolge **Logo → Titel
+   → Beschreibung → Tagline** (Titel bottom-anchored, hält Titel↔Akzent eng; Beschreibung +
+   Tagline darunter top-anchored an festen y). Gleiche bewährte drawtext-Methode wie Titel/
+   Caption (literales x, links-bündig). Intro-Frame-Dauer **2,5 s → 4 s**
+   ([render-reel-Route](app/api/portal/orders/[id]/render-reel/route.ts), `INTRO_SECONDS`),
+   damit die persönliche Story lesbar ist; die Route lädt dafür `booklets.intro_description`
+   zusätzlich und reicht sie an `bakeIntroFrame` durch.
+3. **Kunden-Ich-Perspektive** ([lib/ai/intro.ts](lib/ai/intro.ts)) — der **Kern**: das
+   Intro ist aus der **Ich-Perspektive des teilenden Kunden** geschrieben („Ich habe bei
+   {Betrieb} … lassen — …"), geschlechtsneutral, **nicht** als Selbstdarstellung des
+   Betriebs — sonst wird es nicht geteilt. `generateIntro` bekommt zusätzlich den
+   `businessName` (`businesses.name`, von der [generate-Route](app/api/portal/orders/[id]/generate/route.ts)
+   durchgereicht); der System-Prompt nennt den Betrieb beim Namen als **Erlebnis** des
+   Kunden. Gilt für `intro_title` (kurz, persönlich) **und** `intro_description` (1–2 Sätze
+   Ich-Story), strikt geerdet auf `item_description` + Captions (keine erfundenen Gefühle).
+   `ai_context` (8a-1b) bleibt Betriebs-**FACHkontext** und überschreibt die Ich-Perspektive
+   **nicht**. Wirkt auf **Web-Story UND Reel** (gemeinsamer Intro-Text); greift nur bei
+   **NEU** generierten Intros (gespeicherte `booklets`-Werte bleiben). Lokal mit ffmpeg-full
+   verifiziert (Intro/Outro rendern mit Verlauf-Fallback + Beschreibung sauber).
 
 ### Render-Status-Anzeige (UI, kosmetisch)
 
