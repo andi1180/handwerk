@@ -1667,4 +1667,55 @@ ist bereits auf `[min..Ceiling]` normalisiert (`getCurrentBusiness`).
 
 ---
 
+## Reel-Status in der Auftragsliste (Schritt 8d)
+
+Die Auftragsliste zeigte bisher nur `order.status`. Sie zeigt jetzt **zusätzlich** den
+`booklets.reel_status`, damit „Reel fehlt" auf einen Blick erkennbar ist. **Keine
+Migration** (`reel_status` existiert aus 0004).
+
+### Zwei Achsen (bewusst getrennt)
+
+- **`order.status`** — der **Lifecycle** des Auftrags (`draft → finalized → generated →
+  sent → viewed → shared`), dargestellt durch das bestehende
+  [order-status-badge.tsx](components/order-status-badge.tsx).
+- **`booklets.reel_status`** — der **Render-Zustand** des Reels (`pending`/`rendering`/
+  `ready`/`failed`), dargestellt durch die neue Pill. Diese Achse ist **nur im
+  Auftrags-Status `generated`** sinnvoll: ein Booklet existiert (sonst gäbe es keinen
+  `reel_status`), ist aber noch **nicht versendet** — genau das Fenster, in dem ein
+  fehlendes Reel relevant ist.
+
+### Daten ([app/portal/orders/page.tsx](app/portal/orders/page.tsx))
+
+Nach der Order-Query eine **zweite Query** auf `booklets` (`select("order_id,
+reel_status")`, `.in("order_id", generatedIds)`) über den **AUTHENTICATED Server-Client**
+— `booklets` sind member-lesbar (RLS), **kein** `service_role`. Geladen wird nur für die
+Aufträge im Status `generated` (sonst gar nicht); das Ergebnis wird zu einer
+`Map<order_id, reel_status>` reduziert, aus der die Zeile per `?? null` liest.
+
+### Anzeige ([components/reel-state-pill.tsx](components/reel-state-pill.tsx))
+
+`<ReelStatePill>` — reine Präsentation (Server-Component-fähig, Muster wie
+`order-status-badge.tsx`), in der Zeile **neben** dem Status-Badge (gemeinsamer
+wrap-Flex). Die Liste rendert sie **ausschließlich** bei `order.status === 'generated'`;
+`draft`/`finalized` (noch kein Booklet) und `sent`/`viewed`/`shared` (bereits
+ausgeliefert) bekommen **keine** Pill. Zustände:
+
+| `reel_status` | Label | Farbe |
+| --- | --- | --- |
+| `pending` / `null` | „Reel fehlt" | **Amber/Warnung — aufmerksamkeitsstark** (der Kern) |
+| `rendering` | „Reel rendert …" | Blau |
+| `ready` | „Reel fertig" | Grün |
+| `failed` | „Reel fehlgeschlagen" | Rot |
+
+Der `ReelStatus`-Typ bleibt **eine Quelle** (definiert in
+[generate-controls.tsx](app/portal/orders/[id]/generate-controls.tsx), über die Pill
+re-exportiert). Die Farb-Tokens `--amber-*`/`--blue-*`/`--red-*` ([globals.css](app/globals.css))
+sind analog zu den `--green-*`-Tokens (6c) angelegt; Grün wird wiederverwendet.
+
+### i18n
+
+`orderStatus.reelMissing`/`reelRendering`/`reelReady`/`reelFailed`. Keine Inline-Strings.
+
+---
+
 > Nächste Migration: **0005**.

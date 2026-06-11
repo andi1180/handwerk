@@ -6,6 +6,10 @@ import {
   OrderStatusBadge,
   type OrderStatus,
 } from "@/components/order-status-badge";
+import {
+  ReelStatePill,
+  type ReelStatus,
+} from "@/components/reel-state-pill";
 
 /** Eine Zeile der Auftragsliste — nur die für die Übersicht benötigten Felder. */
 type OrderListRow = {
@@ -40,6 +44,22 @@ export default async function OrdersPage() {
     .returns<OrderListRow[]>();
 
   const orders = data ?? [];
+
+  // Zweite Achse: Reel-Render-Status. Nur für generierte Aufträge relevant
+  // (Booklet existiert, noch nicht versendet). booklets sind member-lesbar
+  // (RLS, AUTHENTICATED Client) — kein service_role. Map order_id → reel_status.
+  const generatedIds = orders
+    .filter((o) => o.status === "generated")
+    .map((o) => o.id);
+  const reelByOrder = new Map<string, ReelStatus | null>();
+  if (generatedIds.length > 0) {
+    const { data: booklets } = await supabase
+      .from("booklets")
+      .select("order_id, reel_status")
+      .in("order_id", generatedIds)
+      .returns<{ order_id: string; reel_status: ReelStatus | null }[]>();
+    for (const b of booklets ?? []) reelByOrder.set(b.order_id, b.reel_status);
+  }
 
   return (
     <div style={{ maxWidth: 720, margin: "0 auto" }}>
@@ -114,7 +134,22 @@ export default async function OrdersPage() {
                   flexShrink: 0,
                 }}
               >
-                <OrderStatusBadge status={order.status} />
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "flex-end",
+                    flexWrap: "wrap",
+                    gap: 6,
+                  }}
+                >
+                  <OrderStatusBadge status={order.status} />
+                  {order.status === "generated" ? (
+                    <ReelStatePill
+                      reelStatus={reelByOrder.get(order.id) ?? null}
+                    />
+                  ) : null}
+                </div>
                 <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>
                   {DATE_FORMAT.format(new Date(order.created_at))}
                 </div>

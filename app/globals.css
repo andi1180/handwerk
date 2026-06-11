@@ -20,6 +20,21 @@
   --green-border: rgba(46, 125, 70, 0.30);
   --green-text: #2E7D46;
 
+  /* Amber/Warnung — aufmerksamkeitsstark für „Reel fehlt" (8d). */
+  --amber-light: rgba(217, 119, 6, 0.14);
+  --amber-border: rgba(217, 119, 6, 0.45);
+  --amber-text: #B45309;
+
+  /* Blau — laufender Render „Reel rendert …" (8d). */
+  --blue-light: rgba(45, 100, 175, 0.10);
+  --blue-border: rgba(45, 100, 175, 0.30);
+  --blue-text: #2D64AF;
+
+  /* Rot — „Reel fehlgeschlagen" (8d). */
+  --red-light: rgba(192, 57, 43, 0.10);
+  --red-border: rgba(192, 57, 43, 0.30);
+  --red-text: #C0392B;
+
   --btn-dark-bg: #3A3A3A;
   --btn-gold-bg: #C4A95B;
 

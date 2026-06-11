@@ -51,6 +51,10 @@ export const de = {
     sent: "Gesendet",
     viewed: "Angesehen",
     shared: "Geteilt",
+    reelMissing: "Reel fehlt",
+    reelRendering: "Reel rendert …",
+    reelReady: "Reel fertig",
+    reelFailed: "Reel fehlgeschlagen",
   },
   orderDetail: {
     back: "Zurück zur Liste",
