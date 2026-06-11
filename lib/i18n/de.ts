@@ -197,6 +197,12 @@ export const de = {
     create: "Reel erstellen",
     starting: "Starte…",
     rendering: "Reel wird erstellt…",
+    // Rotierende, rein kosmetische Fortschritts-Stufen während des Renders
+    // (keine echte Telemetrie) — grob an der Pipeline-Reihenfolge orientiert.
+    stage1: "Bilder werden vorbereitet…",
+    stage2: "Intro & Outro werden gestaltet…",
+    stage3: "Reel wird zusammengesetzt…",
+    stage4: "Fast fertig…",
     watch: "Reel ansehen",
     recreate: "Neu erstellen",
     retry: "Erneut",

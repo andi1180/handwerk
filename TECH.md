@@ -1326,19 +1326,21 @@ Orchestrierung (Auth/Status/Downloads/Upload/Cleanup). Exporte: `bakePhotoFrame`
   `primary→secondary` über die `gradients`-lavfi-Quelle (reine libavfilter-Quelle,
   in jedem vollständigen Build vorhanden) — spiegelt `.booklet-bg--fallback`. Darüber
   der **Vollflächen-Scrim**, dann (falls `logo_url`) das **Logo prominent oben**
-  (`overlay`, in 720×200-Box skaliert, Alpha bleibt — wie die Web-Story-Intro), dann
-  **KI-`intro_title`** groß zentriert (Fallback Betriebsname), Branding-**Akzentbalken**
-  und **`intro_tagline`** (uppercase, `primary_color`) darunter. `intro_description`
-  bewusst **weg** (zu viel für 2,5 s; lebt in der Web-Story).
+  (`overlay`, in **960×340**-Box skaliert — vergrößert ggü. anfangs 720×200, Alpha
+  bleibt, weiterhin zentriert), dann **KI-`intro_title`** groß **links-bündig**
+  (Fallback Betriebsname), Branding-**Akzentbalken** und **`intro_tagline`** (uppercase,
+  `primary_color`) darunter. `intro_description` bewusst **weg** (zu viel für 2,5 s;
+  lebt in der Web-Story).
 - **Outro-Frame:** Hintergrund `outro_bg_url`/Verlauf, Scrim, Logo, **Betriebsname**,
   Akzentbalken, **`outro_message`** und unten in der Safe-Zone **Kontakt** (Telefon
   `contact_phone` + Website `website_url` als Host ohne Protokoll). **KEINE** Share-/
   Review-Elemente (Step 9; das Reel ist eine Datei, kein interaktiver Hub).
 - **Foto-Frames:** Captions unverändert (8b-1b). **ZUSÄTZLICH:** bei
   `branding.logo_per_page` ein **dezentes Logo-Wasserzeichen** oben links (`overlay`,
-  in 320×92-Box skaliert, Rand 44 px — analog `.booklet-page-logo`); ohne
-  `logo_per_page` kein Wasserzeichen. Das Logo wird **einmal** geladen und sowohl für
-  Intro/Outro als auch das Wasserzeichen genutzt.
+  in **400×116**-Box skaliert — leicht größer als anfangs 320×92, aber bewusst subtil,
+  Rand 44 px — analog `.booklet-page-logo`); ohne `logo_per_page` kein Wasserzeichen.
+  Das Logo wird **einmal** geladen und sowohl für Intro/Outro als auch das
+  Wasserzeichen genutzt.
 
 ### Vollflächen-Scrim ([assets/reel/frame-scrim.png](assets/reel/frame-scrim.png))
 
@@ -1351,21 +1353,38 @@ deterministisch). Via `outputFileTracingIncludes` ([next.config.ts](next.config.
 **zusätzlich** zum Font + Caption-Scrim in die render-reel-Function getraced (klein,
 kein Deploy-Größenproblem; Trace verifiziert).
 
-### Schrift, Zentrierung & ein drawtext-Stolperstein
+### Schrift & Textausrichtung (Fix: links-bündig wie die Caption)
 
-- Schrift weiterhin **mitgeliefert** + per `fontfile=` referenziert (kein fontconfig).
-  Zentrierter Text via `x=(w-text_w)/2`; **mehrzeilige** Blöcke sind innerhalb der
-  zentrierten Bounding-Box **links-bündig** (kein `text_align` — erst ab ffmpeg 7.0,
-  Vercel läuft 6.0.1), wie schon bei der Caption.
-- **drawbox-Zentrierung:** in den drawbox-x/y-Ausdrücken meint `w`/`h` die **Box**-Maße,
-  `iw`/`ih` die **Frame**-Maße → zentrierter Akzentbalken nutzt `x=(iw-W)/2` (sonst x=0).
+- Schrift weiterhin **mitgeliefert** + per `fontfile=` referenziert (kein fontconfig),
+  `textfile=`/`expansion=none` wie bei der Caption.
+- **Intro/Outro-Text ist LINKS-BÜNDIG** (literales `x=SIDE_MARGIN`), Akzentbalken
+  ebenso (`drawbox x=SIDE_MARGIN`) — **exakt die Caption-Methode**.
+
+  **Warum (Bugfix):** Ursprünglich war der Text **zentriert** (`drawtext x=(w-text_w)/2`,
+  Akzent `drawbox x=(iw-W)/2`). Auf dem **Production-Build (ffmpeg 6.0.1**, John Van
+  Sickle Static, s. [scripts/upload-ffmpeg.ts](scripts/upload-ffmpeg.ts)) blieb der
+  Intro/Outro-Text dabei **still leer** — Hintergrund + Logo (`overlay`) rendern, der
+  drawtext jedoch nicht; die Captions (8b-1b) liefen sauber. Der **einzige** Unterschied
+  zur funktionierenden Caption waren die zentrierenden `(…)/2`-Ausdrücke; die Caption
+  nutzt ausschließlich **literale x**. Da centered ohne `text_w` nicht geht, ist der
+  Text auf die bewährte Caption-Methode (literales, links-bündiges x) umgestellt. Lokal
+  mit ffmpeg 8.1.1 (ffmpeg-full) rendern beide Varianten — der Unterschied tritt erst
+  auf 6.0.1 auf, daher reproduziert man ihn nur dort. **Das Logo bleibt zentriert**
+  (`overlay x=(W-w)/2` rendert auf 6.0.1 nachweislich — es war sichtbar). Nicht
+  geändert: Assembly, Reihenfolge, Scrim, Job/Status/Poll.
 - **drawtext-Optionsreihenfolge:** `fontfile` steht **nicht** an erster Stelle
-  (`textfile`/`text` zuerst). Mit einem lokalen 8.1.1-Build verschluckte ein
-  führendes `fontfile=` die nachfolgende Option — `fontfile` nicht an den Anfang zu
-  stellen löst das standardkonform und ist für jeden korrekten Parser (Vercel 6.0.1)
-  unkritisch. Lokal mit arm64-ffmpeg verifiziert: alle Frames (Intro mit Bild+Logo,
-  Intro-Verlauf, Outro, Foto mit Caption+Wasserzeichen, Foto sauber) backen,
-  Assembly → 1080×1920 (DAR 9:16), h264/yuv420p, 30 fps, kein Audio.
+  (`textfile` zuerst) — unverändert.
+
+### Render-Status-Anzeige (UI, kosmetisch)
+
+Während `reel_status='rendering'` zeigt der `<ReelButton>`
+([generate-controls.tsx](app/portal/orders/[id]/generate-controls.tsx)) unter dem
+Button **rotierende Stufentexte** (i18n `reel.stage1…4`, Wechsel alle ~3,5 s, grob an
+der Pipeline orientiert: „Bilder werden vorbereitet…" → „Intro & Outro werden
+gestaltet…" → „Reel wird zusammengesetzt…" → „Fast fertig…"), die letzte bleibt
+stehen. **Rein kosmetisch** (keine echte Telemetrie — der Status kommt weiter nur aus
+dem `reel-status`-Poll), verkürzt die gefühlte Wartezeit; ein kleiner Spinner (`spin`-
+Keyframe) begleitet sie. Poll-Logik unverändert.
 
 ### Diagnose
 

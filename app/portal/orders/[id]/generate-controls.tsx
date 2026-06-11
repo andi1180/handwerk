@@ -273,6 +273,15 @@ export type ReelStatus = "pending" | "rendering" | "ready" | "failed";
 /** Poll-Intervall, solange der Render läuft. */
 const REEL_POLL_MS = 3000;
 
+/**
+ * Rein kosmetische Fortschritts-Stufen während des Renders (keine echte
+ * Telemetrie) — sie wechseln alle REEL_STAGE_MS und folgen grob der Pipeline
+ * (Bilder → Intro/Outro → Zusammensetzen → fast fertig). Die letzte Stufe bleibt
+ * stehen (kein Zurückspringen), bis der Poll `ready`/`failed` meldet.
+ */
+const REEL_STAGE_MS = 3500;
+const REEL_STAGES = ["reel.stage1", "reel.stage2", "reel.stage3", "reel.stage4"] as const;
+
 /** Server-Fehlercode des Render-Starts → i18n-Hinweis (+ technischer Detail-Teil). */
 async function noticeForReelStart(res: Response): Promise<string> {
   let code = "";
@@ -316,6 +325,18 @@ export function ReelButton({
     initialStatus === "failed" ? t(DEFAULT_LOCALE, "reel.failed") : null,
   );
   const [starting, setStarting] = useState(false);
+  // Index der kosmetischen Render-Stufe (nur während `rendering` sichtbar).
+  const [stageIdx, setStageIdx] = useState(0);
+
+  // Stufentexte durchlaufen, solange gerendert wird; die letzte bleibt stehen.
+  useEffect(() => {
+    if (status !== "rendering") return;
+    setStageIdx(0);
+    const id = setInterval(() => {
+      setStageIdx((i) => Math.min(i + 1, REEL_STAGES.length - 1));
+    }, REEL_STAGE_MS);
+    return () => clearInterval(id);
+  }, [status]);
 
   // Solange gerendert wird, den Status pollen (sofort + alle REEL_POLL_MS).
   useEffect(() => {
@@ -415,9 +436,27 @@ export function ReelButton({
                   : t(DEFAULT_LOCALE, "reel.create")}
         </button>
       </div>
-      <p style={{ marginTop: 8, fontSize: 12, color: "var(--text-secondary)" }}>
-        {t(DEFAULT_LOCALE, "reel.hint")}
-      </p>
+      {rendering ? (
+        <p
+          aria-live="polite"
+          style={{
+            marginTop: 8,
+            fontSize: 13,
+            fontWeight: 600,
+            color: "var(--gold)",
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 8,
+          }}
+        >
+          <Spinner />
+          {t(DEFAULT_LOCALE, REEL_STAGES[stageIdx] ?? "reel.rendering")}
+        </p>
+      ) : (
+        <p style={{ marginTop: 8, fontSize: 12, color: "var(--text-secondary)" }}>
+          {t(DEFAULT_LOCALE, "reel.hint")}
+        </p>
+      )}
       {notice ? <NoticeBox text={notice} /> : null}
     </div>
   );
@@ -441,6 +480,25 @@ function ExternalLinkIcon() {
       <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
       <path d="M15 3h6v6" />
       <path d="M10 14L21 3" />
+    </svg>
+  );
+}
+
+/** Kleiner rotierender Lade-Ring für die Render-Stufen. Reine Deko. */
+function Spinner() {
+  return (
+    <svg
+      width={14}
+      height={14}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={3}
+      strokeLinecap="round"
+      aria-hidden
+      style={{ flexShrink: 0, animation: "spin 0.9s linear infinite" }}
+    >
+      <path d="M21 12a9 9 0 1 1-6.219-8.56" />
     </svg>
   );
 }

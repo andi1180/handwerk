@@ -16,7 +16,7 @@ import { DEFAULT_BRANDING, isHexColor } from "@/lib/settings/options";
  *  - bakePhotoFrame  — Foto cover-cropt; optional Caption-Overlay (8b-1b) und/oder
  *                      dezentes Logo-Wasserzeichen (8b-1c, logo_per_page).
  *  - bakeIntroFrame  — Intro-Frame (8b-1c): Hintergrund/Verlauf + Logo + Titel +
- *                      Tagline, zentriert, lesbar über Vollflächen-Scrim.
+ *                      Tagline, links-bündig, lesbar über Vollflächen-Scrim.
  *  - bakeOutroFrame  — Outro-Frame (8b-1c): Hintergrund/Verlauf + Logo +
  *                      Betriebsname + Nachricht + Kontakt (Telefon/Website).
  *  - assembleReel    — Frames → 9:16-Reel (je Frame eigene Dauer, harte Schnitte).
@@ -47,7 +47,7 @@ export const REEL_FPS = 30;
 const FONT_PATH = join(process.cwd(), "assets/fonts/PlusJakartaSans-SemiBold.ttf");
 /** Caption-Scrim (8b-1b): nur unten — die Foto-Hälfte oben bleibt frei. */
 const CAPTION_SCRIM_PATH = join(process.cwd(), "assets/reel/caption-scrim.png");
-/** Frame-Scrim (8b-1c): vollflächig — für zentrierten Intro/Outro-Text. */
+/** Frame-Scrim (8b-1c): vollflächig — für den Intro/Outro-Text (links-bündig). */
 const FRAME_SCRIM_PATH = join(process.cwd(), "assets/reel/frame-scrim.png");
 
 /* --- Caption-Layout (8b-1b, unverändert) --- */
@@ -61,15 +61,19 @@ const ACCENT_W = 72; // Caption-Akzentbalken (links unter der Caption)
 const ACCENT_H = 5;
 
 /* --- Intro/Outro-Layout (8b-1c) --- */
-/** Logo prominent oben-zentriert (wie die Web-Story-Intro), in eine Box skaliert. */
-const LOGO_BOX_W = 720;
-const LOGO_BOX_H = 200;
+/** Logo prominent oben-zentriert (wie die Web-Story-Intro), in eine Box skaliert.
+ *  Deutlich größer als anfangs (720×200): wirkt auf dem 9:16-Frame zu klein —
+ *  breite Logos füllen jetzt ~960 px (60 px Rand je Seite), quadratische/hohe bis
+ *  340 px Höhe (~1,3–1,7×). Werte nach Augenmaß, leicht nachjustierbar. */
+const LOGO_BOX_W = 960;
+const LOGO_BOX_H = 340;
 const LOGO_TOP = 240;
-/** Dezentes Logo-Wasserzeichen pro Foto (obere Ecke, logo_per_page). */
-const WATERMARK_BOX_W = 320;
-const WATERMARK_BOX_H = 92;
+/** Dezentes Logo-Wasserzeichen pro Foto (obere Ecke, logo_per_page). Etwas
+ *  größer als anfangs (320×92), aber bewusst subtil. */
+const WATERMARK_BOX_W = 400;
+const WATERMARK_BOX_H = 116;
 const WATERMARK_MARGIN = 44;
-/** Branding-Akzentbalken (zentriert) unter Titel/Name. */
+/** Branding-Akzentbalken (links-bündig am SIDE_MARGIN) unter Titel/Name. */
 const CENTER_ACCENT_W = 120;
 const CENTER_ACCENT_H = 6;
 /** Intro: Titel-Unterkante (Block wächst nach oben), Akzent + Tagline darunter. */
@@ -183,13 +187,19 @@ function drawText(opts: {
 }
 
 /**
- * Zentrierter Branding-Akzentbalken (drawbox) bei fester y-Position. WICHTIG:
- * In den drawbox-x/y-Ausdrücken meint `w`/`h` die BOX-Maße, `iw`/`ih` die
- * Frame-Maße — zum Zentrieren also `iw`, sonst landet der Balken bei x=0.
+ * Branding-Akzentbalken (drawbox) bei fester y-Position, LINKS-BÜNDIG am
+ * SIDE_MARGIN — exakt wie der Caption-Akzentbalken (8b-1b), der auf dem
+ * Production-Build (ffmpeg 6.0.1) bewährt rendert.
+ *
+ * BUGFIX 8b-1c: Vorher zentriert via `x=(iw-…)/2`. Auf 6.0.1 blieb der
+ * gesamte nachfolgende Intro/Outro-Text **still leer** (Captions liefen sauber),
+ * der einzige Unterschied waren die zentrierenden `(iw-…)/2`/`(w-text_w)/2`-
+ * Ausdrücke — die Captions nutzen ausschließlich **literale x**. Wir ziehen den
+ * Text deshalb auf dieselbe bewährte Methode: literales x, links-bündig.
  */
-function centerAccent(y: number, accent: string): string {
+function accentBar(y: number, accent: string): string {
   return (
-    `drawbox=x=(iw-${CENTER_ACCENT_W})/2:y=${y}:` +
+    `drawbox=x=${SIDE_MARGIN}:y=${y}:` +
     `w=${CENTER_ACCENT_W}:h=${CENTER_ACCENT_H}:color=${accent}@1.0:t=fill`
   );
 }
@@ -319,8 +329,8 @@ export async function bakePhotoFrame({
 
 /**
  * Intro-Frame (1080x1920) backen (8b-1c): Hintergrund (Bild cover-crop oder
- * Verlauf) → Vollflächen-Scrim → Logo prominent oben → Titel (groß, zentriert,
- * über der Mitte) → Akzentbalken → Tagline darunter. Description bewusst weg
+ * Verlauf) → Vollflächen-Scrim → Logo prominent oben (zentriert) → Titel (groß,
+ * links-bündig) → Akzentbalken → Tagline darunter. Description bewusst weg
  * (zu viel für ~2,5 s; lebt in der Web-Story).
  */
 export async function bakeIntroFrame({
@@ -366,13 +376,13 @@ export async function bakeIntroFrame({
 
     const titleFile = await writeTmpText(wrapText(title, TITLE_MAX_CHARS), textfiles);
     const draws: string[] = [
-      centerAccent(INTRO_ACCENT_Y, primary),
+      accentBar(INTRO_ACCENT_Y, primary),
       drawText({
         textfile: titleFile,
         fontcolor: "white",
         fontsize: TITLE_FONT_SIZE,
         lineSpacing: TITLE_LINE_SPACING,
-        x: "(w-text_w)/2",
+        x: String(SIDE_MARGIN),
         y: `${TITLE_BOTTOM}-text_h`,
         shadowAlpha: 0.6,
       }),
@@ -388,7 +398,7 @@ export async function bakeIntroFrame({
           fontcolor: primary,
           fontsize: TAGLINE_FONT_SIZE,
           lineSpacing: TAGLINE_LINE_SPACING,
-          x: "(w-text_w)/2",
+          x: String(SIDE_MARGIN),
           y: String(TAGLINE_TOP),
           shadowAlpha: 0.5,
         }),
@@ -469,13 +479,13 @@ export async function bakeOutroFrame({
 
     const nameFile = await writeTmpText(wrapText(businessName, NAME_MAX_CHARS), textfiles);
     const draws: string[] = [
-      centerAccent(OUTRO_ACCENT_Y, primary),
+      accentBar(OUTRO_ACCENT_Y, primary),
       drawText({
         textfile: nameFile,
         fontcolor: "white",
         fontsize: NAME_FONT_SIZE,
         lineSpacing: NAME_LINE_SPACING,
-        x: "(w-text_w)/2",
+        x: String(SIDE_MARGIN),
         y: `${NAME_BOTTOM}-text_h`,
         shadowAlpha: 0.6,
       }),
@@ -491,7 +501,7 @@ export async function bakeOutroFrame({
           fontcolor: "white",
           fontsize: MESSAGE_FONT_SIZE,
           lineSpacing: MESSAGE_LINE_SPACING,
-          x: "(w-text_w)/2",
+          x: String(SIDE_MARGIN),
           y: String(MESSAGE_TOP),
           shadowAlpha: 0.5,
         }),
@@ -506,7 +516,7 @@ export async function bakeOutroFrame({
           fontcolor: "white",
           fontsize: CONTACT_FONT_SIZE,
           lineSpacing: CONTACT_LINE_SPACING,
-          x: "(w-text_w)/2",
+          x: String(SIDE_MARGIN),
           y: `${CONTACT_BOTTOM}-text_h`,
           shadowAlpha: 0.5,
         }),
