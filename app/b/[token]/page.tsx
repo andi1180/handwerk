@@ -1,3 +1,4 @@
+import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import { DEFAULT_LOCALE, t, type Locale } from "@/lib/i18n";
 import { bookletFontClass } from "@/lib/booklet/fonts";
@@ -7,6 +8,7 @@ import {
   type PublicBookletData,
   type PublicBookletMedia,
 } from "@/lib/booklet/load";
+import { ShareBar } from "./share-bar";
 import "./booklet.css";
 
 /* Pro Request frisch rendern — die Signed-URLs sind kurzlebig, nichts cachen. */
@@ -41,6 +43,13 @@ export default async function PublicBookletPage({
   // aus der DB. Der i18n-Layer kennt aktuell nur 'de' → unbekannt ⇒ Default.
   const locale = (["de"] as const).find((l) => l === data.language) ?? DEFAULT_LOCALE;
 
+  // Kanonische absolute Story-URL fürs Teilen. Auf Vercel liefern die
+  // x-forwarded-*-Header Host/Protokoll; die Seite ist ohnehin force-dynamic.
+  const h = await headers();
+  const host = h.get("x-forwarded-host") ?? h.get("host") ?? "";
+  const proto = h.get("x-forwarded-proto") ?? "https";
+  const storyUrl = `${proto}://${host}/b/${token}`;
+
   // Branding-Farben als CSS-Variablen an den Story-Wurzel-Container.
   const rootStyle = {
     "--bk-primary": data.branding.primary_color,
@@ -57,7 +66,12 @@ export default async function PublicBookletPage({
         {data.media.map((item) => (
           <MediaSection key={item.id} item={item} data={data} />
         ))}
-        <OutroSection data={data} locale={locale} />
+        <OutroSection
+          data={data}
+          locale={locale}
+          storyUrl={storyUrl}
+          reelSignedUrl={data.reelSignedUrl}
+        />
       </main>
     </div>
   );
@@ -169,15 +183,19 @@ function MediaSection({
 function OutroSection({
   data,
   locale,
+  storyUrl,
+  reelSignedUrl,
 }: {
   data: PublicBookletData;
   locale: Locale;
+  storyUrl: string;
+  reelSignedUrl: string | null;
 }) {
   const { contact_email, contact_phone, website_url } = data.settings;
   const hasContact = Boolean(contact_email || contact_phone || website_url);
 
   return (
-    <section className="booklet-section">
+    <section className="booklet-section booklet-section--outro">
       {data.outroBgUrl ? (
         <img className="booklet-bg" src={data.outroBgUrl} alt="" />
       ) : (
@@ -197,6 +215,12 @@ function OutroSection({
         {data.settings.outro_message ? (
           <p className="booklet-outro-message">{data.settings.outro_message}</p>
         ) : null}
+
+        <ShareBar
+          storyUrl={storyUrl}
+          reelSignedUrl={reelSignedUrl}
+          locale={locale}
+        />
 
         {hasContact ? (
           <div className="booklet-contact">

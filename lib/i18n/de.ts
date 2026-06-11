@@ -243,4 +243,17 @@ export const de = {
     expiredTitle: "Diese Seite ist nicht mehr verfügbar.",
     expiredText: "Der Link ist abgelaufen.",
   },
+  share: {
+    heading: "Gefällt's dir? Teile es!",
+    shareReel: "Reel teilen",
+    download: "Reel herunterladen",
+    shareStory: "Story teilen",
+    whatsapp: "WhatsApp",
+    copyLink: "Link kopieren",
+    copied: "✓ Link kopiert",
+    sharing: "Wird vorbereitet…",
+    // Titel/Text für navigator.share + WhatsApp-Deeplink (Kunden-Perspektive).
+    shareTitle: "Mein Booklet",
+    message: "Schau dir das an:",
+  },
 } as const;

@@ -1718,4 +1718,33 @@ sind analog zu den `--green-*`-Tokens (6c) angelegt; Grün wird wiederverwendet.
 
 ---
 
+## Share-Sheet auf der Web-Story (Schritt 9a)
+
+Die öffentliche Web-Story [/b/[token]](app/b/[token]/page.tsx) bekommt ihre **Teilen-Mechanik** — der WOM-Kern: Reel als **Datei**, Story als **URL**, WhatsApp-Deeplink, Link kopieren, Download-Fallback. **Keine Migration.** **KEINE** Review-/IG-Caption-Aktionen (das ist 9b), **KEIN** View-/Analytics-Tracking (Step 9/10 später).
+
+### Daten ([app/b/[token]/page.tsx](app/b/[token]/page.tsx) bleibt Server Component)
+
+- **Reel signieren:** Der Lader [lib/booklet/load.ts](lib/booklet/load.ts) liest jetzt zusätzlich `booklets.reel_status` + `reel_url`. Ist `reel_status === 'ready'` **und** `reel_url` gesetzt, wird der Reel-Pfad (Bucket `order-media`, `{business_id}/{order_id}/reel.mp4`) **server-seitig per `service_role`** signiert — im **selben Batch** wie die Medien (`signPaths`, ein Round-Trip), Ablauf 3600 s. Sonst `null`. Neues Feld `PublicBookletData.reelSignedUrl: string | null`. **Token bleibt die einzige Vertrauensquelle** (§14.2): alle Reads strikt auf die `business_id`/`order_id` der Booklet-Row gescoped.
+- **Kanonische Story-URL:** Die Page leitet die absolute `/b/[token]`-URL aus den Request-Headern ab (`x-forwarded-host` ?? `host`, `x-forwarded-proto` ?? `https` — auf Vercel gesetzt); die Seite ist ohnehin `force-dynamic`.
+- Beides geht als Props (`storyUrl`, `reelSignedUrl`, `locale`) an die neue Client-Komponente `<ShareBar>` (gerendert im **Outro**, nach der Abschiedsnachricht, vor den Kontakt-Pills).
+
+### Client-Komponente ([app/b/[token]/share-bar.tsx](app/b/[token]/share-bar.tsx), `"use client"`)
+
+**SSR-sicher** — `window`/`navigator` werden **nur** in Handlern/Effects berührt, nie beim Render. Buttons sind `div + onClick` (kein `<form>`), via Helfer `<Pressable>` mit `role="button"` + Enter/Space-Tastatur. Reihenfolge wie Pflichtenheft §4: **Reel teilen → Story teilen → WhatsApp → Link kopieren.**
+
+- **„Reel teilen" (nur wenn `reelSignedUrl` gesetzt):** `fetch(reelSignedUrl)` → `new File([blob], "reel.mp4", {type:"video/mp4"})`; wenn `navigator.canShare({files})` **und** `navigator.share` → `navigator.share({ files, title })` (öffnet den IG/TikTok-Composer), sonst **Download-Fallback** (Anchor mit `download`-Attribut). Ladezustand während Fetch/Share; **Abbruch durch den Nutzer = kein Fehler** (kein Toast). Eine Capability-Probe im `useEffect` (Dummy-`File` an `canShare`) entscheidet **optimistisch** über das Label: kann teilen ⇒ „Reel teilen", sonst ⇒ „Reel herunterladen". Ist `reelSignedUrl` `null`, wird der Button **gar nicht** gerendert (die Seite ist dann bewusst „kastriert", kein Platzhalter-Fake).
+- **„Story teilen" (URL):** `typeof navigator.share === "function"` → `navigator.share({ url, title, text })`, sonst Fallback = Link kopieren.
+- **„WhatsApp":** Deeplink `https://wa.me/?text=<encodeURIComponent(message + " " + storyUrl)>` via `window.open(..., "_blank", "noopener,noreferrer")`.
+- **„Link kopieren":** `navigator.clipboard.writeText(storyUrl)` → kurzer „✓ Link kopiert"-Flash (~2 s, Timer im `useRef`, beim Unmount geräumt).
+
+### Platzierung & Stil ([app/b/[token]/booklet.css](app/b/[token]/booklet.css))
+
+Prominente Teilen-Sektion im **Outro**, mobile-first, Valooro-Branding (dieselben `--bk-*`-Tokens wie die Web-Story). **„Reel teilen" optisch als Hauptaktion** (`.booklet-share-primary`, `--bk-primary`-Fläche, prominent), Story/WhatsApp/Link als gleich breite Outline-Kacheln (`.booklet-share-row`/`.booklet-share-btn`). Weil das Outro jetzt zusätzlich die Teilen-Buttons trägt, darf es über `100dvh` **hinauswachsen**: `.booklet-section--outro` schaltet von fixem `height: 100dvh; overflow: hidden` auf `min-height: 100dvh; height: auto; overflow: visible` (Snap-Punkt bleibt am oberen Rand) — die full-bleed Medien-Sektionen bleiben unverändert bei 100dvh.
+
+### i18n
+
+Neuer Block `share.*` in [lib/i18n/de.ts](lib/i18n/de.ts): `heading`, `shareReel`, `download`, `shareStory`, `whatsapp`, `copyLink`, `copied`, `sharing` sowie `shareTitle`/`message` (Titel + kurzer Text für `navigator.share`/WhatsApp, Kunden-Perspektive). Labels über `t(locale, "share.…")`, `locale` aus `booklet.language` (Fallback `de`). Keine Inline-Strings.
+
+---
+
 > Nächste Migration: **0005**.

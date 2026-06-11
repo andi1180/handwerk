@@ -32,6 +32,8 @@ export type PublicBookletData = {
   logoUrl: string | null;
   introBgUrl: string | null;
   outroBgUrl: string | null;
+  /** Signierte Reel-URL (Bucket order-media) — nur wenn reel_status='ready', sonst null. */
+  reelSignedUrl: string | null;
   media: PublicBookletMedia[];
 };
 
@@ -53,6 +55,8 @@ type BookletRow = {
   intro_description: string | null;
   language: string;
   expires_at: string | null;
+  reel_status: string | null;
+  reel_url: string | null;
 };
 
 type BusinessRow = {
@@ -112,7 +116,7 @@ export async function loadPublicBooklet(
   const { data: booklet } = await service
     .from("booklets")
     .select(
-      "business_id, order_id, intro_title, intro_description, language, expires_at",
+      "business_id, order_id, intro_title, intro_description, language, expires_at, reel_status, reel_url",
     )
     .eq("access_token", token)
     .maybeSingle<BookletRow>();
@@ -150,11 +154,17 @@ export async function loadPublicBooklet(
   const branding = normalizeBranding(business.branding);
   const settings = normalizeSettings(business.settings);
 
-  const mediaUrls = await signPaths(
-    service,
-    "order-media",
-    rows.map((m) => m.storage_path),
-  );
+  // Reel nur signieren, wenn fertig gerendert (reel_status='ready'). Es liegt im
+  // selben Bucket order-media → zusammen mit den Medien in einem Batch signieren.
+  const reelPath =
+    booklet.reel_status === "ready" && booklet.reel_url
+      ? booklet.reel_url
+      : null;
+
+  const mediaUrls = await signPaths(service, "order-media", [
+    ...rows.map((m) => m.storage_path),
+    ...(reelPath ? [reelPath] : []),
+  ]);
   const brandingUrls = await signPaths(
     service,
     "branding",
@@ -177,6 +187,7 @@ export async function loadPublicBooklet(
       logoUrl: signedBranding(branding.logo_url),
       introBgUrl: signedBranding(branding.intro_bg_url),
       outroBgUrl: signedBranding(branding.outro_bg_url),
+      reelSignedUrl: reelPath ? (mediaUrls.get(reelPath) ?? null) : null,
       media: rows.map((m) => ({
         id: m.id,
         media_type: m.media_type,

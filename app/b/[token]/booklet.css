@@ -262,6 +262,101 @@
   flex-shrink: 0;
 }
 
+/* --- Teilen-Sektion (Schritt 9a) — im Outro, „Reel teilen" = Hauptaktion --- */
+
+/* Das Outro trägt jetzt zusätzlich die Teilen-Buttons und darf daher über
+   100dvh hinauswachsen (anders als die full-bleed Medien-Sektionen, die fix
+   bei 100dvh bleiben). min-height hält den Snap-Punkt am oberen Rand. */
+.booklet-section--outro {
+  height: auto;
+  min-height: 100dvh;
+  overflow: visible;
+}
+
+.booklet-share {
+  width: 100%;
+  max-width: 340px;
+  margin-top: 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.booklet-share-heading {
+  margin: 0 0 2px;
+  font-size: clamp(0.82rem, 3.4vw, 1rem);
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: var(--bk-ink);
+  opacity: 0.95;
+}
+
+/* Hauptaktion: Reel teilen — Branding-Farbe, prominent. */
+.booklet-share-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 56px;
+  padding: 15px 20px;
+  border-radius: 999px;
+  background: var(--bk-primary);
+  color: #14130f;
+  font-size: 1.05rem;
+  font-weight: 700;
+  cursor: pointer;
+  user-select: none;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
+  transition:
+    transform 0.12s ease,
+    filter 0.15s ease;
+}
+.booklet-share-primary:hover {
+  filter: brightness(1.05);
+}
+.booklet-share-primary:active {
+  transform: translateY(1px);
+}
+.booklet-share-primary[aria-disabled="true"] {
+  opacity: 0.7;
+  pointer-events: none;
+}
+
+/* Sekundäraktionen: Story / WhatsApp / Link — gleich breite Outline-Kacheln. */
+.booklet-share-row {
+  display: flex;
+  gap: 10px;
+}
+.booklet-share-btn {
+  flex: 1;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 64px;
+  padding: 10px 6px;
+  color: var(--bk-ink);
+  font-size: 0.8rem;
+  font-weight: 500;
+  text-align: center;
+  cursor: pointer;
+  user-select: none;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 14px;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease;
+}
+.booklet-share-btn:hover {
+  border-color: var(--bk-primary);
+  background: rgba(255, 255, 255, 0.06);
+}
+.booklet-share-btn svg {
+  color: var(--bk-primary);
+  flex-shrink: 0;
+}
+
 /* --- „nicht mehr verfügbar"-Seite (abgelaufen) --- */
 
 .booklet-simple {
