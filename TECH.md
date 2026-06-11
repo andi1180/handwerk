@@ -2017,4 +2017,56 @@ Neue Blöcke in [lib/i18n/de.ts](lib/i18n/de.ts): `register.*` (`title`/`intro`/
 
 ---
 
+## Inbound-Webhook / roapp-Connector (§12)
+
+Vendor-neutraler Inbound-Webhook, der Aufträge **automatisch anlegt** (`order.created`) und **ausliefert** (`order.picked_up`). Additiv zum manuellen Pfad (§12.5). **Keine Migration** — `businesses.webhook_secret` existiert aus 0001. **Pro Betrieb, Secret-authentifiziert, tenant-gescoped** (§12.3 / §14.2).
+
+### Endpoint ([app/api/webhook/[secret]/route.ts](app/api/webhook/[secret]/route.ts), `POST`)
+
+- Liegt **bewusst nicht** unter `/portal` (kein Session-Kontext). Die Middleware lässt ihn durch (Redirects greifen nur für `/portal`).
+- **AUTH = Pfad-Secret (§14.2):** `[secret]` → `businesses.webhook_secret` → `business_id` (über `service_role`, da kein Session-Kontext). Diese `business_id` ist die **EINZIGE Vertrauensquelle** — **NIE** aus dem Payload. Alle DB-Zugriffe laufen über `service_role`, strikt auf diese `business_id` gescoped.
+- **ROBUSTHEIT (§12):** **Ungültiges/fehlendes Secret ⇒ 404** ist das **einzige harte Gate**. Alles andere antwortet **200 + kurzer Status-String** (`{ status }`), damit roapp **keine Retry-Stürme** macht. No-op-/Fehlerfälle werden geloggt: `lookup_failed`, `bad_body`, `ignored_event`, `no_object_id`, `enrich_failed`, `already_exists`, `insert_failed`, `noop_status`, `order_not_found`, `not_generated`, `already_sent`, `no_booklet`, `status_failed` sowie die Erfolge `created`/`sent`/`sent_no_email`.
+- **Ablauf:** Secret → Betrieb (404) → Body parsen (`bad_body`) → Event klassifizieren (`ignored_event`) → `object_id` vorhanden (`no_object_id`) → **EIN** Anreicherungs-Call (`enrich_failed`) → Branch.
+
+### Vendor-neutrale Klassifizierung ([lib/roapp/events.ts](lib/roapp/events.ts))
+
+**PLAIN-Modul** (kein `service_role`/Secret/API-Key) — dem Endpunkt ist egal, ob der POST roapp-nativ, von Zapier/Make oder manuell kommt (§12.1).
+
+- `parseWebhookBody(body)` → `{ eventName, objectType, objectId }`: liest `event_name` (Fallback `event`/`type`), `context.object_type` (Fallback Top-Level `object_type`), `context.object_id` (Fallback `object_id`, number→string). Defensiv, **kein `any`**.
+- `classifyEvent(parsed)` → `"created" | "picked_up" | null`: nur für `object_type === "order"`; `event_name` endet auf `.created` ⇒ `created`, auf `.status.changed` ⇒ `picked_up`, sonst `null`.
+- **WICHTIG:** Die numerische Status-ID aus dem Payload (`metadata.new.id`) wird **ignoriert** — sie stimmt **nicht** mit der API-`status.id` überein. Ob „abgeholt", entscheidet der API-`status.name`.
+
+### roapp-Anreicherung ([lib/roapp/client.ts](lib/roapp/client.ts), server-only)
+
+- `getRoappOrder(objectId)`: **EIN** Call `GET https://api.roapp.io/orders/{object_id}` mit `Authorization: Bearer ${ROAPP_API_KEY}` (AbortController-Timeout 10 s). Die Antwort enthält das **eingebettete `client`-Objekt** (`email`/`first_name`/`last_name`/`name`), **`status.name`** im Klartext und **`id_label`** (= unser `external_ref`) — **kein** zweiter Contact-Call. **Wirft** bei fehlendem Key / Nicht-2xx / Timeout / ungültigem JSON (Endpoint fängt ⇒ 200 `enrich_failed`).
+- `parseRoappOrder(raw)` extrahiert defensiv/typsicher (`RoappOrder`), entpackt eine optionale `{ data: … }`-Hülle.
+- `ROAPP_PICKED_UP_STATUS_NAME` = `process.env.ROAPP_PICKED_UP_STATUS_NAME` ?? `"Abgeholt"`.
+
+### Branch `order.created` (Auftrag anlegen)
+
+Wie die Portal-Order-Route ([app/api/portal/orders/route.ts](app/api/portal/orders/route.ts)), aber via `service_role`:
+- `customer_name` = `first+last` → sonst `client.name` → sonst `external_ref` → sonst `"Kunde"` (Spalte NOT NULL); `customer_email` = `client.email`; `external_ref` = `id_label`; `language` = `business.default_language`; `status='draft'`.
+- **§13.5:** `consent_given` **IMMER `false`**, `consent_at` **`null`** — Consent gehört an den Tresen, kann per Webhook nicht erteilt werden.
+- `item_description` = `null` — roapp-Custom-Field-IDs sind pro Betrieb verschieden ⇒ kein zuverlässiges Mapping.
+- **IDEMPOTENT:** existiert schon eine Order mit `external_ref` für den Betrieb ⇒ kein zweiter Insert, `already_exists` (Dedup nur, wenn `external_ref` vorhanden).
+
+### Branch `order.picked_up` (Auslieferung — deliver-Pfad REPLIZIERT)
+
+Die deliver-Logik ([app/api/portal/orders/[id]/deliver/route.ts](app/api/portal/orders/[id]/deliver/route.ts)) ist **repliziert, nicht geteilt** (die Portal-Route ist session-gebunden):
+- Nur wenn **API-`status.name === ROAPP_PICKED_UP_STATUS_NAME`** ⇒ sonst `noop_status`.
+- Order per `external_ref` + `business_id` finden (sonst `order_not_found`); nur Status **`generated`** wird ausgeliefert (draft/finalized ⇒ `not_generated`, sent/viewed/shared ⇒ `already_sent`).
+- **Status `generated→sent`** defensiv gefiltert (`.eq('status','generated')`) **+ `count`-Check gegen Doppelversand** (Webhook kann mehrfach feuern / Race ⇒ `count === 0` ⇒ `already_sent`, keine Nebenwirkungen).
+- **Nicht-blockierend** (wie im Vorbild): `booklets.sent_at`, **Billing-Event `'booklet_sent'`** (via `service_role` — `billing_events` hat kein `authenticated`-INSERT-Grant), **Booklet-E-Mail** via [sendBookletEmail](lib/email/booklet-email.ts) (Link `${BOOKLET_BASE_URL}/b/${access_token}?${CUSTOMER_VIEW_QUERY}`, `replyTo = settings.contact_email`). Erfolg ⇒ `sent` bzw. `sent_no_email`.
+
+### Env & Secret-Verwaltung
+
+- **Env:** `ROAPP_API_KEY` (server-only, neu) + optional `ROAPP_PICKED_UP_STATUS_NAME` — dokumentiert in [.env.example](.env.example). `BOOKLET_BASE_URL` existiert bereits.
+- **Secret setzen** (keine Migration, ops): [supabase/scripts/set_webhook_secret.sql](supabase/scripts/set_webhook_secret.sql) setzt per `gen_random_uuid()` ein Secret für **einen** Betrieb (`where business_email = …`, nur wenn `webhook_secret is null` ⇒ **überschreibt bestehende nie**) und liest es aus. Webhook-URL: `https://handwerk.valooro.com/api/webhook/<webhook_secret>`.
+
+### Offener Folgeschritt
+
+- **`x-signature` (HMAC) wird NICHT geprüft** — das Pfad-Secret ist die Auth fürs MVP. Eine zusätzliche HMAC-Signaturprüfung des Payloads (gegen ein pro-Betrieb-Shared-Secret) ist ein sinnvoller Härtungs-Folgeschritt.
+
+---
+
 > Nächste Migration: **0006**.

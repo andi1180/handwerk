@@ -1,0 +1,372 @@
+import { NextResponse } from "next/server";
+import { createServiceClient } from "@/lib/supabase/service";
+import { normalizeSettings } from "@/lib/auth/current-business";
+import { CUSTOMER_VIEW_QUERY } from "@/lib/booklet/customer-view";
+import { sendBookletEmail } from "@/lib/email/booklet-email";
+import { classifyEvent, parseWebhookBody } from "@/lib/roapp/events";
+import {
+  getRoappOrder,
+  ROAPP_PICKED_UP_STATUS_NAME,
+  type RoappOrder,
+} from "@/lib/roapp/client";
+
+/**
+ * POST /api/webhook/[secret] — vendor-neutraler Inbound-Webhook (§12).
+ *
+ * Liegt bewusst NICHT unter /portal: kein Session-Kontext. Die Authentifizierung
+ * ist das PFAD-SECRET: `[secret]` → `businesses.webhook_secret` → `business_id`.
+ * Diese `business_id` ist die EINZIGE Vertrauensquelle (§14.2) — NIE aus dem
+ * Payload. Ohne Session laufen ALLE DB-Zugriffe über `service_role`, strikt auf
+ * die aufgelöste `business_id` gescoped.
+ *
+ * Zwei Events (vendor-neutral klassifiziert, roapp-spezifisch angereichert):
+ *  - order.created  (event_name endet auf ".created")        → Order anlegen.
+ *  - order.picked_up(event_name endet auf ".status.changed") → falls API-
+ *    `status.name === ROAPP_PICKED_UP_STATUS_NAME` und unsere Order `generated`
+ *    ist: deliver-Pfad replizieren (Status, Billing, E-Mail).
+ *
+ * Anreicherung: EIN Call `GET /orders/{object_id}` liefert client + status.name +
+ * id_label (= external_ref). KEIN zweiter Contact-Call.
+ *
+ * ROBUSTHEIT (§12): Außer ungültigem Secret (404) IMMER 200 + kurzer
+ * Status-String, damit roapp keine Retry-Stürme macht. No-op-Fälle werden
+ * geloggt. Die deliver-Logik ist REPLIZIERT (nicht geteilt), weil die
+ * Portal-deliver-Route session-gebunden ist.
+ *
+ * HINWEIS: Die `x-signature` (HMAC) wird im MVP NICHT geprüft — das Pfad-Secret
+ * ist die Auth. Signaturprüfung ist als Folgeschritt in TECH.md notiert.
+ */
+
+type ServiceClient = ReturnType<typeof createServiceClient>;
+
+/** Der über das Secret aufgelöste Betrieb (Vertrauensquelle). */
+type WebhookBusiness = {
+  id: string;
+  name: string;
+  default_language: string;
+  settings: unknown;
+};
+
+/** Echte Fehlermeldung für die Server-Logs (Vercel) extrahieren. */
+function errMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * 200 mit kurzem Status-String. Alles außer ungültigem Secret antwortet so —
+ * roapp soll nicht erneut zustellen.
+ */
+function ok(status: string): NextResponse {
+  return NextResponse.json({ status }, { status: 200 });
+}
+
+/** 404 — das EINZIGE harte Gate: unbekanntes/fehlendes Secret. */
+function notFound(): NextResponse {
+  return NextResponse.json({ error: "not_found" }, { status: 404 });
+}
+
+/**
+ * Öffentliche Booklet-Basis-URL für den E-Mail-Link (identische Logik zur
+ * deliver-Route). Bevorzugt `BOOKLET_BASE_URL` (Prod: eigene Booklet-Domain,
+ * z. B. https://b.valooro.com); Fallback ist der Request-Origin (dev).
+ */
+function bookletBaseUrl(request: Request): string {
+  const configured = process.env.BOOKLET_BASE_URL?.trim();
+  if (configured) return configured.replace(/\/+$/, "");
+  const url = new URL(request.url);
+  return `${url.protocol}//${url.host}`;
+}
+
+export async function POST(
+  request: Request,
+  { params }: { params: Promise<{ secret: string }> },
+) {
+  const { secret } = await params;
+  if (!secret) return notFound();
+
+  const service = createServiceClient();
+
+  // AUTH (§14.2): Pfad-Secret → Betrieb. Die EINZIGE Vertrauensquelle.
+  const { data: business, error: bizError } = await service
+    .from("businesses")
+    .select("id, name, default_language, settings")
+    .eq("webhook_secret", secret)
+    .maybeSingle<WebhookBusiness>();
+  if (bizError) {
+    // Infrastruktur-Hiccup beim Auflösen — kein Retry-Sturm provozieren (§12).
+    console.error("webhook: business lookup failed", {
+      step: "secret_lookup",
+      message: bizError.message,
+    });
+    return ok("lookup_failed");
+  }
+  if (!business) return notFound();
+
+  // Body parsen + Event vendor-neutral klassifizieren.
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    console.error("webhook: invalid json body", {
+      business_id: business.id,
+      step: "parse_body",
+    });
+    return ok("bad_body");
+  }
+
+  const parsed = parseWebhookBody(body);
+  const kind = classifyEvent(parsed);
+  if (!kind) return ok("ignored_event");
+  if (!parsed.objectId) {
+    console.error("webhook: missing object_id", {
+      business_id: business.id,
+      step: "object_id",
+    });
+    return ok("no_object_id");
+  }
+
+  // Anreicherung über die roapp-API (EIN Call: client + status.name + id_label).
+  let roappOrder: RoappOrder;
+  try {
+    roappOrder = await getRoappOrder(parsed.objectId);
+  } catch (error) {
+    console.error("webhook: roapp enrich failed", {
+      business_id: business.id,
+      step: "enrich",
+      object_id: parsed.objectId,
+      message: errMessage(error),
+    });
+    return ok("enrich_failed");
+  }
+
+  const externalRef = roappOrder.id_label;
+
+  if (kind === "created") {
+    return handleOrderCreated(service, business, roappOrder, externalRef);
+  }
+  return handleOrderPickedUp(request, service, business, roappOrder, externalRef);
+}
+
+/**
+ * order.created: Auftrag im Betrieb anlegen (wie die Portal-Order-Route, aber
+ * via service_role). IDEMPOTENT über `external_ref`: existiert die Order schon,
+ * kein zweiter Insert. §13.5: `consent_given` IMMER false / `consent_at` null —
+ * Consent gehört an den Tresen, kann per Webhook nicht erteilt werden.
+ */
+async function handleOrderCreated(
+  service: ServiceClient,
+  business: WebhookBusiness,
+  roappOrder: RoappOrder,
+  externalRef: string | null,
+): Promise<NextResponse> {
+  // Idempotenz: existiert schon eine Order mit diesem external_ref im Betrieb?
+  // (Nur wenn external_ref vorhanden — ohne ihn lässt sich nicht dedupen.)
+  if (externalRef) {
+    const { data: existing, error } = await service
+      .from("orders")
+      .select("id")
+      .eq("business_id", business.id)
+      .eq("external_ref", externalRef)
+      .maybeSingle<{ id: string }>();
+    if (error) {
+      console.error("webhook: created lookup failed", {
+        business_id: business.id,
+        step: "created_lookup",
+        message: error.message,
+      });
+      return ok("lookup_failed");
+    }
+    if (existing) return ok("already_exists");
+  }
+
+  const { error: insertError } = await service.from("orders").insert({
+    business_id: business.id,
+    customer_name: buildCustomerName(roappOrder, externalRef),
+    customer_email: roappOrder.client?.email ?? null,
+    customer_phone: null,
+    external_ref: externalRef,
+    // roapp-Custom-Field-IDs sind pro Betrieb verschieden ⇒ kein zuverlässiges
+    // Mapping. item_description bleibt leer; der Betrieb pflegt es ggf. nach.
+    item_description: null,
+    language: business.default_language,
+    status: "draft",
+    consent_given: false, // §13.5: NIE per Webhook
+    consent_at: null,
+  });
+  if (insertError) {
+    console.error("webhook: order insert failed", {
+      business_id: business.id,
+      step: "created_insert",
+      message: insertError.message,
+    });
+    return ok("insert_failed");
+  }
+
+  return ok("created");
+}
+
+/**
+ * Kundenname aus dem eingebetteten roapp-client: first+last, sonst name, sonst
+ * external_ref, sonst ein generischer Platzhalter (Spalte ist NOT NULL).
+ */
+function buildCustomerName(
+  order: RoappOrder,
+  externalRef: string | null,
+): string {
+  const full = `${order.client?.first_name ?? ""} ${order.client?.last_name ?? ""}`.trim();
+  if (full) return full;
+  if (order.client?.name) return order.client.name;
+  if (externalRef) return externalRef;
+  return "Kunde";
+}
+
+/**
+ * order.picked_up: NUR wenn der API-`status.name` „abgeholt" bedeutet (nie die
+ * numerische Payload-ID). Order per external_ref + business finden; ist sie
+ * `generated`, den deliver-Pfad replizieren (Status `generated→sent` defensiv
+ * gefiltert + count-Check gegen Doppelversand; sent_at, Billing, E-Mail — alle
+ * Nebenwirkungen nicht-blockierend wie im deliver-Vorbild).
+ */
+async function handleOrderPickedUp(
+  request: Request,
+  service: ServiceClient,
+  business: WebhookBusiness,
+  roappOrder: RoappOrder,
+  externalRef: string | null,
+): Promise<NextResponse> {
+  // Status-Erkennung ausschließlich über den API-Klartext.
+  if (roappOrder.status?.name !== ROAPP_PICKED_UP_STATUS_NAME) {
+    return ok("noop_status");
+  }
+  if (!externalRef) return ok("order_not_found");
+
+  // Order per external_ref + business (service_role, strikt gescoped).
+  const { data: order, error: findError } = await service
+    .from("orders")
+    .select("id, status, customer_name, customer_email")
+    .eq("business_id", business.id)
+    .eq("external_ref", externalRef)
+    .maybeSingle<{
+      id: string;
+      status: string;
+      customer_name: string;
+      customer_email: string | null;
+    }>();
+  if (findError) {
+    console.error("webhook: picked_up lookup failed", {
+      business_id: business.id,
+      step: "pickedup_lookup",
+      message: findError.message,
+    });
+    return ok("lookup_failed");
+  }
+  if (!order) return ok("order_not_found");
+
+  // Ausliefern lässt sich nur ein generiertes Booklet. draft/finalized ⇒ noch
+  // nicht so weit; sent/viewed/shared ⇒ bereits ausgeliefert.
+  if (order.status !== "generated") {
+    return ok(
+      order.status === "draft" || order.status === "finalized"
+        ? "not_generated"
+        : "already_sent",
+    );
+  }
+
+  // Booklet (access_token) laden — service_role, auf business_id gescoped.
+  const { data: booklet } = await service
+    .from("booklets")
+    .select("id, access_token")
+    .eq("order_id", order.id)
+    .eq("business_id", business.id)
+    .maybeSingle<{ id: string; access_token: string }>();
+  if (!booklet) {
+    console.error("webhook: booklet missing", {
+      business_id: business.id,
+      order_id: order.id,
+      step: "booklet_load",
+    });
+    return ok("no_booklet");
+  }
+
+  const now = new Date().toISOString();
+
+  // 1. Status generated→sent, defensiv gefiltert + count: kein Doppelversand,
+  //    wenn der Webhook mehrfach feuert oder ein anderer Pfad parallel liefert.
+  const { count, error: statusError } = await service
+    .from("orders")
+    .update({ status: "sent" }, { count: "exact" })
+    .eq("id", order.id)
+    .eq("status", "generated");
+  if (statusError) {
+    console.error("webhook: status update failed", {
+      business_id: business.id,
+      order_id: order.id,
+      step: "status_update",
+      message: statusError.message,
+    });
+    return ok("status_failed");
+  }
+  if (!count) {
+    // Race verloren — bereits ausgeliefert. Keine Nebenwirkungen wiederholen.
+    return ok("already_sent");
+  }
+
+  // 2. booklets.sent_at (nicht-blockierend).
+  const { error: sentError } = await service
+    .from("booklets")
+    .update({ sent_at: now })
+    .eq("id", booklet.id)
+    .eq("business_id", business.id);
+  if (sentError) {
+    console.error("webhook: sent_at update failed", {
+      business_id: business.id,
+      order_id: order.id,
+      step: "sent_at_update",
+      message: sentError.message,
+    });
+  }
+
+  // 3. Billing-Event 'booklet_sent' (service_role — billing_events hat für
+  //    authenticated kein INSERT-Grant). Nicht-blockierend.
+  const { error: billingError } = await service.from("billing_events").insert({
+    business_id: business.id,
+    booklet_id: booklet.id,
+    order_id: order.id,
+    event_type: "booklet_sent",
+  });
+  if (billingError) {
+    console.error("webhook: billing insert failed", {
+      business_id: business.id,
+      order_id: order.id,
+      step: "billing_insert",
+      message: billingError.message,
+    });
+  }
+
+  // 4. Booklet-E-Mail (nur wenn customer_email). NICHT-BLOCKIEREND.
+  let emailSent = false;
+  if (order.customer_email) {
+    try {
+      const settings = normalizeSettings(business.settings);
+      const base = bookletBaseUrl(request);
+      const bookletUrl = `${base}/b/${booklet.access_token}?${CUSTOMER_VIEW_QUERY}`;
+      await sendBookletEmail({
+        to: order.customer_email,
+        customerName: order.customer_name,
+        businessName: business.name,
+        bookletUrl,
+        replyTo: settings.contact_email ?? undefined,
+      });
+      emailSent = true;
+    } catch (error) {
+      console.error("webhook: email send failed", {
+        business_id: business.id,
+        order_id: order.id,
+        step: "email",
+        message: errMessage(error),
+      });
+    }
+  }
+
+  return ok(emailSent ? "sent" : "sent_no_email");
+}
