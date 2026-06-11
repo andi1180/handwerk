@@ -1156,4 +1156,98 @@ nimmt den Poll automatisch wieder auf. i18n `reel.*` (ersetzt `reelTest.*`).
 
 ---
 
+## Caption-Overlays im Reel (Schritt 8b-1b)
+
+Baut auf 8b-1a auf: pro Foto wird die **Caption** unten in der Safe-Zone **ins
+Reel gebrannt** — mute-safe, der Text trägt die Story (kein Ton). **Keine
+Migration.** **KEIN** Intro/Outro (8b-1c), **KEINE** Video-Clips (8b-2), **KEIN**
+Ken-Burns (8b-3). **NUR FFmpeg, KEIN Sharp.** Status/Job/Upload/Output bleiben
+exakt wie 8b-1a (`after()`, `reel_status`, `render-reel`/`reel-status`,
+`{business_id}/{order_id}/reel.mp4`).
+
+### Schrift MITGELIEFERT (nicht auf System-Fonts verlassen)
+
+Vercel-Functions haben **keine** System-Fonts und **kein** fontconfig — eine
+Suche liefe leer. Deshalb liegt die Schrift **im Repo** und wird **explizit per
+Pfad** referenziert:
+
+- [assets/fonts/PlusJakartaSans-SemiBold.ttf](assets/fonts/PlusJakartaSans-SemiBold.ttf)
+  (~130 KB, OFL, Lizenz daneben in [assets/fonts/OFL.txt](assets/fonts/OFL.txt))
+  — derselbe Font wie die App/Web-Story, Schnitt **SemiBold** (= `font-weight:
+  600` der `.booklet-caption`).
+- **Tracing:** Next traced die Datei nicht automatisch (kein `import`, nur als
+  ffmpeg-Argument). [next.config.ts](next.config.ts) bindet sie + das Scrim per
+  **`outputFileTracingIncludes`** gezielt in die `render-reel`-Function ein
+  (Glob `/api/portal/orders/*/render-reel` + Bracket-Fallback). Anders als das
+  ffmpeg-Binary (8b-0, verworfen) sind das **kleine** Dateien — **kein**
+  Deploy-Größenproblem. Verifiziert: die Trace-Datei
+  (`.next/.../render-reel/route.js.nft.json`) listet Font + Scrim, **andere**
+  Order-Functions nicht.
+- Zur Laufzeit relativ zu **`process.cwd()`** (= Function-Root auf Vercel).
+  `drawtext` lädt die Schrift via `fontfile=` direkt über libfreetype — **kein**
+  fontconfig-Lookup. **Per-Betrieb-Schrift** im Reel ist eine spätere Politur
+  (erst EINEN Font sauber zum Laufen bringen).
+
+### Caption-Text
+
+`displayCaption(media)` aus [lib/booklet/caption.ts](lib/booklet/caption.ts)
+(`caption ?? keyword`; beide leer ⇒ `null`) — **dieselbe** Quelle wie die
+Web-Story, kein Drift. `null` ⇒ **sauberes Foto, kein Scrim, kein Text**.
+
+### Rendering-Ansatz (Variante B: ffmpeg `drawtext`)
+
+Gewählt: **ffmpeg `drawtext` mit `fontfile=`** (kein Sharp/SVG — librsvg bräuchte
+ebenfalls fontconfig, derselbe Serverless-Font-Schmerz; `drawtext`+`fontfile`
+umgeht das). **Zweistufig** (statt eines großen Filtergraphen — jeder
+ffmpeg-Aufruf bleibt simpel und einzeln diagnostizierbar):
+
+1. **Pro Foto ein 1080×1920-PNG-Frame backen** (eigener ffmpeg-Aufruf): cover
+   (`scale=…:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1`).
+   **Mit Caption** zusätzlich: statisches **Scrim** (transparent→dunkel) drüber
+   (`overlay`), **Branding-Akzentbalken** (`drawbox`, `primary_color`) und
+   **`drawtext`** (weiß, SemiBold, links-bündig, mehrzeilig, unten in der
+   Safe-Zone verankert). **Ohne Caption**: nur cover-crop (sauberes Foto).
+2. **Frames zum Reel fügen** (ein ffmpeg-Aufruf): je Frame `-loop 1 -t 3`,
+   `setsar=1,fps=30,format=yuv420p` (vereinheitlicht RGB/RGBA der Frames →
+   `concat` verlangt EIN Format), **harte Schnitte**, `libx264`/`yuv420p`/
+   `+faststart`/`-an` — Encode-Parameter wie 8b-1a.
+
+**Scrim:** statisches
+[assets/reel/caption-scrim.png](assets/reel/caption-scrim.png) (1080×1920 RGBA,
+~10 KB), vertikaler Verlauf `transparent 0–42% → schwarz 0.72` — **spiegelt die
+Web-Story** (`.booklet-caption-scrim`). Bewusst **committet** (Generator
+[scripts/make-caption-scrim.mjs](scripts/make-caption-scrim.mjs), reines Node/
+zlib) statt zur Laufzeit per `geq` erzeugt: deterministisch, lokal verifizierbar,
+als kleines Asset mitgetraced.
+
+**Safe-Zone & Layout** (im 1080×1920-Frame): Text unten, **~16 %** über dem Rand
+(`BOTTOM_MARGIN=307`), links-bündig (`SIDE_MARGIN=80` — robust ohne `text_align`,
+das es erst in neueren ffmpeg gibt), Fontgröße 52, `line_spacing=12`,
+weiß + Schatten (`shadowcolor=black@0.55:shadowy=2`); unten am Block der
+Akzentbalken in `primary_color`. **Mehrzeiliger Umbruch** (`wrapCaption`, greedy,
+konservatives Zeichen-Limit) für lange Captions (bis ~180 Zeichen) →
+Zeilenumbrüche in einer **`textfile`** (kein Filtergraph-Escaping nötig — `:`/`%`/
+Umlaute unkritisch; zusätzlich `expansion=none` → Text 1:1). Vertikale Verankerung
+über die `drawtext`-Variable `text_h` (`y=h-335-text_h`) — der Block wächst nach
+oben, der Boden bleibt in der Safe-Zone.
+
+### Diagnose statt Garbage
+
+Schlägt das Font-Rendering fehl (Schrift nicht getraced / `drawtext` im Build
+fehlt), endet der Job sichtbar auf `reel_status='failed'` mit klarem `reel_error`
+(eigener Schritt **`font_missing`** = Schrift nicht lesbar; sonst **`bake_frames`**)
+— **nie** ein Reel mit leerem/unleserlichem Text. Lokal mit einer arm64-ffmpeg
+(8.1.1) gegen Font + Scrim verifiziert: cover-crop, Scrim, Akzentbalken, weiße
+mehrzeilige Caption (inkl. Umlaute/`—`) lesbar; Assembly → 6 s, h264/yuv420p,
+1080×1920 (DAR 9:16), 30 fps, kein Audio.
+
+### Fallback (falls Vercel zickt)
+
+Sollte `drawtext`/`fontfile` im Vercel-Runtime doch versagen, ist **Variante A**
+(Sharp + SVG-Overlay mit **eingebettetem** Font via base64-`@font-face`, dann
+Composite) der dokumentierte Ausweg — **erst nach Rücksprache**, nicht still mit
+kaputtem Text weiterrendern.
+
+---
+
 > Nächste Migration: **0005**.
