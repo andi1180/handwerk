@@ -292,8 +292,8 @@ async function noticeForReelStart(res: Response): Promise<string> {
     // kein/ungültiger Body → generischer Fehler
   }
   const base =
-    code === "need_photos"
-      ? t(DEFAULT_LOCALE, "reel.needPhotos")
+    code === "need_media"
+      ? t(DEFAULT_LOCALE, "reel.needMedia")
       : t(DEFAULT_LOCALE, "reel.error");
   const detail = code ? `${res.status} ${code}` : String(res.status);
   return `${base} (${detail})`;

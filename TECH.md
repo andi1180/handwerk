@@ -1433,4 +1433,77 @@ kaputten Frames.
 
 ---
 
+## Video-Clips im Reel (Schritt 8b-2a)
+
+Baut auf 8b-1a/1b/1c auf: das Reel verwebt jetzt **Video-Clips** mit den Fotos —
+normalisiert auf 9:16, **stumm**, **interleaved nach `sort_order`**. Fotos + ihre
+Captions (8b-1b) und die Intro/Outro-Frames (8b-1c) bleiben **unverändert**. **Keine
+Migration**, **keine** UI-/Poll-Änderung (`after()`/`reel_status`/`render-reel`/
+`reel-status`/`{business_id}/{order_id}/reel.mp4` identisch). **NUR FFmpeg, KEIN
+Sharp.** **KEINE** Clip-Captions/Wasserzeichen (8b-2b), **KEIN** Ken-Burns (8b-3).
+
+### Media laden (Guard: need_photos → need_media)
+
+Die [render-reel-Route](app/api/portal/orders/[id]/render-reel/route.ts) lädt jetzt
+**ALLE** `order_media` (Fotos UND Videos), sortiert nach `sort_order` ASC (vorher nur
+`media_type='photo'`): `select storage_path, media_type, caption, keyword`. Der Guard
+ist von **`need_photos`** auf **`need_media`** umgestellt — **≥ 1 Medium (Foto ODER
+Video)** ⇒ sonst **400 `need_media`**. i18n: `reel.needPhotos` → `reel.needMedia`,
+`reel.hint` nennt jetzt auch die Clips (bis 6 s).
+
+### Pro Item normalisieren ([lib/reel/frames.ts](lib/reel/frames.ts))
+
+Damit gemischte Medien überhaupt zusammengefügt werden können, bekommt **jedes** Item
+**dieselbe kanonische Form** (`CANON_ENCODE`: `libx264` / `yuv420p` / `-an`, 30 fps CFR,
+SAR 1:1, 1080×1920):
+
+- **Foto** (`bakePhotoFrame` → `encodeStillSegment`): **unverändert** wie 8b-1b — 3 s-
+  Still, cover-crop, Caption-Overlay + optionales Logo-Wasserzeichen. Das gebackene PNG
+  wird per `encodeStillSegment` (`-loop 1 -t 3`) zum mp4-Segment encodet.
+- **Video** (`normalizeClip`, NEU): den Clip auf die kanonische Form bringen —
+  - `scale=…increase,crop=1080:1920,setsar=1` (**cover**; `autorotate` greift VOR den
+    Filtern → Hochformat-Handyclips werden korrekt aufgerichtet),
+  - `fps=30,format=yuv420p`, `libx264`,
+  - **Audio gestrippt** (`-an`) — mute-safe (der Text/die Bilder tragen die Story),
+  - **Dauer-Cap** auf **min(Clip-Länge, 6 s)** über `-t 6` als **INPUT-Option** (stoppt
+    das Lesen nach 6 s; kürzere Clips laufen bis EOF). `MAX_CLIP_SECONDS = 6` (Tempo; in
+    8b-3 konfigurierbar).
+  - **NOCH KEINE** Caption/Wasserzeichen auf dem Clip (8b-2b).
+
+### Assembly: concat-Demuxer statt concat-Filter
+
+Die alte `assembleReel` (ein concat-**Filter** über geloopte PNGs) ist durch
+`concatSegments` ersetzt. **Reihenfolge: Intro → [Items in `sort_order`: Foto-Stills +
+Clip-Segmente gemischt] → Outro**, harte Schnitte. Jedes Item wird zu einem
+**formatgleichen Zwischensegment** (mp4) gerendert; die Segmente werden per
+**concat-Demuxer** (Dateiliste → `-f concat -safe 0 -i list.txt -c copy -movflags
++faststart`) verlustfrei gefügt.
+
+- **Warum Demuxer + Segmente** statt eines großen concat-Filters mit gemischten
+  Image-/Video-Inputs: heterogene Medien gehen nur **format-IDENTISCH** durch concat.
+  Der Demuxer mit **`-c copy`** ist genau dafür da, ist schnell (kein Re-Encode) und
+  isoliert jeden Schritt (ein defektes Item scheitert einzeln, mit Item-Kontext im
+  `reel_error`). **Driften die Segment-Parameter** (Auflösung/pixfmt/codec/fps/SAR),
+  **bricht der Demuxer** — `encodeStillSegment`/`normalizeClip` garantieren genau die
+  EINE kanonische Form (`CANON_ENCODE`).
+- Lokal mit ffmpeg 8.1.1 verifiziert: ein normalisierter **Landscape-Clip mit Audio**
+  → 1080×1920, SAR 1:1, yuv420p, 30 fps, **exakt 6 s**, **0 Audio-Spuren**; der
+  `-c copy`-concat aus Still+Clip+Still → 1080×1920, yuv420p, 30 fps, **exakt 12 s**,
+  kein Audio. (Die concat-Demuxer-/cover-/fps-Filter sind alt + stabil — kein
+  6.0.1-spezifischer Stolperstein wie `gradients :type=linear` oder zentrierter
+  drawtext; die bleiben aus 8b-1c gefixt und sind hier nicht berührt.)
+
+### Orchestrierung & Diagnose
+
+Die Route bleibt reine Orchestrierung; `after()`/Status/Upload/Output sind identisch zu
+8b-1a/1c. Geänderte/neue `reel_error`-Schritte: **`download_media`** (war
+`download_photos`; lädt jetzt alle Medien), **`build_segments`** (war `bake_frames`;
+Foto-Frame+Encode **oder** Clip-Normalisierung — mit `item {i} ({media_type})`-Kontext),
+**`concat`** (war `ffmpeg`). Unverändert: `assets_missing` / `ensure_ffmpeg` /
+`download_assets` / `bake_intro` / `bake_outro` / `upload` / `mark_ready`. `pnpm
+typecheck` + `pnpm build` grün; Tracing (Font + beide Scrims) unverändert in die
+render-reel-Function.
+
+---
+
 > Nächste Migration: **0005**.

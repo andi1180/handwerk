@@ -8,18 +8,26 @@ import { promisify } from "node:util";
 import { DEFAULT_BRANDING, isHexColor } from "@/lib/settings/options";
 
 /**
- * Server-only FFmpeg-Frame-Backerei für das Reel (Schritte 8b-1a/1b/1c).
+ * Server-only FFmpeg-Frame-Backerei für das Reel (Schritte 8b-1a/1b/1c/2a).
  *
- * Sammelt die gesamte ffmpeg-Filtergraph-Logik an einer Stelle, damit die
+ * Sammelt die gesamte ffmpeg-Filtergraph-/Encode-Logik an einer Stelle, damit die
  * render-reel-Route reine Orchestrierung bleibt (Auth/Status/Downloads/Upload).
  *
- *  - bakePhotoFrame  — Foto cover-cropt; optional Caption-Overlay (8b-1b) und/oder
- *                      dezentes Logo-Wasserzeichen (8b-1c, logo_per_page).
- *  - bakeIntroFrame  — Intro-Frame (8b-1c): Hintergrund/Verlauf + Logo + Titel +
- *                      Tagline, links-bündig, lesbar über Vollflächen-Scrim.
- *  - bakeOutroFrame  — Outro-Frame (8b-1c): Hintergrund/Verlauf + Logo +
- *                      Betriebsname + Nachricht + Kontakt (Telefon/Website).
- *  - assembleReel    — Frames → 9:16-Reel (je Frame eigene Dauer, harte Schnitte).
+ *  - bakePhotoFrame     — Foto cover-cropt; optional Caption-Overlay (8b-1b) und/oder
+ *                         dezentes Logo-Wasserzeichen (8b-1c, logo_per_page).
+ *  - bakeIntroFrame     — Intro-Frame (8b-1c): Hintergrund/Verlauf + Logo + Titel +
+ *                         Beschreibung + Tagline, links-bündig über Vollflächen-Scrim.
+ *  - bakeOutroFrame     — Outro-Frame (8b-1c): Hintergrund/Verlauf + Logo +
+ *                         Betriebsname + Nachricht + Kontakt (Telefon/Website).
+ *  - encodeStillSegment — gebackenes PNG → normalisiertes mp4-Segment (8b-2a).
+ *  - normalizeClip      — Video-Clip → KANONISCHES mp4-Segment (8b-2a): cover 9:16,
+ *                         30 fps, yuv420p, STUMM, auf min(Clip, maxSeconds) gecappt.
+ *  - concatSegments     — formatgleiche Segmente → 9:16-Reel (concat-Demuxer,
+ *                         -c copy, harte Schnitte; Intro → Items (sort_order) → Outro).
+ *
+ * 8b-2a interleavt Fotos (Stills) und Video-Clips nach sort_order: jedes Item wird
+ * zu einem formatgleichen Zwischensegment gerendert, dann verlustfrei (concat-
+ * Demuxer) gefügt — heterogene Medien gehen nur format-IDENTISCH durch concat.
  *
  * Schrift + Scrims sind MITGELIEFERT und EXPLIZIT per Pfad referenziert (kein
  * System-/fontconfig-Lookup — der ist auf Vercel leer). Sie werden via
@@ -31,7 +39,11 @@ const execFileAsync = promisify(execFile);
 
 /** ffmpeg darf nie hängen — Timeouts je Aufruf. */
 const FRAME_TIMEOUT_MS = 60_000;
-const ASSEMBLE_TIMEOUT_MS = 240_000;
+/** Segment-Encode (8b-2a): Still-Loop bzw. Clip-Normalisierung. Großzügiger als ein
+ *  PNG-Bake, weil ein Clip dekodiert + neu enkodiert wird. */
+const SEGMENT_TIMEOUT_MS = 120_000;
+/** concat-Demuxer (8b-2a): fügt nur die fertigen Segmente (-c copy, kein Re-Encode). */
+const CONCAT_TIMEOUT_MS = 120_000;
 const FFMPEG_MAX_BUFFER = 4 * 1024 * 1024;
 
 /** 9:16-Hochformat (Instagram/TikTok-Reel). */
@@ -584,30 +596,29 @@ export async function bakeOutroFrame({
 }
 
 /**
- * Frames → 9:16-Reel: je Frame eine eigene Dauer (`-loop 1 -t s`), HARTE
- * Schnitte (concat-Filter), h264 + yuv420p + +faststart, KEIN Audio. Pro Input
- * `setsar=1,fps,format=yuv420p` (vereinheitlicht RGB/RGBA der Frames — concat
- * verlangt EIN Format).
+ * KANONISCHE Reel-Form, die ALLE Segmente (Stills wie Clips) tragen MÜSSEN, sonst
+ * bricht der concat-Demuxer (-c copy): 30 fps (CFR), yuv420p, libx264, KEIN Audio.
+ * `setsar=1` ist in `COVER` enthalten bzw. wird beim Still gesetzt.
  */
-export async function assembleReel({
+const CANON_ENCODE = ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-an"] as const;
+
+/**
+ * Gebackenes Still-PNG (Intro/Foto/Outro) → normalisiertes mp4-Segment (8b-2a):
+ * das Bild wird `seconds` lang geloopt (`-loop 1 -t s`) und auf die KANONISCHE
+ * Reel-Form encodet. Diese Form ist identisch zu `normalizeClip` — Voraussetzung
+ * fürs verlustfreie Zusammenfügen per concat-Demuxer (s. `concatSegments`).
+ */
+export async function encodeStillSegment({
   ffmpegBin,
-  frames,
+  image,
+  seconds,
   output,
 }: {
   ffmpegBin: string;
-  frames: { path: string; seconds: number }[];
+  image: string;
+  seconds: number;
   output: string;
 }): Promise<void> {
-  const inputArgs: string[] = [];
-  const filterParts: string[] = [];
-  frames.forEach((frame, i) => {
-    inputArgs.push("-loop", "1", "-t", String(frame.seconds), "-i", frame.path);
-    filterParts.push(`[${i}:v]setsar=1,fps=${REEL_FPS},format=yuv420p[v${i}]`);
-  });
-  const concatInputs = frames.map((_, i) => `[v${i}]`).join("");
-  const filterComplex =
-    `${filterParts.join(";")};${concatInputs}concat=n=${frames.length}:v=1:a=0[outv]`;
-
   await execFileAsync(
     ffmpegBin,
     [
@@ -615,20 +626,114 @@ export async function assembleReel({
       "-nostdin",
       "-loglevel",
       "error",
-      ...inputArgs,
-      "-filter_complex",
-      filterComplex,
-      "-map",
-      "[outv]",
-      "-pix_fmt",
-      "yuv420p",
-      "-c:v",
-      "libx264",
-      "-movflags",
-      "+faststart",
-      "-an",
+      "-loop",
+      "1",
+      "-t",
+      String(seconds),
+      "-i",
+      image,
+      "-vf",
+      `setsar=1,fps=${REEL_FPS},format=yuv420p`,
+      ...CANON_ENCODE,
       output,
     ],
-    { timeout: ASSEMBLE_TIMEOUT_MS, maxBuffer: FFMPEG_MAX_BUFFER },
+    { timeout: SEGMENT_TIMEOUT_MS, maxBuffer: FFMPEG_MAX_BUFFER },
   );
+}
+
+/**
+ * Video-Clip → KANONISCHES mp4-Segment (8b-2a), IDENTISCH zu den Foto-Segmenten:
+ *  - cover-crop auf 1080×1920 (`COVER`; autorotate greift VOR den Filtern → auch
+ *    Hochformat-Handyclips werden korrekt aufgerichtet),
+ *  - 30 fps (CFR via `fps`-Filter), yuv420p, libx264,
+ *  - **Audio gestrippt** (`-an`) — das Reel ist mute-safe (der Text trägt die Story),
+ *  - Dauer auf **min(Clip-Länge, maxSeconds)** gecappt: `-t` als INPUT-Option stoppt
+ *    das Lesen nach maxSeconds (kürzere Clips laufen bis EOF). Tempo; in 8b-3
+ *    konfigurierbar.
+ *
+ * NOCH KEINE Caption/Wasserzeichen auf dem Clip (das ist 8b-2b). Die kanonische
+ * Form ist die Voraussetzung fürs concat-Demuxer-Zusammenfügen.
+ */
+export async function normalizeClip({
+  ffmpegBin,
+  input,
+  maxSeconds,
+  output,
+}: {
+  ffmpegBin: string;
+  input: string;
+  maxSeconds: number;
+  output: string;
+}): Promise<void> {
+  await execFileAsync(
+    ffmpegBin,
+    [
+      "-y",
+      "-nostdin",
+      "-loglevel",
+      "error",
+      "-t",
+      String(maxSeconds),
+      "-i",
+      input,
+      "-vf",
+      `${COVER},fps=${REEL_FPS},format=yuv420p`,
+      ...CANON_ENCODE,
+      output,
+    ],
+    { timeout: SEGMENT_TIMEOUT_MS, maxBuffer: FFMPEG_MAX_BUFFER },
+  );
+}
+
+/**
+ * Formatgleiche Segmente → 9:16-Reel via **concat-Demuxer** (8b-2a): eine
+ * Dateiliste (`file '…'` je Zeile) wird mit `-f concat -safe 0` gelesen und mit
+ * **`-c copy`** (KEIN Re-Encode) zusammengefügt — schnell und robust, SOLANGE alle
+ * Segmente dieselben Codec-/Format-Parameter tragen (Auflösung, yuv420p, h264,
+ * 30 fps, SAR 1:1). Genau das stellen `encodeStillSegment`/`normalizeClip` sicher;
+ * driften die Parameter, bricht der Demuxer. HARTE Schnitte (kein Übergang),
+ * `+faststart` aufs Endprodukt. Reihenfolge der Liste = Reihenfolge im Reel
+ * (Intro → Items in sort_order → Outro).
+ */
+export async function concatSegments({
+  ffmpegBin,
+  segments,
+  output,
+}: {
+  ffmpegBin: string;
+  segments: string[];
+  output: string;
+}): Promise<void> {
+  // concat-Demuxer braucht eine Dateiliste; Single-Quotes im Pfad defensiv escapen
+  // (unsere /tmp-UUID-Pfade enthalten zwar keine, aber sicher ist sicher).
+  const listBody = segments
+    .map((p) => `file '${p.replace(/'/g, "'\\''")}'`)
+    .join("\n");
+  const listPath = join(tmpdir(), `concat-${randomUUID()}.txt`);
+  await writeFile(listPath, `${listBody}\n`, "utf8");
+  try {
+    await execFileAsync(
+      ffmpegBin,
+      [
+        "-y",
+        "-nostdin",
+        "-loglevel",
+        "error",
+        "-f",
+        "concat",
+        "-safe",
+        "0",
+        "-i",
+        listPath,
+        "-c",
+        "copy",
+        "-movflags",
+        "+faststart",
+        output,
+      ],
+      { timeout: CONCAT_TIMEOUT_MS, maxBuffer: FFMPEG_MAX_BUFFER },
+    );
+  } finally {
+    await unlink(listPath).catch(() => {});
+  }
 }

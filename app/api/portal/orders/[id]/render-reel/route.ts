@@ -9,35 +9,44 @@ import { getCurrentBusiness } from "@/lib/auth/current-business";
 import { displayCaption } from "@/lib/booklet/caption";
 import { ensureFfmpeg, errMessage } from "@/lib/reel/ffmpeg";
 import {
-  assembleReel,
   assertReelAssets,
   bakeIntroFrame,
   bakeOutroFrame,
   bakePhotoFrame,
+  concatSegments,
+  encodeStillSegment,
+  normalizeClip,
 } from "@/lib/reel/frames";
 
 /**
- * SCHRITT 8b-1c — Intro/Outro-Frames im Reel (+ optionales Logo-Wasserzeichen).
+ * SCHRITT 8b-2a — Video-Clips ins Reel (Assembly, OHNE Clip-Captions).
  *
  * Baut aus einem generierten Booklet ein 9:16-Reel (1080x1920, HARTE Schnitte,
- * KEIN Audio): ein Intro-Frame (~4 s) → die Foto-Frames (je 3 s, 8b-1a/1b) →
- * ein Outro-Frame (~2,5 s). Der eigentliche Render läuft in `after()` (Hintergrund
- * nach der Response, innerhalb maxDuration); der Fortschritt ist über
- * `booklets.reel_status` persistent (Poll + Reload).
+ * KEIN Audio): Intro-Frame (~4 s) → die MEDIEN in sort_order (Foto-Stills je 3 s
+ * UND normalisierte Video-Clips, gemischt) → Outro-Frame (~2,5 s). Der Render
+ * läuft in `after()` (Hintergrund nach der Response, innerhalb maxDuration); der
+ * Fortschritt ist über `booklets.reel_status` persistent (Poll + Reload).
  *
  *  - Intro:  intro_bg (Bild) oder Verlauf, Logo prominent oben, KI-Titel +
- *            persönliche Ich-Beschreibung (FIX 8b-1c) + Tagline.
- *  - Fotos:  Caption-Overlay (8b-1b); ZUSÄTZLICH bei logo_per_page ein dezentes
- *            Logo-Wasserzeichen in der oberen Ecke (analog Web-Story).
+ *            persönliche Ich-Beschreibung + Tagline.
+ *  - Fotos:  cover-crop + Caption-Overlay (8b-1b); ZUSÄTZLICH bei logo_per_page ein
+ *            dezentes Logo-Wasserzeichen (8b-1c). UNVERÄNDERT.
+ *  - Clips:  auf die KANONISCHE Form normalisiert (cover 9:16, 30 fps, yuv420p,
+ *            STUMM, auf 6 s gecappt) — IDENTISCH zu den Foto-Segmenten, sonst bricht
+ *            der concat-Demuxer. NOCH KEINE Clip-Caption/Wasserzeichen (8b-2b).
  *  - Outro:  outro_bg/Verlauf, Logo, Betriebsname + Nachricht + Kontakt
  *            (Telefon/Website). KEINE Share-/Review-Elemente (Step 9).
  *
- * Die gesamte ffmpeg-Filtergraph-Logik liegt in `lib/reel/frames.ts` — diese
- * Route ist reine Orchestrierung (Auth/Status/Downloads/Upload). NUR FFmpeg,
- * KEIN Sharp. Schrift + Scrims sind MITGELIEFERT und EXPLIZIT per Pfad
- * referenziert (kein fontconfig — der ist auf Vercel leer).
+ * ASSEMBLY (8b-2a): jedes Item wird zu einem formatgleichen mp4-Zwischensegment
+ * gerendert; die Segmente werden per concat-Demuxer (-c copy) in EINER Reihenfolge
+ * (Intro → Items → Outro) gefügt — robustes Interleaving heterogener Medien.
  *
- * KEINE Video-Clips (8b-2), KEIN Ken-Burns (8b-3).
+ * Die gesamte ffmpeg-Filtergraph-/Encode-Logik liegt in `lib/reel/frames.ts` —
+ * diese Route ist reine Orchestrierung (Auth/Status/Downloads/Upload). NUR FFmpeg,
+ * KEIN Sharp. Schrift + Scrims sind MITGELIEFERT und EXPLIZIT per Pfad referenziert
+ * (kein fontconfig — der ist auf Vercel leer).
+ *
+ * KEINE Clip-Captions/Wasserzeichen (8b-2b), KEIN Ken-Burns (8b-3).
  *
  * Node-Runtime erzwingen (Edge kann kein child_process / Binary ausführen) und
  * maxDuration anheben (Fluid Compute) — Download + ffmpeg + Upload dürfen dauern.
@@ -47,6 +56,9 @@ export const maxDuration = 300;
 
 /** Anzeigedauer je Foto im Reel (harte Schnitte, kein Übergang). */
 const SECONDS_PER_PHOTO = 3;
+/** Clip-Cap (8b-2a): jeder Video-Clip wird auf min(Clip-Länge, 6 s) gekürzt — Tempo
+ *  fürs Reel. In 8b-3 konfigurierbar. */
+const MAX_CLIP_SECONDS = 6;
 /** Intro länger (FIX 8b-1c): die persönliche Ich-Story (Titel + Beschreibung)
  *  muss lesbar sein. Outro bleibt knapp (nur Marke + ein paar Zeilen). */
 const INTRO_SECONDS = 4;
@@ -58,8 +70,10 @@ type BookletRow = {
   intro_title: string | null;
   intro_description: string | null;
 };
-type PhotoItem = {
+/** Ein Medien-Item (Foto ODER Video) in sort_order — die Reel-Einheit (8b-2a). */
+type MediaItem = {
   storage_path: string;
+  media_type: "photo" | "video";
   caption: string | null;
   keyword: string | null;
 };
@@ -76,8 +90,7 @@ function displayHost(url: string): string {
  *  - AUTHENTICATED Server-Client; kein User ⇒ 401, kein Betrieb ⇒ 403.
  *  - Order über RLS geladen (fremde/fehlende id ⇒ 404).
  *  - Status muss `generated` sein ⇒ sonst 409.
- *  - Mindestens ein FOTO (`order_media.media_type='photo'`) ⇒ sonst 400 need_photos
- *    (Clips kommen in 8b-2).
+ *  - Mindestens ein Medium (Foto ODER Video, `order_media`) ⇒ sonst 400 need_media.
  *
  * ISOLATION (§14.2): Die `business_id` stammt AUS DER GELADENEN ORDER (über RLS
  * gegen die Session validiert), NIE aus dem Body. Alle Storage-/booklets-Writes
@@ -122,18 +135,18 @@ export async function POST(
     return NextResponse.json({ error: "invalid_status" }, { status: 409 });
   }
 
-  // FOTOS in Reihenfolge laden (RLS), inkl. caption/keyword für die Overlays
-  // (8b-1b). Ohne Foto kein Reel (Clips folgen 8b-2).
-  const { data: photoRows } = await supabase
+  // ALLE Medien in Reihenfolge laden (RLS): Fotos UND Video-Clips, gemischt nach
+  // sort_order (8b-2a). caption/keyword für die Foto-Overlays (8b-1b); Clips
+  // bekommen in 8b-2a noch kein Overlay. Ohne jedes Medium kein Reel.
+  const { data: mediaRows } = await supabase
     .from("order_media")
-    .select("storage_path, caption, keyword")
+    .select("storage_path, media_type, caption, keyword")
     .eq("order_id", order.id)
-    .eq("media_type", "photo")
     .order("sort_order", { ascending: true })
-    .returns<PhotoItem[]>();
-  const photos = photoRows ?? [];
-  if (photos.length < 1) {
-    return NextResponse.json({ error: "need_photos" }, { status: 400 });
+    .returns<MediaItem[]>();
+  const media = mediaRows ?? [];
+  if (media.length < 1) {
+    return NextResponse.json({ error: "need_media" }, { status: 400 });
   }
 
   // Booklet (existiert, da Status `generated`) über service_role laden — wir
@@ -185,7 +198,7 @@ export async function POST(
       orderId: order.id,
       businessId: order.business_id,
       bookletId: booklet.id,
-      photos,
+      media,
       // Intro: KI-Titel (Fallback Betriebsname, wie die Web-Story) + die
       // persönliche Ich-Beschreibung (FIX 8b-1c) + Tagline.
       introTitle: booklet.intro_title?.trim() || business.name,
@@ -230,18 +243,19 @@ async function downloadAsset(
 
 /**
  * Hintergrund-Render (after()): Assets prüfen → ffmpeg bereitstellen →
- * Branding-Assets (Logo/Intro-BG/Outro-BG) + Fotos nach /tmp laden → Intro-Frame,
- * Foto-Frames (cover-crop + Caption + optionales Wasserzeichen) und Outro-Frame
- * backen → Intro → Fotos → Outro zum 9:16-Reel fügen → nach `order-media`
- * hochladen → booklet auf 'ready' (mit reel_url = Storage-Pfad) bzw. bei jedem
- * Fehler auf 'failed' (+ reel_error). Alle Temp-Dateien werden aufgeräumt
- * (NICHT /tmp/ffmpeg — das bleibt gecacht).
+ * Branding-Assets (Logo/Intro-BG/Outro-BG) + ALLE Medien (Fotos + Clips) nach /tmp
+ * laden → Intro-Segment, pro Item ein formatgleiches Segment (Foto-Still mit
+ * Caption/Wasserzeichen bzw. normalisierter Clip) in sort_order und Outro-Segment
+ * encoden → per concat-Demuxer (Intro → Items → Outro) zum 9:16-Reel fügen → nach
+ * `order-media` hochladen → booklet auf 'ready' (reel_url) bzw. bei jedem Fehler auf
+ * 'failed' (+ reel_error). Alle Temp-Dateien werden aufgeräumt (NICHT /tmp/ffmpeg —
+ * das bleibt gecacht).
  */
 async function renderReel({
   orderId,
   businessId,
   bookletId,
-  photos,
+  media,
   introTitle,
   introDescription,
   introTagline,
@@ -258,7 +272,7 @@ async function renderReel({
   orderId: string;
   businessId: string;
   bookletId: string;
-  photos: PhotoItem[];
+  media: MediaItem[];
   introTitle: string;
   introDescription: string | null;
   introTagline: string | null;
@@ -275,16 +289,11 @@ async function renderReel({
   const service = createServiceClient();
   const storagePath = `${businessId}/${orderId}/reel.mp4`;
   const tmpDir = tmpdir();
-  const localPhotos: string[] = [];
-  const photoFrames: string[] = [];
+  const localMedia: string[] = []; // heruntergeladene Fotos + Clips (in sort_order)
+  const pngFrames: string[] = []; // gebackene PNG-Frames (Intro/Foto/Outro)
+  const segments: string[] = []; // normalisierte mp4-Segmente (Reihenfolge = Reel)
   const assets: string[] = []; // heruntergeladene Logo-/Hintergrund-Dateien
-  const introFrame = join(tmpDir, `intro-${randomUUID()}.png`);
-  const outroFrame = join(tmpDir, `outro-${randomUUID()}.png`);
   const outputPath = join(tmpDir, `reel-${randomUUID()}.mp4`);
-
-  // Caption pro Foto vorab auflösen (caption ?? keyword; beide leer ⇒ null =
-  // sauberes Foto ohne Scrim). Gleiche Quelle wie die Web-Story (kein Drift).
-  const captions = photos.map((p) => displayCaption(p));
 
   /** Reel-Render bei einem Fehler als 'failed' markieren (mit Diagnose). */
   const fail = async (step: string, error: unknown): Promise<void> => {
@@ -331,29 +340,34 @@ async function renderReel({
       return;
     }
 
-    // 3) Fotos per service_role nach /tmp laden (Original-Extension behalten).
+    // 3) ALLE Medien (Fotos + Clips) per service_role nach /tmp laden (Original-
+    //    Extension behalten — ffmpeg demuxt nach ihr). Reihenfolge bleibt sort_order
+    //    (= localMedia-Index, parallel zu `media`).
     try {
-      for (const photo of photos) {
+      for (const item of media) {
         const { data, error } = await service.storage
           .from("order-media")
-          .download(photo.storage_path);
+          .download(item.storage_path);
         if (error || !data) {
           throw new Error(
-            `download ${photo.storage_path}: ${error?.message ?? "no data"}`,
+            `download ${item.storage_path}: ${error?.message ?? "no data"}`,
           );
         }
-        const ext = extname(photo.storage_path) || ".jpg";
-        const local = join(tmpDir, `photo-${randomUUID()}${ext}`);
+        const ext =
+          extname(item.storage_path) || (item.media_type === "video" ? ".mp4" : ".jpg");
+        const local = join(tmpDir, `media-${randomUUID()}${ext}`);
         await writeFile(local, Buffer.from(await data.arrayBuffer()));
-        localPhotos.push(local);
+        localMedia.push(local);
       }
     } catch (error) {
-      await fail("download_photos", error);
+      await fail("download_media", error);
       return;
     }
 
-    // 4) Intro-Frame backen (Hintergrund/Verlauf + Logo + Titel + Tagline).
+    // 4) Intro-Frame backen (PNG) + zum ERSTEN Segment encoden.
     try {
+      const introFrame = join(tmpDir, `intro-${randomUUID()}.png`);
+      pngFrames.push(introFrame);
       await bakeIntroFrame({
         ffmpegBin,
         output: introFrame,
@@ -365,32 +379,69 @@ async function renderReel({
         primaryColor,
         secondaryColor,
       });
+      const introSeg = join(tmpDir, `seg-${randomUUID()}.mp4`);
+      await encodeStillSegment({
+        ffmpegBin,
+        image: introFrame,
+        seconds: INTRO_SECONDS,
+        output: introSeg,
+      });
+      segments.push(introSeg);
     } catch (error) {
       await fail("bake_intro", error);
       return;
     }
 
-    // 5) Foto-Frames backen (cover-crop, Caption-Overlay, optionales Wasserzeichen).
+    // 5) Pro Item EIN formatgleiches Segment, in sort_order (interleaved):
+    //    Foto → Frame backen (cover + Caption + optionales Wasserzeichen) → Still-
+    //    Segment (3 s); Video → Clip normalisieren (cover, 30 fps, yuv420p, stumm,
+    //    6 s-Cap). NOCH KEINE Clip-Caption/Wasserzeichen (8b-2b).
     try {
-      for (let i = 0; i < localPhotos.length; i++) {
-        const framePath = join(tmpDir, `frame-${randomUUID()}.png`);
-        await bakePhotoFrame({
-          ffmpegBin,
-          input: localPhotos[i]!,
-          output: framePath,
-          caption: captions[i] ?? null,
-          logoPath: logoPerPage ? logoLocal : null,
-          primaryColor,
-        });
-        photoFrames.push(framePath);
+      for (let i = 0; i < media.length; i++) {
+        const item = media[i]!;
+        const local = localMedia[i]!;
+        const segment = join(tmpDir, `seg-${randomUUID()}.mp4`);
+        try {
+          if (item.media_type === "video") {
+            await normalizeClip({
+              ffmpegBin,
+              input: local,
+              maxSeconds: MAX_CLIP_SECONDS,
+              output: segment,
+            });
+          } else {
+            const framePath = join(tmpDir, `frame-${randomUUID()}.png`);
+            pngFrames.push(framePath);
+            await bakePhotoFrame({
+              ffmpegBin,
+              input: local,
+              output: framePath,
+              caption: displayCaption(item),
+              logoPath: logoPerPage ? logoLocal : null,
+              primaryColor,
+            });
+            await encodeStillSegment({
+              ffmpegBin,
+              image: framePath,
+              seconds: SECONDS_PER_PHOTO,
+              output: segment,
+            });
+          }
+        } catch (error) {
+          // Item-Kontext anhängen (welches Medium scheiterte) für die Diagnose.
+          throw new Error(`item ${i} (${item.media_type}): ${errMessage(error)}`);
+        }
+        segments.push(segment);
       }
     } catch (error) {
-      await fail("bake_frames", error);
+      await fail("build_segments", error);
       return;
     }
 
-    // 6) Outro-Frame backen (Hintergrund/Verlauf + Logo + Name + Nachricht + Kontakt).
+    // 6) Outro-Frame backen (PNG) + zum LETZTEN Segment encoden.
     try {
+      const outroFrame = join(tmpDir, `outro-${randomUUID()}.png`);
+      pngFrames.push(outroFrame);
       await bakeOutroFrame({
         ffmpegBin,
         output: outroFrame,
@@ -402,24 +453,26 @@ async function renderReel({
         primaryColor,
         secondaryColor,
       });
+      const outroSeg = join(tmpDir, `seg-${randomUUID()}.mp4`);
+      await encodeStillSegment({
+        ffmpegBin,
+        image: outroFrame,
+        seconds: OUTRO_SECONDS,
+        output: outroSeg,
+      });
+      segments.push(outroSeg);
     } catch (error) {
       await fail("bake_outro", error);
       return;
     }
 
-    // 7) Assembly: Intro (2,5 s) → Fotos (je 3 s) → Outro (2,5 s), harte Schnitte.
+    // 7) Segmente per concat-Demuxer (-c copy) fügen: Intro → Items (sort_order) →
+    //    Outro, harte Schnitte. Bricht, wenn Segmente formatungleich sind —
+    //    encodeStillSegment/normalizeClip garantieren EINE kanonische Form.
     try {
-      await assembleReel({
-        ffmpegBin,
-        output: outputPath,
-        frames: [
-          { path: introFrame, seconds: INTRO_SECONDS },
-          ...photoFrames.map((path) => ({ path, seconds: SECONDS_PER_PHOTO })),
-          { path: outroFrame, seconds: OUTRO_SECONDS },
-        ],
-      });
+      await concatSegments({ ffmpegBin, segments, output: outputPath });
     } catch (error) {
-      await fail("ffmpeg", error);
+      await fail("concat", error);
       return;
     }
 
@@ -451,14 +504,7 @@ async function renderReel({
     }
   } finally {
     // Temp-Dateien aufräumen (NICHT /tmp/ffmpeg — bleibt für warme Instanzen).
-    const cleanup = [
-      ...localPhotos,
-      ...photoFrames,
-      ...assets,
-      introFrame,
-      outroFrame,
-      outputPath,
-    ];
+    const cleanup = [...localMedia, ...pngFrames, ...segments, ...assets, outputPath];
     await Promise.all(
       cleanup.map((p) =>
         unlink(p).catch(() => {
