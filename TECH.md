@@ -1082,6 +1082,78 @@ Migration. Weiterhin reiner **Machbarkeits-Spike**; die provisorische Route
 im Status `generated` am Seitenende → POST → „Test-Reel öffnen"-Link, Lade-/
 Fehler-State (`try/finally` + AbortController, 180 s). i18n `reelTest.*`. Provisorisch.
 
+> **Ersetzt in 8b-1a:** `render-reel-test` (Route + `<ReelTestButton>` + `reelTest.*`)
+> wurde durch das echte Foto-Reel (`render-reel`) ersetzt; `ensureFfmpeg()` lebt jetzt
+> in [lib/reel/ffmpeg.ts](lib/reel/ffmpeg.ts).
+
 ---
 
-> Nächste Migration: **0004**.
+## Reel-Assembly + Job/Status (Schritt 8b-1a)
+
+Erstes **echtes** Reel: aus den **Fotos** eines generierten Booklets entsteht ein
+9:16-Video (1080×1920, **3 s je Foto**, **harte Schnitte**, **ohne Ton**). Der Render
+läuft **asynchron** als Hintergrund-Job mit persistentem Status + Poll. Ersetzt die
+provisorische `render-reel-test`-Route. **NUR FFmpeg, KEIN Sharp.** KEIN Intro/Outro/
+Captions (8b-1b), KEINE Video-Clips (8b-2), KEIN Ken-Burns (8b-3).
+
+### Migration 0004 ([supabase/migrations/0004_reel_status.sql](supabase/migrations/0004_reel_status.sql))
+
+- `booklets.reel_status text NOT NULL default 'pending'` mit Check `in
+  ('pending','rendering','ready','failed')` + `booklets.reel_error text` (Diagnose).
+  `reel_url` (Storage-Pfad des fertigen Reels) existiert bereits aus 0001.
+- **Keine** neue Policy/GRANT: `booklets` ist RLS-aktiv (0001) — die member-Policies
+  (`select`/`update` für `authenticated`) und `service_role` (`grant all`) decken die
+  Spalten ab. Verify [supabase/verify/0004_reel_status_checks.sql](supabase/verify/0004_reel_status_checks.sql):
+  Spalten existieren + Check-Constraint.
+
+### `ensureFfmpeg()` ausgelagert ([lib/reel/ffmpeg.ts](lib/reel/ffmpeg.ts))
+
+Die bewährte Runtime-Download-Logik aus dem 8b-0v2-Spike (gz aus `assets/ffmpeg/
+linux-x64.gz` → `gunzip` → atomar nach `/tmp/ffmpeg`, mit Warm-Cache + `access X_OK`)
+liegt jetzt **server-only** in `lib/reel/ffmpeg.ts` (`ensureFfmpeg()` + `errMessage()`)
+und wird vom echten Render genutzt. `next.config` bleibt unangetastet — das Binary ist
+**nicht** gebundlet.
+
+### Render-Endpoint ([app/api/portal/orders/[id]/render-reel/route.ts](app/api/portal/orders/[id]/render-reel/route.ts))
+
+- `runtime = "nodejs"`, `maxDuration = 300`. Auth wie Generate (401/403; Order über RLS
+  ⇒ 404). Status muss **`generated`** sein ⇒ sonst **409**. **≥ 1 FOTO**
+  (`order_media.media_type='photo'`, RLS) ⇒ sonst **400 `need_photos`** (Clips folgen
+  8b-2). **`business_id` AUS DER ORDER**, nie Body.
+- **Sofort** `booklet.reel_status='rendering'` (`service_role`, strikt auf die
+  Order-`business_id`), `reel_error=null`, dann **202** zurück. Das Booklet existiert
+  (Status `generated`); fehlt es ⇒ 500 `no_booklet`.
+- Die eigentliche Arbeit läuft in **`after()`** ([next/server], Hintergrund nach der
+  Response, innerhalb `maxDuration`): `ensureFfmpeg()` → die Fotos der Order
+  (`service_role`, `storage.download`) nach `/tmp` (Original-Extension behalten) →
+  **ein** ffmpeg-Aufruf mit `-loop 1 -t 3` je Bild + `filter_complex`
+  (`scale=…:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1,fps=30` ⇒
+  **cover**, dann `concat`) → `-pix_fmt yuv420p -c:v libx264 -movflags +faststart -an`
+  → `/tmp/reel.mp4` (Prozess-Timeout 240 s). Upload per `service_role` nach
+  `order-media` unter `{business_id}/{order_id}/reel.mp4` (`upsert`).
+- **Erfolg:** `booklet.reel_url=Pfad`, `reel_status='ready'`, `reel_error=null`.
+  **Fehler (jeder Schritt):** `reel_status='failed'`, `reel_error="{step}: {message}"`
+  + `console.error(order_id, step, message)`. `finally` räumt nur die **Temp-Fotos +
+  reel.mp4** auf — **NICHT** `/tmp/ffmpeg` (bleibt gecacht).
+
+### Status-Poll ([app/api/portal/orders/[id]/reel-status/route.ts](app/api/portal/orders/[id]/reel-status/route.ts))
+
+`GET`, AUTHENTICATED, Order über RLS ⇒ 404. Liest `booklets.reel_status`/`reel_url`
+über den **AUTHENTICATED** Client (0002-Policy lässt Mitglieder ihren eigenen Pfad
+signieren — **kein** `service_role`). Antwort `{ status, url }` — `url` = frische
+`createSignedUrl(reel_url, 3600)` **nur** bei `ready`, sonst `null`.
+
+### UI & i18n
+
+`<ReelButton>` ([generate-controls.tsx](app/portal/orders/[id]/generate-controls.tsx))
+im Status `generated`: **opt-in** „Reel erstellen" (Kostenkontrolle) → `POST render-reel`
+(202) → `reel-status` alle **~3 s** pollen → `rendering` „Reel wird erstellt…" → `ready`
+„Reel ansehen" (Link auf das signierte `reel.mp4`) + „Neu erstellen" / `failed`
+Fehlerhinweis + „Erneut". `try/catch/finally`, kein Hängen. Der **Anfangsstatus kommt
+vom Server** ([page.tsx](app/portal/orders/[id]/page.tsx) liest `reel_status`/signiert
+`reel_url` bei `ready`) — Reload zeigt den persistenten Stand, und ein laufender Render
+nimmt den Poll automatisch wieder auf. i18n `reel.*` (ersetzt `reelTest.*`).
+
+---
+
+> Nächste Migration: **0005**.

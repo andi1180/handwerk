@@ -11,7 +11,8 @@ import { FinalizeBanner, FinalizeButton } from "./finalize-controls";
 import {
   GenerateButton,
   GeneratedBanner,
-  ReelTestButton,
+  ReelButton,
+  type ReelStatus,
 } from "./generate-controls";
 import { getOrderById, getOrderMedia } from "@/lib/orders/queries";
 
@@ -64,16 +65,31 @@ export default async function OrderDetailPage({
   const isFinalized = order.status === "finalized";
   const isGenerated = order.status === "generated";
 
-  // Booklet-Token für den Vorschau-Link laden (8a-2). RLS lässt Mitglieder die
-  // booklets-Row lesen — kein service_role nötig. Nur relevant, sobald generiert.
+  // Booklet-Token für den Vorschau-Link (8a-2) + Reel-Status (8b-1a) laden. RLS
+  // lässt Mitglieder die booklets-Row lesen — kein service_role nötig. Nur
+  // relevant, sobald generiert. reel_status ist persistent (Reload zeigt den
+  // Render-Stand); bei `ready` zusätzlich eine frische Signed-URL des Reels.
   let bookletToken: string | null = null;
+  let reelStatus: ReelStatus = "pending";
+  let reelUrl: string | null = null;
   if (isGenerated) {
     const { data: booklet } = await supabase
       .from("booklets")
-      .select("access_token")
+      .select("access_token, reel_status, reel_url")
       .eq("order_id", order.id)
-      .maybeSingle<{ access_token: string }>();
+      .maybeSingle<{
+        access_token: string;
+        reel_status: ReelStatus | null;
+        reel_url: string | null;
+      }>();
     bookletToken = booklet?.access_token ?? null;
+    reelStatus = booklet?.reel_status ?? "pending";
+    if (reelStatus === "ready" && booklet?.reel_url) {
+      const { data } = await supabase.storage
+        .from("order-media")
+        .createSignedUrl(booklet.reel_url, SIGNED_URL_TTL_SECONDS);
+      reelUrl = data?.signedUrl ?? null;
+    }
   }
 
   return (
@@ -204,9 +220,14 @@ export default async function OrderDetailPage({
         <GenerateButton orderId={order.id} mediaCount={media.length} />
       ) : null}
 
-      {/* Provisorischer FFmpeg-Infra-Test (nur Status generated, 8b-0v2). Wird in
-          8b-1 durch das echte „Reel erstellen" ersetzt. */}
-      {isGenerated ? <ReelTestButton orderId={order.id} /> : null}
+      {/* Echtes Foto-Reel (nur Status generated, 8b-1a): async Render + Poll. */}
+      {isGenerated ? (
+        <ReelButton
+          orderId={order.id}
+          initialStatus={reelStatus}
+          initialUrl={reelUrl}
+        />
+      ) : null}
     </div>
   );
 }

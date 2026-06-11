@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { DEFAULT_LOCALE, t } from "@/lib/i18n";
 import { postAction } from "./finalize-controls";
@@ -267,66 +267,113 @@ export function GeneratedBanner({
   );
 }
 
-/** Client-Timeout: der Render darf etwas dauern (Download + ffmpeg + Upload), aber nie ewig hängen. */
-const REEL_TEST_TIMEOUT_MS = 180_000;
+/** Reel-Render-Status (Spiegel von booklets.reel_status, 8b-1a). */
+export type ReelStatus = "pending" | "rendering" | "ready" | "failed";
+
+/** Poll-Intervall, solange der Render läuft. */
+const REEL_POLL_MS = 3000;
+
+/** Server-Fehlercode des Render-Starts → i18n-Hinweis (+ technischer Detail-Teil). */
+async function noticeForReelStart(res: Response): Promise<string> {
+  let code = "";
+  try {
+    const body = (await res.json()) as { error?: unknown };
+    if (typeof body.error === "string") code = body.error;
+  } catch {
+    // kein/ungültiger Body → generischer Fehler
+  }
+  const base =
+    code === "need_photos"
+      ? t(DEFAULT_LOCALE, "reel.needPhotos")
+      : t(DEFAULT_LOCALE, "reel.error");
+  const detail = code ? `${res.status} ${code}` : String(res.status);
+  return `${base} (${detail})`;
+}
 
 /**
- * Provisorischer FFmpeg-Infra-Test (Schritt 8b-0v2): POST auf `render-reel-test`,
- * zeigt bei Erfolg einen Link zum erzeugten Test-mp4. KEIN echtes Reel — beweist
- * nur, dass ffmpeg in der Vercel-Function läuft (Binary zur Laufzeit aus dem
- * Storage geladen) und der Output im Storage landet. Wird in 8b-1 durch das echte
- * „Reel erstellen" ersetzt. Lade-/Fehler-State via try/finally (nie ein Dauer-
- * „Rendere…"), mit AbortController-Timeout.
+ * Echtes Foto-Reel (Schritt 8b-1a): asynchroner Render mit Status-Poll.
+ *
+ * Opt-in (= Kostenkontrolle): Klick auf „Reel erstellen" startet `POST render-reel`
+ * (Server antwortet 202 + setzt reel_status='rendering'), danach wird
+ * `reel-status` alle ~3 s gepollt: „Reel wird erstellt…" → bei `ready` ein Link
+ * auf das signierte reel.mp4, bei `failed` ein Fehlerhinweis + „Erneut".
+ *
+ * Der Anfangsstatus kommt vom Server (Seiten-Reload zeigt den persistenten Stand);
+ * steht er auf `rendering`, nimmt der Poll automatisch wieder auf.
  */
-export function ReelTestButton({ orderId }: { orderId: string }) {
-  const [busy, setBusy] = useState(false);
-  const [url, setUrl] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+export function ReelButton({
+  orderId,
+  initialStatus,
+  initialUrl,
+}: {
+  orderId: string;
+  initialStatus: ReelStatus;
+  initialUrl: string | null;
+}) {
+  const [status, setStatus] = useState<ReelStatus>(initialStatus);
+  const [url, setUrl] = useState<string | null>(initialUrl);
+  const [notice, setNotice] = useState<string | null>(
+    initialStatus === "failed" ? t(DEFAULT_LOCALE, "reel.failed") : null,
+  );
+  const [starting, setStarting] = useState(false);
 
-  const handleRender = useCallback(() => {
-    setBusy(true);
-    setNotice(null);
-    setUrl(null);
-    void (async () => {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), REEL_TEST_TIMEOUT_MS);
+  // Solange gerendert wird, den Status pollen (sofort + alle REEL_POLL_MS).
+  useEffect(() => {
+    if (status !== "rendering") return;
+    let cancelled = false;
+
+    const poll = async () => {
       try {
-        const res = await fetch(
-          `/api/portal/orders/${orderId}/render-reel-test`,
-          { method: "POST", signal: controller.signal },
-        );
+        const res = await fetch(`/api/portal/orders/${orderId}/reel-status`);
+        if (!res.ok) return; // transient → nächster Tick
+        const body = (await res.json()) as { status?: unknown; url?: unknown };
+        if (cancelled) return;
+        if (body.status === "ready") {
+          setUrl(typeof body.url === "string" ? body.url : null);
+          setStatus("ready");
+        } else if (body.status === "failed") {
+          setNotice(t(DEFAULT_LOCALE, "reel.failed"));
+          setStatus("failed");
+        }
+      } catch {
+        // transienter Netzwerkfehler — beim nächsten Tick erneut versuchen
+      }
+    };
+
+    const id = setInterval(() => void poll(), REEL_POLL_MS);
+    void poll();
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [status, orderId]);
+
+  const start = useCallback(() => {
+    setStarting(true);
+    setNotice(null);
+    void (async () => {
+      try {
+        const res = await fetch(`/api/portal/orders/${orderId}/render-reel`, {
+          method: "POST",
+        });
         if (!res.ok) {
-          let code = "";
-          try {
-            const body = (await res.json()) as { error?: unknown };
-            if (typeof body.error === "string") code = body.error;
-          } catch {
-            // kein/ungültiger Body → nur HTTP-Status zeigen
-          }
-          const detail = code ? `${res.status} ${code}` : String(res.status);
-          setNotice(`${t(DEFAULT_LOCALE, "reelTest.error")} (${detail})`);
+          setNotice(await noticeForReelStart(res));
           return;
         }
-        const body = (await res.json()) as { url?: unknown };
-        if (typeof body.url === "string") {
-          setUrl(body.url);
-        } else {
-          setNotice(t(DEFAULT_LOCALE, "reelTest.error"));
-        }
+        // 202: Render läuft → in den Poll-Zustand wechseln.
+        setUrl(null);
+        setStatus("rendering");
       } catch (error) {
-        if (error instanceof DOMException && error.name === "AbortError") {
-          setNotice(t(DEFAULT_LOCALE, "reelTest.timeout"));
-        } else {
-          console.error("reel-test: request failed", error);
-          setNotice(t(DEFAULT_LOCALE, "reelTest.error"));
-        }
+        console.error("reel: start failed", error);
+        setNotice(t(DEFAULT_LOCALE, "reel.error"));
       } finally {
-        // Lade-Zustand IMMER zurücksetzen — nie ein Dauer-„Rendere…".
-        clearTimeout(timer);
-        setBusy(false);
+        setStarting(false);
       }
     })();
   }, [orderId]);
+
+  const rendering = status === "rendering";
+  const busy = starting || rendering;
 
   return (
     <div style={{ marginTop: 24 }}>
@@ -338,21 +385,7 @@ export function ReelTestButton({ orderId }: { orderId: string }) {
           gap: 10,
         }}
       >
-        <button
-          type="button"
-          className="btn-outline"
-          onClick={handleRender}
-          disabled={busy}
-          style={{
-            opacity: busy ? 0.6 : 1,
-            cursor: busy ? "default" : "pointer",
-          }}
-        >
-          {busy
-            ? t(DEFAULT_LOCALE, "reelTest.rendering")
-            : t(DEFAULT_LOCALE, "reelTest.button")}
-        </button>
-        {url ? (
+        {status === "ready" && url ? (
           <a
             className="btn-gold"
             href={url}
@@ -360,12 +393,30 @@ export function ReelTestButton({ orderId }: { orderId: string }) {
             rel="noopener noreferrer"
           >
             <ExternalLinkIcon />
-            {t(DEFAULT_LOCALE, "reelTest.open")}
+            {t(DEFAULT_LOCALE, "reel.watch")}
           </a>
         ) : null}
+
+        <button
+          type="button"
+          className={status === "ready" ? "btn-outline" : "btn-gold capture-btn"}
+          onClick={start}
+          disabled={busy}
+          style={{ opacity: busy ? 0.6 : 1, cursor: busy ? "default" : "pointer" }}
+        >
+          {starting
+            ? t(DEFAULT_LOCALE, "reel.starting")
+            : rendering
+              ? t(DEFAULT_LOCALE, "reel.rendering")
+              : status === "ready"
+                ? t(DEFAULT_LOCALE, "reel.recreate")
+                : status === "failed"
+                  ? t(DEFAULT_LOCALE, "reel.retry")
+                  : t(DEFAULT_LOCALE, "reel.create")}
+        </button>
       </div>
       <p style={{ marginTop: 8, fontSize: 12, color: "var(--text-secondary)" }}>
-        {t(DEFAULT_LOCALE, "reelTest.hint")}
+        {t(DEFAULT_LOCALE, "reel.hint")}
       </p>
       {notice ? <NoticeBox text={notice} /> : null}
     </div>
