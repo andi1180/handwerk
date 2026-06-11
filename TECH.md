@@ -1295,4 +1295,86 @@ kaputtem Text weiterrendern.
 
 ---
 
+## Intro/Outro im Reel (Schritt 8b-1c)
+
+Baut auf 8b-1a/1b auf: das Reel bekommt einen **Intro-** und einen **Outro-Frame**
+(je ~2,5 s) mit Logo + Branding + Text — die Marke rahmt die Foto-Story. Foto-Frames
+optional mit **Logo-Wasserzeichen**. **Keine Migration**, **keine** UI-/Poll-Änderung
+(`after()`/`reel_status`/`render-reel`/`reel-status` unverändert). **KEINE** Video-Clips
+(8b-2), **KEIN** Ken-Burns (8b-3). **NUR FFmpeg, KEIN Sharp.**
+
+### Reihenfolge & Assembly
+
+Intro-Frame (2,5 s) → Foto-Frames (je 3 s, 8b-1b) → Outro-Frame (2,5 s), **harte
+Schnitte**. Die Assembly (`assembleReel`) nimmt jetzt **pro Frame eine eigene Dauer**
+(`-loop 1 -t s` je Input) statt einer globalen Konstante; Encode unverändert
+(`libx264`/`yuv420p`/`+faststart`/`-an`, `concat`-Filter, `setsar=1,fps=30,
+format=yuv420p` je Input). Upload/Status/Output identisch zu 8b-1a
+(`{business_id}/{order_id}/reel.mp4`).
+
+### Filtergraph-Logik ausgelagert ([lib/reel/frames.ts](lib/reel/frames.ts), NEU, server-only)
+
+Die gesamte ffmpeg-Filtergraph-Logik liegt jetzt in `lib/reel/frames.ts` — die
+[render-reel-Route](app/api/portal/orders/[id]/render-reel/route.ts) bleibt reine
+Orchestrierung (Auth/Status/Downloads/Upload/Cleanup). Exporte: `bakePhotoFrame`,
+`bakeIntroFrame`, `bakeOutroFrame`, `assembleReel`, `assertReelAssets`, `REEL_*`. Der
+8b-1b-Foto-Pfad (cover-crop + Caption-Overlay) wurde **unverändert** mit übernommen
+(gleiche Filter-Substrings), nur um das optionale Wasserzeichen erweitert.
+
+- **Intro-Frame:** Hintergrund = `intro_bg_url` (Bucket `branding`, `service_role`
+  download) cover-crop 1080×1920; **fehlt er** ⇒ diagonaler Verlauf aus
+  `primary→secondary` über die `gradients`-lavfi-Quelle (reine libavfilter-Quelle,
+  in jedem vollständigen Build vorhanden) — spiegelt `.booklet-bg--fallback`. Darüber
+  der **Vollflächen-Scrim**, dann (falls `logo_url`) das **Logo prominent oben**
+  (`overlay`, in 720×200-Box skaliert, Alpha bleibt — wie die Web-Story-Intro), dann
+  **KI-`intro_title`** groß zentriert (Fallback Betriebsname), Branding-**Akzentbalken**
+  und **`intro_tagline`** (uppercase, `primary_color`) darunter. `intro_description`
+  bewusst **weg** (zu viel für 2,5 s; lebt in der Web-Story).
+- **Outro-Frame:** Hintergrund `outro_bg_url`/Verlauf, Scrim, Logo, **Betriebsname**,
+  Akzentbalken, **`outro_message`** und unten in der Safe-Zone **Kontakt** (Telefon
+  `contact_phone` + Website `website_url` als Host ohne Protokoll). **KEINE** Share-/
+  Review-Elemente (Step 9; das Reel ist eine Datei, kein interaktiver Hub).
+- **Foto-Frames:** Captions unverändert (8b-1b). **ZUSÄTZLICH:** bei
+  `branding.logo_per_page` ein **dezentes Logo-Wasserzeichen** oben links (`overlay`,
+  in 320×92-Box skaliert, Rand 44 px — analog `.booklet-page-logo`); ohne
+  `logo_per_page` kein Wasserzeichen. Das Logo wird **einmal** geladen und sowohl für
+  Intro/Outro als auch das Wasserzeichen genutzt.
+
+### Vollflächen-Scrim ([assets/reel/frame-scrim.png](assets/reel/frame-scrim.png))
+
+Der Caption-Scrim (8b-1b) ist **nur unten** — der zentrierte Intro/Outro-Text braucht
+einen **vollflächigen** Verlauf. Neues committetes
+[frame-scrim.png](assets/reel/frame-scrim.png) (1080×1920 RGBA, ~11 KB), Werte spiegeln
+`.booklet-scrim` (`0.5 @ 0% → 0.3 @ 38% → 0.62 @ 100%`), Generator
+[scripts/make-frame-scrim.mjs](scripts/make-frame-scrim.mjs) (reines Node/zlib,
+deterministisch). Via `outputFileTracingIncludes` ([next.config.ts](next.config.ts))
+**zusätzlich** zum Font + Caption-Scrim in die render-reel-Function getraced (klein,
+kein Deploy-Größenproblem; Trace verifiziert).
+
+### Schrift, Zentrierung & ein drawtext-Stolperstein
+
+- Schrift weiterhin **mitgeliefert** + per `fontfile=` referenziert (kein fontconfig).
+  Zentrierter Text via `x=(w-text_w)/2`; **mehrzeilige** Blöcke sind innerhalb der
+  zentrierten Bounding-Box **links-bündig** (kein `text_align` — erst ab ffmpeg 7.0,
+  Vercel läuft 6.0.1), wie schon bei der Caption.
+- **drawbox-Zentrierung:** in den drawbox-x/y-Ausdrücken meint `w`/`h` die **Box**-Maße,
+  `iw`/`ih` die **Frame**-Maße → zentrierter Akzentbalken nutzt `x=(iw-W)/2` (sonst x=0).
+- **drawtext-Optionsreihenfolge:** `fontfile` steht **nicht** an erster Stelle
+  (`textfile`/`text` zuerst). Mit einem lokalen 8.1.1-Build verschluckte ein
+  führendes `fontfile=` die nachfolgende Option — `fontfile` nicht an den Anfang zu
+  stellen löst das standardkonform und ist für jeden korrekten Parser (Vercel 6.0.1)
+  unkritisch. Lokal mit arm64-ffmpeg verifiziert: alle Frames (Intro mit Bild+Logo,
+  Intro-Verlauf, Outro, Foto mit Caption+Wasserzeichen, Foto sauber) backen,
+  Assembly → 1080×1920 (DAR 9:16), h264/yuv420p, 30 fps, kein Audio.
+
+### Diagnose
+
+Pro Schritt eigener `reel_error`-Code: `assets_missing` (Schrift/Scrim nicht lesbar,
+z. B. Tracing fehlgeschlagen), `download_assets` (Logo/Hintergrund), `download_photos`,
+`bake_intro`, `bake_frames`, `bake_outro`, `ffmpeg` (Assembly), `upload`, `mark_ready`
+— `reel_status='failed'` + `console.error` (order_id/step/message), nie ein Reel mit
+kaputten Frames.
+
+---
+
 > Nächste Migration: **0005**.
