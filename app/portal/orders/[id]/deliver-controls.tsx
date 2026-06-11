@@ -4,6 +4,7 @@ import { useCallback, useState } from "react";
 import { useRouter } from "next/navigation";
 import { DEFAULT_LOCALE, t } from "@/lib/i18n";
 import { CUSTOMER_VIEW_QUERY } from "@/lib/booklet/customer-view";
+import { NO_TRACK_QUERY } from "@/lib/booklet/events";
 
 /**
  * Auslieferung im Portal (Schritt 9c-1). Zwei kleine Client-Komponenten,
@@ -174,9 +175,11 @@ export function DeliveredBanner({
             : t(DEFAULT_LOCALE, "deliver.deliveredNoDate")}
         </span>
         {token ? (
+          // `?c=1` → volle Kunden-Sicht (§9d); `&p=1` → betriebs-eigener Aufruf
+          // wird NICHT getrackt (§10a.1, kein viewed/shared/Status-Vorrücken).
           <a
             className="btn-outline"
-            href={`/b/${token}?${CUSTOMER_VIEW_QUERY}`}
+            href={`/b/${token}?${CUSTOMER_VIEW_QUERY}&${NO_TRACK_QUERY}`}
             target="_blank"
             rel="noopener noreferrer"
             style={{ flexShrink: 0 }}

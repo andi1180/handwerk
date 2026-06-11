@@ -1914,4 +1914,26 @@ Geteilte, **plain** (secret-freie, client-importierbare) Quelle: [lib/booklet/ev
 
 ---
 
+## No-Track-Marker — betriebs-eigene Aufrufe nicht tracken (Schritt 10a.1)
+
+Verhindert, dass der **Betrieb** beim Öffnen/Testen des eigenen Booklets `viewed`/`shared`-Events auslöst und damit den Auftragsstatus (`sent → viewed → shared`) fälschlich vorrückt. **Keine Migration.**
+
+### Marker (`p=1`) — UI/Tracking-Schalter, KEIN Auth-Gate
+
+- Definiert in [lib/booklet/events.ts](lib/booklet/events.ts) (Tracking-Domäne, **plain**/secret-frei → client-importierbar): `NO_TRACK_PARAM` (`"p"`), `NO_TRACK_VALUE` (`"1"`), `NO_TRACK_QUERY` (`"p=1"`) + `hasNoTrackMarker(search)` (`URLSearchParams`-Parse, `p === "1"`). **Eine Quelle** für den Lese-Check (Client) und das Anhängen an Betriebs-Links.
+- **KEIN Sicherheits-Gate** — exakt wie der `c=1`-Marker (§9d): der `access_token` bleibt der alleinige Zugriffsschutz; `p=1` schaltet **ausschließlich** das clientseitige Tracking ab. **Kein DB-Zugriff** hängt daran (`loadPublicBooklet`/der Event-Endpoint sehen den Marker nie).
+
+### Unterdrückung zentral im Client-Helfer
+
+- [lib/booklet/track.ts](lib/booklet/track.ts): `trackBookletEvent` bricht **früh ab** (`typeof window !== "undefined" && hasNoTrackMarker(window.location.search)` ⇒ `return`), **bevor** der `fetch` startet. Kein Request → kein Event-Insert → **kein** Status-Vorrücken.
+- Bewusst **zentral** im einen Helfer (nicht in den drei Aufrufern [view-tracker.tsx](app/b/[token]/view-tracker.tsx) / [share-bar.tsx](app/b/[token]/share-bar.tsx) / [tracked-link.tsx](app/b/[token]/tracked-link.tsx)), sodass **kein** Aufrufer den Check vergessen kann.
+
+### Betriebs-Links bekommen den Marker — Kunden-Links NICHT
+
+- **Mit `&p=1`** (zusätzlich zu `c=1`): Portal-Vorschau-Link ([generate-controls.tsx](app/portal/orders/[id]/generate-controls.tsx), Status `generated`) und der „Ausgeliefert"-Banner-Link ([deliver-controls.tsx](app/portal/orders/[id]/deliver-controls.tsx), Status `sent`) → `…/b/${token}?c=1&p=1`. Über diese öffnet der Betrieb das eigene Booklet.
+- **Ohne `p=1`** (nur `c=1`, weiter getrackt): der **E-Mail**-Link (9c-1, [deliver/route.ts](app/api/portal/orders/[id]/deliver/route.ts)) und der **QR**-Link (9c-2, [qr/page.tsx](app/portal/orders/[id]/qr/page.tsx)) — die echten Kunden-Wege. Das ist der ganze Punkt: nur betriebs-eigene Aufrufe sind ausgenommen.
+- **Share teilt weiter die NACKTE URL** ([share-bar.tsx](app/b/[token]/share-bar.tsx) baut `storyUrl` ohne Marker, §9d) → Empfänger geteilter Links tragen **keinen** Marker und werden normal getrackt.
+
+---
+
 > Nächste Migration: **0005**.

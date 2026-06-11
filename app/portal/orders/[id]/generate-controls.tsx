@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { DEFAULT_LOCALE, t } from "@/lib/i18n";
 import { CUSTOMER_VIEW_QUERY } from "@/lib/booklet/customer-view";
+import { NO_TRACK_QUERY } from "@/lib/booklet/events";
 import { postAction } from "./finalize-controls";
 
 /**
@@ -224,11 +225,12 @@ export function GeneratedBanner({
         <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 2 }}>
           {/* Primär-Aktion: die fertige Story prüfen (öffnet /b/[token]).
               Marker `?c=1` (§9d) → der Betrieb sieht die volle Kunden-Sicht
-              inkl. Teilen-Sektion. */}
+              inkl. Teilen-Sektion; `&p=1` (§10a.1) → betriebs-eigener Aufruf
+              wird NICHT getrackt (kein viewed/shared, kein Status-Vorrücken). */}
           {token ? (
             <a
               className="btn-gold"
-              href={`/b/${token}?${CUSTOMER_VIEW_QUERY}`}
+              href={`/b/${token}?${CUSTOMER_VIEW_QUERY}&${NO_TRACK_QUERY}`}
               target="_blank"
               rel="noopener noreferrer"
             >
