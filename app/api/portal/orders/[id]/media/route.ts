@@ -116,6 +116,26 @@ export async function POST(
     return NextResponse.json({ error: "invalid_path" }, { status: 400 });
   }
 
+  // Medien-Anzahl-Limit (Schritt 8c) — HARTER Riegel (Client-Disable ist nur UX,
+  // umgehbar). Vorhandene order_media des jeweiligen media_type dieser Order
+  // zählen; >= pro-Betrieb-Limit ⇒ 400. business.settings ist auf [min..Ceiling]
+  // normalisiert (getCurrentBusiness).
+  const limit =
+    mediaType === "photo"
+      ? business.settings.photo_max_count
+      : business.settings.video_max_count;
+  const { count } = await supabase
+    .from("order_media")
+    .select("id", { count: "exact", head: true })
+    .eq("order_id", order.id)
+    .eq("media_type", mediaType);
+  if ((count ?? 0) >= limit) {
+    console.error(
+      `[media POST] limit_reached (order ${orderId}, type ${mediaType}, count ${count}, limit ${limit})`,
+    );
+    return NextResponse.json({ error: "limit_reached" }, { status: 400 });
+  }
+
   // sort_order = coalesce(max(sort_order), 0) + 1 für diese Order.
   const { data: last } = await supabase
     .from("order_media")

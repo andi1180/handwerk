@@ -20,7 +20,9 @@ import {
   CONTENT_LIMITS,
   DELIVERY_MODES,
   FONT_OPTIONS,
+  PHOTO_COUNT,
   RETENTION_MONTHS,
+  VIDEO_COUNT,
   VIDEO_SECONDS,
   backgroundStoragePath,
   isDeliveryMode,
@@ -92,6 +94,12 @@ export function SettingsForm({
   const [logoPerPage, setLogoPerPage] = useState(business.branding.logo_per_page);
   const [videoMaxSeconds, setVideoMaxSeconds] = useState(
     business.settings.video_max_seconds,
+  );
+  const [photoMaxCount, setPhotoMaxCount] = useState(
+    business.settings.photo_max_count,
+  );
+  const [videoMaxCount, setVideoMaxCount] = useState(
+    business.settings.video_max_count,
   );
   const [igHandle, setIgHandle] = useState(business.settings.ig_handle ?? "");
   const [googleReviewUrl, setGoogleReviewUrl] = useState(
@@ -170,6 +178,32 @@ export function SettingsForm({
       return;
     }
     if (
+      !Number.isInteger(photoMaxCount) ||
+      photoMaxCount < PHOTO_COUNT.min ||
+      photoMaxCount > PHOTO_COUNT.max
+    ) {
+      fail(
+        t(DEFAULT_LOCALE, "settings.errPhotoCount", {
+          min: PHOTO_COUNT.min,
+          max: PHOTO_COUNT.max,
+        }),
+      );
+      return;
+    }
+    if (
+      !Number.isInteger(videoMaxCount) ||
+      videoMaxCount < VIDEO_COUNT.min ||
+      videoMaxCount > VIDEO_COUNT.max
+    ) {
+      fail(
+        t(DEFAULT_LOCALE, "settings.errVideoCount", {
+          min: VIDEO_COUNT.min,
+          max: VIDEO_COUNT.max,
+        }),
+      );
+      return;
+    }
+    if (
       introTagline.trim().length > CONTENT_LIMITS.introTagline ||
       outroMessage.trim().length > CONTENT_LIMITS.outroMessage ||
       contactPhone.trim().length > CONTENT_LIMITS.contactPhone
@@ -200,6 +234,8 @@ export function SettingsForm({
           font,
           logo_per_page: logoPerPage,
           video_max_seconds: videoMaxSeconds,
+          photo_max_count: photoMaxCount,
+          video_max_count: videoMaxCount,
           ig_handle: igHandle,
           google_review_url: googleReviewUrl,
           website_url: websiteUrl,
@@ -330,6 +366,34 @@ export function SettingsForm({
           hint={t(DEFAULT_LOCALE, "settings.videoMaxSecondsHint", {
             default: VIDEO_SECONDS.default,
             max: VIDEO_SECONDS.max,
+          })}
+        />
+        <RangeNumberField
+          label={t(DEFAULT_LOCALE, "settings.photoMaxCount")}
+          value={photoMaxCount}
+          min={PHOTO_COUNT.min}
+          max={PHOTO_COUNT.max}
+          onChange={(v) => {
+            markDirty();
+            setPhotoMaxCount(v);
+          }}
+          hint={t(DEFAULT_LOCALE, "settings.photoMaxCountHint", {
+            default: PHOTO_COUNT.default,
+            max: PHOTO_COUNT.max,
+          })}
+        />
+        <RangeNumberField
+          label={t(DEFAULT_LOCALE, "settings.videoMaxCount")}
+          value={videoMaxCount}
+          min={VIDEO_COUNT.min}
+          max={VIDEO_COUNT.max}
+          onChange={(v) => {
+            markDirty();
+            setVideoMaxCount(v);
+          }}
+          hint={t(DEFAULT_LOCALE, "settings.videoMaxCountHint", {
+            default: VIDEO_COUNT.default,
+            max: VIDEO_COUNT.max,
           })}
         />
       </div>

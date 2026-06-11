@@ -135,11 +135,23 @@ export function Capture({
   businessId,
   orderId,
   maxVideoSeconds = MAX_VIDEO_SECONDS,
+  photoMax,
+  videoMax,
+  photoCount,
+  videoCount,
 }: {
   businessId: string;
   orderId: string;
   /** Pro Betrieb konfiguriert (Settings); fällt auf die Konstante zurück. */
   maxVideoSeconds?: number;
+  /** Pro-Betrieb-Limit für Fotos pro Auftrag (Schritt 8c). */
+  photoMax: number;
+  /** Pro-Betrieb-Limit für Videos pro Auftrag (Schritt 8c). */
+  videoMax: number;
+  /** Bereits gespeicherte Fotos dieses Auftrags (Server-Liste). */
+  photoCount: number;
+  /** Bereits gespeicherte Videos dieses Auftrags (Server-Liste). */
+  videoCount: number;
 }) {
   const router = useRouter();
   const supabase = useMemo(() => createClient(), []);
@@ -337,6 +349,19 @@ export function Capture({
     void runUpload(item);
   };
 
+  // Medien-Anzahl-Limit (8c): in-flight = optimistische Queue-Items des jeweiligen
+  // Typs mitzählen, damit nicht mehr eingereiht wird, als Slots frei sind. Reine
+  // UX-Sperre — der harte Riegel ist der Server-Guard im Media-Route-Handler.
+  const inFlightPhotos = items.filter((it) => it.mediaType === "photo").length;
+  const inFlightVideos = items.filter((it) => it.mediaType === "video").length;
+  const photoLimitReached = photoCount + inFlightPhotos >= photoMax;
+  const videoLimitReached = videoCount + inFlightVideos >= videoMax;
+
+  const disabledBtnStyle: React.CSSProperties = {
+    opacity: 0.45,
+    pointerEvents: "none",
+  };
+
   return (
     <div style={{ marginBottom: 12 }}>
       {/* Versteckte Datei-Inputs. Aufnahme: native Kamera (`capture`); Upload:
@@ -378,11 +403,17 @@ export function Capture({
         <div className="capture-row">
           <div
             role="button"
-            tabIndex={0}
+            tabIndex={photoLimitReached ? -1 : 0}
+            aria-disabled={photoLimitReached}
             className="btn-dark capture-btn"
-            onClick={openPhoto}
+            style={photoLimitReached ? disabledBtnStyle : undefined}
+            onClick={photoLimitReached ? undefined : openPhoto}
             onKeyDown={(e) => {
-              if (e.key === "Enter" || e.key === " ") openPhoto();
+              if (
+                !photoLimitReached &&
+                (e.key === "Enter" || e.key === " ")
+              )
+                openPhoto();
             }}
           >
             <CameraIcon />
@@ -390,11 +421,17 @@ export function Capture({
           </div>
           <div
             role="button"
-            tabIndex={0}
+            tabIndex={videoLimitReached ? -1 : 0}
+            aria-disabled={videoLimitReached}
             className="btn-outline capture-btn"
-            onClick={openVideo}
+            style={videoLimitReached ? disabledBtnStyle : undefined}
+            onClick={videoLimitReached ? undefined : openVideo}
             onKeyDown={(e) => {
-              if (e.key === "Enter" || e.key === " ") openVideo();
+              if (
+                !videoLimitReached &&
+                (e.key === "Enter" || e.key === " ")
+              )
+                openVideo();
             }}
           >
             <VideoIcon />
@@ -404,11 +441,17 @@ export function Capture({
         <div className="capture-row">
           <div
             role="button"
-            tabIndex={0}
+            tabIndex={photoLimitReached ? -1 : 0}
+            aria-disabled={photoLimitReached}
             className="btn-outline capture-btn"
-            onClick={openPhotoUpload}
+            style={photoLimitReached ? disabledBtnStyle : undefined}
+            onClick={photoLimitReached ? undefined : openPhotoUpload}
             onKeyDown={(e) => {
-              if (e.key === "Enter" || e.key === " ") openPhotoUpload();
+              if (
+                !photoLimitReached &&
+                (e.key === "Enter" || e.key === " ")
+              )
+                openPhotoUpload();
             }}
           >
             <UploadIcon />
@@ -416,11 +459,17 @@ export function Capture({
           </div>
           <div
             role="button"
-            tabIndex={0}
+            tabIndex={videoLimitReached ? -1 : 0}
+            aria-disabled={videoLimitReached}
             className="btn-outline capture-btn"
-            onClick={openVideoUpload}
+            style={videoLimitReached ? disabledBtnStyle : undefined}
+            onClick={videoLimitReached ? undefined : openVideoUpload}
             onKeyDown={(e) => {
-              if (e.key === "Enter" || e.key === " ") openVideoUpload();
+              if (
+                !videoLimitReached &&
+                (e.key === "Enter" || e.key === " ")
+              )
+                openVideoUpload();
             }}
           >
             <UploadIcon />
@@ -428,6 +477,36 @@ export function Capture({
           </div>
         </div>
       </div>
+
+      {/* Limit-Hinweis (8c): wenn das Foto-/Video-Limit erreicht ist, sind die
+          jeweiligen Buttons deaktiviert — hier der erklärende Text. */}
+      {photoLimitReached || videoLimitReached ? (
+        <div
+          style={{
+            marginTop: 8,
+            display: "flex",
+            flexDirection: "column",
+            gap: 4,
+          }}
+        >
+          {photoLimitReached ? (
+            <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+              {t(DEFAULT_LOCALE, "capture.limitReached", {
+                type: t(DEFAULT_LOCALE, "capture.photosLabel"),
+                max: photoMax,
+              })}
+            </span>
+          ) : null}
+          {videoLimitReached ? (
+            <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+              {t(DEFAULT_LOCALE, "capture.limitReached", {
+                type: t(DEFAULT_LOCALE, "capture.videosLabel"),
+                max: videoMax,
+              })}
+            </span>
+          ) : null}
+        </div>
+      ) : null}
 
       {/* Hinweis (z. B. Video zu lang) — nur sichtbar, wenn gesetzt. */}
       {notice ? (

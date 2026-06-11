@@ -3,7 +3,9 @@ import { createClient } from "@/lib/supabase/server";
 import { getCurrentBusiness } from "@/lib/auth/current-business";
 import {
   CONTENT_LIMITS,
+  PHOTO_COUNT,
   RETENTION_MONTHS,
+  VIDEO_COUNT,
   VIDEO_SECONDS,
   asRecord,
   isDeliveryMode,
@@ -99,6 +101,26 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: "invalid_retention" }, { status: 400 });
   }
 
+  // Medien-Anzahl-Limit (Schritt 8c): pro-Betrieb, jeweils unter dem
+  // Plattform-Ceiling (PHOTO_COUNT.max / VIDEO_COUNT.max).
+  const photoMaxCount = intInRange(
+    payload.photo_max_count,
+    PHOTO_COUNT.min,
+    PHOTO_COUNT.max,
+  );
+  if (photoMaxCount === null) {
+    return NextResponse.json({ error: "invalid_photo_count" }, { status: 400 });
+  }
+
+  const videoMaxCount = intInRange(
+    payload.video_max_count,
+    VIDEO_COUNT.min,
+    VIDEO_COUNT.max,
+  );
+  if (videoMaxCount === null) {
+    return NextResponse.json({ error: "invalid_video_count" }, { status: 400 });
+  }
+
   // Booklet-Inhalt (Schritt 7b): optionale Text-/Kontaktfelder. Leer ⇒ null.
   const introTagline = trimmedOrNull(payload.intro_tagline);
   if (introTagline !== null && introTagline.length > CONTENT_LIMITS.introTagline) {
@@ -149,6 +171,8 @@ export async function PATCH(request: Request) {
   const settings = {
     ...asRecord(current.settings),
     video_max_seconds: videoMaxSeconds,
+    photo_max_count: photoMaxCount,
+    video_max_count: videoMaxCount,
     ig_handle: trimmedOrNull(payload.ig_handle),
     google_review_url: trimmedOrNull(payload.google_review_url),
     website_url: trimmedOrNull(payload.website_url),

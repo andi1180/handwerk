@@ -26,6 +26,17 @@ export type BackgroundSlot = (typeof BACKGROUND_SLOTS)[number];
 /** Grenzen + Default für die maximale Videolänge (Sekunden), Ceiling 30. */
 export const VIDEO_SECONDS = { min: 5, max: 30, default: 20 } as const;
 
+/**
+ * Grenzen + Default für die Anzahl Fotos pro Auftrag (Schritt 8c). `max` ist das
+ * harte **Plattform-Ceiling** (Kostenschutz; wandert später ins Admin-Portal) —
+ * der pro-Betrieb konfigurierte Wert ist die Einstellung darunter (`default`).
+ * Analog zu `VIDEO_SECONDS`.
+ */
+export const PHOTO_COUNT = { min: 1, max: 20, default: 10 } as const;
+
+/** Grenzen + Default für die Anzahl Videos pro Auftrag — Ceiling-Logik wie `PHOTO_COUNT`. */
+export const VIDEO_COUNT = { min: 1, max: 10, default: 3 } as const;
+
 /** Grenzen + Default für die Aufbewahrung (Monate); deckt sich mit der DB-Check. */
 export const RETENTION_MONTHS = { min: 1, max: 120, default: 12 } as const;
 

@@ -1,7 +1,9 @@
 import { createClient } from "@/lib/supabase/server";
 import {
   DEFAULT_BRANDING,
+  PHOTO_COUNT,
   RETENTION_MONTHS,
+  VIDEO_COUNT,
   VIDEO_SECONDS,
   asRecord,
   isDeliveryMode,
@@ -28,6 +30,10 @@ export type BusinessBranding = {
 /** Betriebs-Einstellungen (aus `businesses.settings` jsonb). */
 export type BusinessSettings = {
   video_max_seconds: number;
+  /** Max. Fotos pro Auftrag (Schritt 8c); pro-Betrieb-Wert unter dem Plattform-Ceiling. */
+  photo_max_count: number;
+  /** Max. Videos pro Auftrag (Schritt 8c); pro-Betrieb-Wert unter dem Plattform-Ceiling. */
+  video_max_count: number;
   ig_handle: string | null;
   google_review_url: string | null;
   website_url: string | null;
@@ -121,8 +127,28 @@ export function normalizeSettings(raw: unknown): BusinessSettings {
         )
       : VIDEO_SECONDS.default;
 
+  const rawPhotoCount = s.photo_max_count;
+  const photoCount =
+    typeof rawPhotoCount === "number" && Number.isFinite(rawPhotoCount)
+      ? Math.min(
+          Math.max(Math.round(rawPhotoCount), PHOTO_COUNT.min),
+          PHOTO_COUNT.max,
+        )
+      : PHOTO_COUNT.default;
+
+  const rawVideoCount = s.video_max_count;
+  const videoCount =
+    typeof rawVideoCount === "number" && Number.isFinite(rawVideoCount)
+      ? Math.min(
+          Math.max(Math.round(rawVideoCount), VIDEO_COUNT.min),
+          VIDEO_COUNT.max,
+        )
+      : VIDEO_COUNT.default;
+
   return {
     video_max_seconds: video,
+    photo_max_count: photoCount,
+    video_max_count: videoCount,
     ig_handle: asTrimmedOrNull(s.ig_handle),
     google_review_url: asTrimmedOrNull(s.google_review_url),
     website_url: asTrimmedOrNull(s.website_url),

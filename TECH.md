@@ -1506,4 +1506,65 @@ render-reel-Function.
 
 ---
 
+## Medien-Anzahl-Limit (Schritt 8c)
+
+Pro-Betrieb-Limit für die **Anzahl** Fotos/Videos je Auftrag, unter einem harten
+**Plattform-Ceiling**. **Keine Migration** — die Keys liegen im bestehenden
+`businesses.settings`-jsonb (wie 5a/7b/8a-1b). Drei Ebenen: Settings (Einstellung),
+Capture (UX-Sperre) und Server-Guard (harter Riegel).
+
+### Ceiling-Logik ([lib/settings/options.ts](lib/settings/options.ts))
+
+`PHOTO_COUNT = { min: 1, max: 20, default: 10 }`, `VIDEO_COUNT = { min: 1, max: 10,
+default: 3 }`. **`max` ist das Plattform-Ceiling** (Kostenschutz; wandert später ins
+Admin-Portal), der pro-Betrieb konfigurierte Wert ist die Einstellung **darunter**
+(`default`). Exakt dieselbe Konstruktion wie `VIDEO_SECONDS` — eine geteilte Quelle für
+Defaults beim Lesen, Client-Validierung und Server-Validierung.
+
+### Datenmodell ([lib/auth/current-business.ts](lib/auth/current-business.ts))
+
+`BusinessSettings` + `normalizeSettings` um `photo_max_count`/`video_max_count` erweitert:
+aus dem jsonb gelesen, auf `[min..Ceiling]` geclamped, Default bei fehlend/ungültig
+(`Math.min(Math.max(round(v), min), max)` — kein `any`, gleiches Muster wie
+`video_max_seconds`).
+
+### Settings-Form + Route
+
+- [settings-form.tsx](app/portal/settings/settings-form.tsx): in der bestehenden
+  „Aufnahme"-Gruppe (wo die Video-Länge sitzt) zwei `RangeNumberField` „Max. Fotos pro
+  Auftrag" + „Max. Videos pro Auftrag" (Range-Slider + gekoppeltes Zahlenfeld). Client-
+  Validierung deckt sich mit dem Server (`1..Ceiling`).
+- [settings/route.ts](app/api/portal/settings/route.ts) (`PATCH`): `photo_max_count ∈
+  [1,20]` / `video_max_count ∈ [1,10]` über `intInRange` ⇒ sonst **400**
+  (`invalid_photo_count` / `invalid_video_count`); beide Werte fließen in den bestehenden
+  settings-**READ-MERGE-WRITE** (überschreiben nichts anderes). `business_id` weiter
+  **nur** aus der Session.
+
+### Enforcement im Capture (UX-Sperre)
+
+Die Detailseite [page.tsx](app/portal/orders/[id]/page.tsx) zählt die geladenen
+`order_media` getrennt nach `media_type` (`photoCount`/`videoCount`) und reicht sie mit
+`photoMax`/`videoMax` (aus `business.settings`) an [capture.tsx](app/portal/orders/[id]/capture.tsx).
+Dort werden die Foto-Buttons (Aufnehmen **und** Hochladen) **deaktiviert** (grau,
+`pointer-events: none`, `aria-disabled`, `tabIndex -1`) + erklärender Hinweis
+(`capture.limitReached`, `{type}`/`{max}`), sobald
+`photoCount + in-flight-Foto-Queue-Items ≥ photoMax` (analog Video). **In-flight** = die
+optimistischen Queue-Items des jeweiligen Typs, damit nicht mehr eingereiht wird, als
+Slots frei sind (man könnte sonst 5 auf einmal starten, obwohl nur 1 Slot frei ist).
+
+### Server-Guard (Wahrheit, [media/route.ts](app/api/portal/orders/[id]/media/route.ts))
+
+Vor dem Insert werden die vorhandenen `order_media` des jeweiligen `media_type` dieser
+Order gezählt (`select("id", { count: "exact", head: true })`); `≥
+business.settings.{photo,video}_max_count` ⇒ **400 `limit_reached`** + `console.error`.
+**Das ist der harte Riegel** — der Client-Disable ist nur UX und umgehbar; `business.settings`
+ist bereits auf `[min..Ceiling]` normalisiert (`getCurrentBusiness`).
+
+### i18n
+
+`settings.photoMaxCount`/`videoMaxCount` (+ `*Hint`), `settings.errPhotoCount`/
+`errVideoCount`, `capture.limitReached`/`photosLabel`/`videosLabel`.
+
+---
+
 > Nächste Migration: **0005**.

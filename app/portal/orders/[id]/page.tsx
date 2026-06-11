@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentBusiness } from "@/lib/auth/current-business";
-import { VIDEO_SECONDS } from "@/lib/settings/options";
+import { PHOTO_COUNT, VIDEO_COUNT, VIDEO_SECONDS } from "@/lib/settings/options";
 import { DEFAULT_LOCALE, t } from "@/lib/i18n";
 import { OrderStatusBadge } from "@/components/order-status-badge";
 import { Capture } from "./capture";
@@ -47,6 +47,14 @@ export default async function OrderDetailPage({
   const business = await getCurrentBusiness();
   const maxVideoSeconds =
     business?.settings.video_max_seconds ?? VIDEO_SECONDS.default;
+
+  // Medien-Anzahl-Limit (8c): Fotos/Videos getrennt zählen + die pro-Betrieb-
+  // Limits an den Capture geben (Client-Disable; der harte Riegel ist der
+  // Server-Guard im Media-Route-Handler).
+  const photoCount = media.filter((m) => m.media_type === "photo").length;
+  const videoCount = media.filter((m) => m.media_type === "video").length;
+  const photoMax = business?.settings.photo_max_count ?? PHOTO_COUNT.default;
+  const videoMax = business?.settings.video_max_count ?? VIDEO_COUNT.default;
 
   const supabase = await createClient();
   const mediaWithUrls: MediaWithUrl[] = await Promise.all(
@@ -196,6 +204,10 @@ export default async function OrderDetailPage({
             businessId={order.business_id}
             orderId={order.id}
             maxVideoSeconds={maxVideoSeconds}
+            photoMax={photoMax}
+            videoMax={videoMax}
+            photoCount={photoCount}
+            videoCount={videoCount}
           />
         ) : null}
 
