@@ -1,5 +1,6 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import { getAnthropic, SONNET_MODEL } from "./anthropic";
+import { languageName } from "./language";
 
 /**
  * Eingabe für das Booklet-Intro (Schritt 8a-1). Speist sich aus der
@@ -41,12 +42,6 @@ export class IntroParseError extends Error {
     super(message);
     this.name = "IntroParseError";
   }
-}
-
-/** Sprach-Anzeigenamen für den Prompt (§15: neue Sprache = Config, kein Refactor). */
-const LANGUAGE_NAMES: Record<string, string> = { de: "Deutsch" };
-function languageName(language: string): string {
-  return LANGUAGE_NAMES[language] ?? language;
 }
 
 function systemPrompt(

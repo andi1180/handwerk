@@ -4,6 +4,8 @@ import { createServiceClient } from "@/lib/supabase/service";
 import { getCurrentBusiness } from "@/lib/auth/current-business";
 import { isAiConfigured } from "@/lib/ai/anthropic";
 import { generateIntro, IntroParseError } from "@/lib/ai/intro";
+import { generateReviewDraft } from "@/lib/ai/review";
+import { buildIgCaption } from "@/lib/booklet/ig-caption";
 import { generateAccessToken } from "@/lib/booklet/token";
 
 /** Echte Fehlermeldung für die Server-Logs (Vercel) extrahieren. */
@@ -13,9 +15,10 @@ function errMessage(error: unknown): string {
 
 /**
  * POST /api/portal/orders/[id]/generate — erzeugt die Booklet-Daten eines
- * abgeschlossenen Auftrags (Schritt 8a-1, OHNE Render): KI-Intro (Sonnet 4.6),
- * unerratbarer `access_token`, Status → `generated`. KEIN /b/[token]-Render
- * (8a-2), KEIN Reel (8b), KEINE Share-/Delivery-UI (Step 9).
+ * abgeschlossenen Auftrags: KI-Intro (Sonnet 4.6), Google-Review-Entwurf
+ * (Sonnet 4.6, Schritt 9b), IG-Caption (reines Template, 9b), unerratbarer
+ * `access_token`, Status → `generated`. Alle KI-Texte werden HIER bei der
+ * Generierung erzeugt und gespeichert — die öffentliche Seite bleibt KI-frei.
  *
  * Guards (alle vor dem Schreiben):
  *  - AUTHENTICATED Server-Client; kein User ⇒ 401, kein Betrieb ⇒ 403.
@@ -125,6 +128,39 @@ export async function POST(
     );
   }
 
+  // Google-Review-Entwurf (Sonnet 4.6, §8.6). NON-FATAL: ein Fehler hier darf
+  // die Booklet-Generierung NICHT blockieren — die Web-Story funktioniert ohne
+  // den Vorschlag, und Re-Generate versucht es erneut. Erfolg ⇒ review_draft,
+  // sonst null (+ Log). Re-Generate überschreibt (wie das Intro).
+  let reviewDraft: string | null = null;
+  try {
+    const draft = await generateReviewDraft({
+      itemDescription: order.item_description,
+      captions,
+      introTitle: intro.title,
+      introDescription: intro.description,
+      businessName: business.name,
+      language: order.language,
+      businessContext: business.settings.ai_context ?? undefined,
+    });
+    reviewDraft = draft.length > 0 ? draft : null;
+  } catch (error) {
+    console.error("generate: review draft failed", {
+      order_id: order.id,
+      step: "review_sonnet",
+      message: errMessage(error),
+    });
+    // reviewDraft bleibt null — Booklet wird trotzdem generiert.
+  }
+
+  // IG-Caption (reines Template, KEIN KI-Call → kann nicht fehlschlagen):
+  // intro_title + @ig_handle (nur wenn gesetzt) + kuratierte Hashtags. Der
+  // @-Handle ist der Tagging-Multiplikator (§9).
+  const igCaption = buildIgCaption({
+    introTitle: intro.title,
+    igHandle: business.settings.ig_handle,
+  });
+
   // booklets UPSERT by order_id (unique) über service_role, strikt auf die
   // Order-business_id gescoped. Bestehenden access_token BEI Re-Generate
   // behalten — geteilte Links dürfen nicht brechen.
@@ -154,6 +190,8 @@ export async function POST(
       .update({
         intro_title: intro.title,
         intro_description: intro.description,
+        review_draft: reviewDraft,
+        ig_caption: igCaption,
         language: order.language,
         web_story_ready: true,
       })
@@ -168,14 +206,16 @@ export async function POST(
       return NextResponse.json({ error: "upsert_failed" }, { status: 500 });
     }
   } else {
-    // reel_url/review_draft/ig_caption/image_urls/expires_at bleiben null (8b/9).
-    // web_story_ready = true: renderbar über /b/[token] (8a-2).
+    // reel_url/image_urls/expires_at bleiben null (8b/9). review_draft/ig_caption
+    // werden jetzt mitgeschrieben (9b). web_story_ready = true: renderbar (8a-2).
     const { error: insertError } = await service.from("booklets").insert({
       order_id: order.id,
       business_id: order.business_id,
       access_token: token,
       intro_title: intro.title,
       intro_description: intro.description,
+      review_draft: reviewDraft,
+      ig_caption: igCaption,
       language: order.language,
       web_story_ready: true,
     });

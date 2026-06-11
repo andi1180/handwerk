@@ -3,33 +3,48 @@
 import { useEffect, useRef, useState } from "react";
 import { t, type Locale } from "@/lib/i18n";
 
+/** Welcher „✓ kopiert"-Flash gerade aktiv ist (immer nur einer). */
+type CopiedKey = "link" | "ig" | "review";
+
 /**
- * Teilen-Sektion der öffentlichen Web-Story (Schritt 9a) — der WOM-Kern.
+ * Teilen-Sektion der öffentlichen Web-Story — der WOM-Kern.
  *
  * SSR-sicher: `window`/`navigator` werden ausschließlich in Handlern/Effects
  * berührt, nie beim Render. Buttons sind `div + onClick` (kein `<form>`).
  *
- * Reihenfolge (Pflichtenheft §4): Reel teilen (Datei) → Story teilen (URL) →
- * WhatsApp → Link kopieren. Review/IG-Caption kommen erst in 9b.
+ * Reihenfolge: Reel teilen (Datei, 9a) → IG-Caption-Vorschlag (9b, nahe „Reel
+ * teilen") → Story teilen (URL, 9a) → WhatsApp (9a) → Link kopieren (9a) →
+ * Google-Bewertung (9b, darunter).
  *
  * - „Reel teilen": Reel-Blob holen → File → `navigator.share({ files })` (öffnet
- *   den IG/TikTok-Composer). Geht das nicht (oder kein File-Share), Fallback =
- *   Download über einen Anchor mit `download`-Attribut. Nur sichtbar, wenn ein
- *   fertiges Reel vorliegt (`reelSignedUrl` gesetzt) — sonst gar kein Button.
+ *   den IG/TikTok-Composer). Geht das nicht, Fallback = Download. Nur sichtbar,
+ *   wenn ein fertiges Reel vorliegt (`reelSignedUrl` gesetzt).
+ * - IG-Caption (9b): nur wenn `igCaption` vorhanden — der Kunde kopiert sie für
+ *   den IG-Post (der @-Handle des Betriebs ist der Tagging-Multiplikator).
  * - „Story teilen": `navigator.share({ url })`, Fallback = Link kopieren.
  * - „WhatsApp": Deeplink `https://wa.me/?text=…`.
  * - „Link kopieren": Clipboard + kurzer „✓ Link kopiert"-Flash.
+ * - „Google-Bewertung schreiben" (9b): nur wenn `googleReviewUrl` UND `reviewDraft`
+ *   vorhanden. Klick → Entwurf in die Zwischenablage + Deeplink zum Google-Profil.
+ *   §8.6-PFLICHT: Framing „Vorschlag, gern in deinen Worten anpassen" (NICHT „Text
+ *   einfügen"), und NIEMALS an eine Belohnung gekoppelt (harter Google-ToS-Verstoß).
  */
 export function ShareBar({
   storyUrl,
   reelSignedUrl,
+  reviewDraft,
+  googleReviewUrl,
+  igCaption,
   locale,
 }: {
   storyUrl: string;
   reelSignedUrl: string | null;
+  reviewDraft: string | null;
+  googleReviewUrl: string | null;
+  igCaption: string | null;
   locale: Locale;
 }) {
-  const [copied, setCopied] = useState(false);
+  const [copiedKey, setCopiedKey] = useState<CopiedKey | null>(null);
   const [reelBusy, setReelBusy] = useState(false);
   // Optimistisch: die Zielgruppe (Kunde am Handy) kann i. d. R. Dateien teilen.
   // Nach dem Mount per Capability-Probe ggf. auf „Herunterladen" korrigiert.
@@ -57,19 +72,36 @@ export function ShareBar({
     [],
   );
 
-  function flashCopied() {
-    setCopied(true);
+  function flashCopied(key: CopiedKey) {
+    setCopiedKey(key);
     if (copyTimer.current) clearTimeout(copyTimer.current);
-    copyTimer.current = setTimeout(() => setCopied(false), 2000);
+    copyTimer.current = setTimeout(() => setCopiedKey(null), 2000);
   }
 
-  async function copyLink(): Promise<void> {
+  /** Text in die Zwischenablage + Flash; Verweigerung (z. B. ohne HTTPS) still ignorieren. */
+  async function copyText(text: string, key: CopiedKey): Promise<void> {
     try {
-      await navigator.clipboard.writeText(storyUrl);
-      flashCopied();
+      await navigator.clipboard.writeText(text);
+      flashCopied(key);
     } catch {
-      // Clipboard verweigert (z. B. ohne HTTPS) — still ignorieren.
+      // Clipboard nicht verfügbar — kein Fehler-Toast.
     }
+  }
+
+  function copyLink() {
+    void copyText(storyUrl, "link");
+  }
+
+  function copyIgCaption() {
+    if (igCaption) void copyText(igCaption, "ig");
+  }
+
+  async function writeReview() {
+    if (!reviewDraft || !googleReviewUrl) return;
+    // §8.6: Entwurf bereitstellen (Clipboard, Doc ist hier noch fokussiert ⇒
+    // zuverlässig) und DANN das Google-Profil im neuen Tab öffnen.
+    await copyText(reviewDraft, "review");
+    window.open(reviewHref(googleReviewUrl), "_blank", "noopener,noreferrer");
   }
 
   function downloadReel(url: string) {
@@ -124,7 +156,7 @@ export function ShareBar({
         // Abbruch durch den Nutzer ist kein Fehler.
       }
     } else {
-      await copyLink();
+      copyLink();
     }
   }
 
@@ -133,6 +165,8 @@ export function ShareBar({
     const href = `https://wa.me/?text=${encodeURIComponent(text)}`;
     window.open(href, "_blank", "noopener,noreferrer");
   }
+
+  const showReview = Boolean(googleReviewUrl && reviewDraft);
 
   return (
     <div className="booklet-share">
@@ -155,6 +189,24 @@ export function ShareBar({
         </Pressable>
       ) : null}
 
+      {igCaption ? (
+        <div className="booklet-ig">
+          <div className="booklet-ig-head">
+            <InstagramIcon />
+            <span>{t(locale, "igCaption.label")}</span>
+          </div>
+          <p className="booklet-ig-text">{igCaption}</p>
+          <Pressable className="booklet-ig-copy" onPress={copyIgCaption}>
+            <CopyIcon />
+            <span>
+              {copiedKey === "ig"
+                ? t(locale, "igCaption.copied")
+                : t(locale, "igCaption.copy")}
+            </span>
+          </Pressable>
+        </div>
+      ) : null}
+
       <div className="booklet-share-row">
         <Pressable className="booklet-share-btn" onPress={handleShareStory}>
           <SendIcon />
@@ -166,11 +218,31 @@ export function ShareBar({
         </Pressable>
         <Pressable className="booklet-share-btn" onPress={copyLink}>
           <LinkIcon />
-          <span>{copied ? t(locale, "share.copied") : t(locale, "share.copyLink")}</span>
+          <span>{copiedKey === "link" ? t(locale, "share.copied") : t(locale, "share.copyLink")}</span>
         </Pressable>
       </div>
+
+      {showReview ? (
+        <div className="booklet-review">
+          <Pressable className="booklet-review-btn" onPress={writeReview}>
+            <StarIcon />
+            <span>
+              {copiedKey === "review"
+                ? t(locale, "review.copied")
+                : t(locale, "review.button")}
+            </span>
+          </Pressable>
+          {/* §8.6: „Vorschlag, in deinen Worten" — NICHT „Text einfügen". Kein Belohnungs-Hinweis. */}
+          <p className="booklet-review-hint">{t(locale, "review.hint")}</p>
+        </div>
+      ) : null}
     </div>
   );
+}
+
+/** Externer Link bekommt ein Protokoll, falls der Betrieb keins gesetzt hat. */
+function reviewHref(url: string): string {
+  return /^https?:\/\//i.test(url) ? url : `https://${url}`;
 }
 
 /* div-basierter Button (kein <form>): Klick + Tastatur (Enter/Space). */
@@ -271,6 +343,63 @@ function LinkIcon() {
     >
       <path d="M10 13a5 5 0 0 0 7.07 0l2.83-2.83a5 5 0 0 0-7.07-7.07L11.5 4.5" />
       <path d="M14 11a5 5 0 0 0-7.07 0L4.1 13.83a5 5 0 0 0 7.07 7.07l1.32-1.32" />
+    </svg>
+  );
+}
+
+function InstagramIcon() {
+  return (
+    <svg
+      width={18}
+      height={18}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.8}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <rect x="2" y="2" width="20" height="20" rx="5" />
+      <circle cx="12" cy="12" r="4.2" />
+      <circle cx="17.5" cy="6.5" r="1.1" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
+function CopyIcon() {
+  return (
+    <svg
+      width={16}
+      height={16}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.8}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <rect x="9" y="9" width="11" height="11" rx="2" />
+      <path d="M5 15V5a2 2 0 0 1 2-2h10" />
+    </svg>
+  );
+}
+
+function StarIcon() {
+  return (
+    <svg
+      width={20}
+      height={20}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.8}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M12 3l2.7 5.5 6 .9-4.35 4.24 1.03 5.97L12 17.8l-5.38 2.8 1.03-5.97L3.3 9.4l6-.9L12 3z" />
     </svg>
   );
 }

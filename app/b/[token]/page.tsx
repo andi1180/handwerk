@@ -219,6 +219,9 @@ function OutroSection({
         <ShareBar
           storyUrl={storyUrl}
           reelSignedUrl={reelSignedUrl}
+          reviewDraft={data.reviewDraft}
+          googleReviewUrl={data.settings.google_review_url}
+          igCaption={data.igCaption}
           locale={locale}
         />
 

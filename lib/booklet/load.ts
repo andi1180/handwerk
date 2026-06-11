@@ -27,6 +27,13 @@ export type PublicBookletData = {
   settings: BusinessSettings;
   introTitle: string | null;
   introDescription: string | null;
+  /**
+   * Google-Review-Entwurf (Schritt 9b) — bei der Generierung erzeugt (Sonnet),
+   * NICHT auf der öffentlichen Seite. Der Kunde kopiert ihn als Vorschlag (§8.6).
+   */
+  reviewDraft: string | null;
+  /** IG-Caption-Vorschlag (Schritt 9b, Template) — Kunde kopiert ihn für den IG-Post. */
+  igCaption: string | null;
   language: string;
   /** Server-seitig signierte URLs (privater Bucket `branding`), sonst null. */
   logoUrl: string | null;
@@ -53,6 +60,8 @@ type BookletRow = {
   order_id: string;
   intro_title: string | null;
   intro_description: string | null;
+  review_draft: string | null;
+  ig_caption: string | null;
   language: string;
   expires_at: string | null;
   reel_status: string | null;
@@ -116,7 +125,7 @@ export async function loadPublicBooklet(
   const { data: booklet } = await service
     .from("booklets")
     .select(
-      "business_id, order_id, intro_title, intro_description, language, expires_at, reel_status, reel_url",
+      "business_id, order_id, intro_title, intro_description, review_draft, ig_caption, language, expires_at, reel_status, reel_url",
     )
     .eq("access_token", token)
     .maybeSingle<BookletRow>();
@@ -183,6 +192,8 @@ export async function loadPublicBooklet(
       settings,
       introTitle: booklet.intro_title,
       introDescription: booklet.intro_description,
+      reviewDraft: booklet.review_draft,
+      igCaption: booklet.ig_caption,
       language: booklet.language,
       logoUrl: signedBranding(branding.logo_url),
       introBgUrl: signedBranding(branding.intro_bg_url),

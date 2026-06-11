@@ -256,4 +256,16 @@ export const de = {
     shareTitle: "Mein Booklet",
     message: "Schau dir das an:",
   },
+  review: {
+    // §8.6-PFLICHT: „Vorschlag, gern in deinen Worten anpassen" — NIE „Text
+    // einfügen", und NIEMALS an eine Belohnung gekoppelt (harter Google-ToS-Verstoß).
+    button: "Google-Bewertung schreiben",
+    hint: "Vorschlag — pass ihn gern in deinen Worten an.",
+    copied: "✓ Entwurf kopiert",
+  },
+  igCaption: {
+    label: "Instagram-Caption",
+    copy: "Caption kopieren",
+    copied: "✓ Kopiert",
+  },
 } as const;

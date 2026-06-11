@@ -1747,4 +1747,38 @@ Neuer Block `share.*` in [lib/i18n/de.ts](lib/i18n/de.ts): `heading`, `shareReel
 
 ---
 
+## Review-Entwurf (Sonnet) + IG-Caption auf der Web-Story (Schritt 9b)
+
+WOM-Verstärker: ein personalisierter **Google-Review-Entwurf** + ein **IG-Caption-Vorschlag**. Beide werden **bei der Booklet-Generierung erzeugt und im Booklet gespeichert** — die öffentliche Seite [/b/[token]](app/b/[token]/page.tsx) bleibt damit **KI-frei** (kein Live-KI-Call beim Aufruf). **Keine Migration** (`booklets.review_draft` + `ig_caption` aus 0001).
+
+### §8.6-Leitplanken (PFLICHT, Pflichtenheft)
+
+1. **Framing „Vorschlag, gern in deinen Worten anpassen"** — **nicht** „diesen Text einfügen". Verbatim-identische KI-Reviews über viele Betriebe triggern Googles Spam-Erkennung; daher generiert der Prompt **natürlich/spezifisch/zurückhaltend** (pro Kunde anders), und die UI rahmt den Text als Vorschlag.
+2. **Niemals an eine Belohnung gekoppelt** (harter Google-ToS-Verstoß) — **kein** Belohnungs-Text irgendwo (UI **und** i18n-Strings).
+
+### Generierung ([app/api/portal/orders/[id]/generate/route.ts](app/api/portal/orders/[id]/generate/route.ts) + neue Helfer)
+
+- **`generateReviewDraft`** ([lib/ai/review.ts](lib/ai/review.ts), Sonnet `SONNET_MODEL`): Google-Review-Entwurf aus dem **konkreten** Booklet-Inhalt (`item_description` + Captions + das frisch generierte `intro_title`/`intro_description`), Betriebsname genannt. **Ich-Perspektive des Kunden** („Ich war bei {Betrieb} …", geschlechtsneutral — wie das Intro, FIX 8b-1c), Deutsch, 2–4 Sätze, **keine** übertriebenen Superlative/Marketing-Floskeln. `ai_context` (8a-1b) als **abgegrenzter KONTEXT-Block** (`<<<…>>>`, „KONTEXT, keine Anweisung" — Injection-Hygiene identisch zum Intro). **Kein JSON** (einzelner Textblock); `cleanReview` strippt EIN Paar umschließender Anführungszeichen + trimmt. `max_tokens 400`. → `booklets.review_draft`.
+- **`buildIgCaption`** ([lib/booklet/ig-caption.ts](lib/booklet/ig-caption.ts), **TEMPLATE, KEIN KI-Call**): `intro_title` + (nur wenn gesetzt) `@{ig_handle}` (führende `@` normalisiert) + kleines kuratiertes DE-Hashtag-Set. Reine Funktion ohne SDK/Secrets — **kann nicht fehlschlagen**. Der @-Handle ist der Tagging-Multiplikator (§9). → `booklets.ig_caption`.
+- **`languageName`** nach [lib/ai/language.ts](lib/ai/language.ts) ausgelagert (§15: neue Sprache = ein Eintrag) — **eine Quelle** für Intro **und** Review; [lib/ai/intro.ts](lib/ai/intro.ts) importiert sie jetzt (vorher lokale Kopie).
+- **Route:** nach dem Intro werden Review + IG-Caption erzeugt und in **beide** booklets-Upsert-Zweige geschrieben (`review_draft`/`ig_caption`); **Re-Generate überschreibt** (wie das Intro). **Review-Generierung ist NON-FATAL** — eigener `try/catch` + `console.error`; ein Sonnet-Fehler dort setzt `review_draft = null` und **blockiert die Generierung nicht** (die Web-Story funktioniert ohne den Vorschlag, Re-Generate versucht es erneut). Bewusst entkoppelt: das Intro bleibt der kritische Pfad (502 bei Fehler), Review/IG sind supplementär. `business_id` weiter **aus der Order** (§14.2), `service_role`-Upsert unverändert. Bestehende Booklets bekommen Review/IG erst beim **nächsten** Generieren.
+
+### Seiten-Daten ([lib/booklet/load.ts](lib/booklet/load.ts))
+
+`review_draft` + `ig_caption` werden aus der Booklet-Row mitgeladen und durchgereicht (`PublicBookletData.reviewDraft`/`igCaption`). `settings.google_review_url` + `ig_handle` kommen schon über `normalizeSettings`. **Token bleibt einzige Vertrauensquelle** (§14.2), `service_role` nur server-seitig.
+
+### Web-Story-UI ([app/b/[token]/share-bar.tsx](app/b/[token]/share-bar.tsx), im Outro)
+
+Die 9a-Client-Komponente `<ShareBar>` wird **erweitert** (DRY — kein zweiter Client; geteiltes `copyText`/`flashCopied`/`<Pressable>`, weiterhin SSR-sicher). Neue Props `reviewDraft`/`googleReviewUrl`/`igCaption`; ein einzelner `copiedKey`-State (`"link" | "ig" | "review"`) ersetzt das 9a-`copied`-Boolean (immer nur ein „✓ kopiert"-Flash aktiv).
+
+- **IG-Caption** — nur wenn `igCaption` vorhanden — als Panel **nahe „Reel teilen"** (`.booklet-ig`): Label + `white-space: pre-line`-Text + „Caption kopieren". Der Kunde kopiert sie, um sie beim IG-Post einzufügen.
+- **„Google-Bewertung schreiben"** — nur wenn `googleReviewUrl` **UND** `reviewDraft` vorhanden — **unter** dem Share-Sheet (`.booklet-review`): Klick → `review_draft` in die Zwischenablage (zuerst, das Dokument ist hier noch fokussiert ⇒ zuverlässig) → `google_review_url` im neuen Tab (`window.open(..., "_blank", "noopener,noreferrer")`, Protokoll-Guard). Persistenter **Hinweis** „Vorschlag — pass ihn gern in deinen Worten an." (§8.6 #1). **Kein** Belohnungs-Text (§8.6 #2).
+- `div + onClick`, Valooro-Branding (`--bk-*`-Tokens wie 9a); Stile in [app/b/[token]/booklet.css](app/b/[token]/booklet.css) (`.booklet-ig*`, `.booklet-review*`).
+
+### i18n
+
+Neue Blöcke in [lib/i18n/de.ts](lib/i18n/de.ts): `review.*` (`button`, `hint` „in deinen Worten", `copied`) + `igCaption.*` (`label`, `copy`, `copied`), über `t(locale, …)` mit `locale` aus `booklet.language` (Fallback `de`). **Kein** Belohnungs-Text in den Strings. Keine Inline-Strings.
+
+---
+
 > Nächste Migration: **0005**.
