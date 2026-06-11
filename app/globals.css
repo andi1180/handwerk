@@ -557,6 +557,181 @@ body {
   color: #333333;
 }
 
+/* --- Analytics-Dashboard (Schritt 10b) — Zahlen-Karten + CSS-Balken --- */
+.dashboard {
+  max-width: 880px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.dashboard-welcome {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.dashboard-empty {
+  text-align: center;
+  padding: 40px 24px;
+}
+
+/* Headline-Karte: die Share-Rate prominent, gold akzentuiert. */
+.dashboard-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  text-align: center;
+  border-color: var(--gold-border);
+  background: var(--gold-light);
+}
+
+.dashboard-hero-rate {
+  font-size: clamp(44px, 12vw, 68px);
+  font-weight: 700;
+  line-height: 1;
+  color: var(--gold);
+}
+
+.dashboard-hero-pct {
+  font-size: 0.45em;
+  font-weight: 600;
+  margin-left: 2px;
+}
+
+.dashboard-hero-label {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.dashboard-hero-hint {
+  margin: 0;
+  max-width: 360px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.dashboard-hero-sub {
+  display: flex;
+  gap: 32px;
+  margin-top: 12px;
+}
+
+/* 2-Spalten-Raster auf Desktop, einspaltig auf Mobile. */
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+@media (max-width: 768px) {
+  .dashboard-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.dashboard-section-title {
+  margin: 0 0 14px;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+/* Eine Balken-Zeile: Label | Track (CSS-Balken) | Wert. */
+.dashboard-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.dashboard-bar-row:last-child {
+  margin-bottom: 0;
+}
+
+.dashboard-bar-label {
+  flex-shrink: 0;
+  width: 96px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dashboard-bar-track {
+  flex: 1;
+  min-width: 0;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+
+.dashboard-bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--gold);
+  transition: width 0.3s ease;
+}
+
+.dashboard-bar-value {
+  flex-shrink: 0;
+  min-width: 28px;
+  text-align: right;
+  font-size: 14px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Zahlen-Kachel (Funnel-Sub, Aufrufe). */
+.dashboard-stats-row {
+  display: flex;
+  gap: 16px;
+}
+
+.dashboard-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.dashboard-stat-value {
+  font-size: 18px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.dashboard-stat--big {
+  flex: 1;
+  align-items: center;
+  text-align: center;
+  padding: 8px 0;
+}
+
+.dashboard-stat--big .dashboard-stat-value {
+  font-size: 30px;
+  color: var(--gold);
+}
+
+.dashboard-stat-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+/* --- Valooro-Logo im Sidebar-Header (Schritt 10b) --- */
+.portal-sidebar-logo {
+  display: block;
+  max-width: 140px;
+  max-height: 40px;
+  width: auto;
+  height: auto;
+  margin: 0 20px 12px;
+  object-fit: contain;
+}
+
 /* Druck: NUR die QR-Karte. Portal-Chrome + Druck-Button raus, Karte schmal/S/W. */
 @media print {
   .portal-sidebar,

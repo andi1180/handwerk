@@ -289,4 +289,29 @@ export const de = {
     forCustomer: "Für {name}",
     hint: "Scannen Sie den Code für Ihr persönliches Booklet",
   },
+  dashboard: {
+    // Analytics-Dashboard auf der Startseite (Schritt 10b).
+    shareRate: "Teil-Rate",
+    shareRateHint:
+      "Anteil der ausgelieferten Booklets, die geteilt wurden — die Kernkennzahl.",
+    funnel: "Verlauf",
+    delivered: "Ausgeliefert",
+    viewed: "Angesehen",
+    shared: "Geteilt",
+    sharesByChannel: "Teilungen nach Kanal",
+    clicks: "Klicks",
+    // Kanal-Labels (spiegeln die Event-Channels aus lib/booklet/events.ts).
+    reel: "Reel",
+    story: "Story",
+    whatsapp: "WhatsApp",
+    copy: "Link kopiert",
+    website: "Website",
+    review: "Bewertung",
+    ig: "Instagram",
+    views: "Aufrufe",
+    uniqueViews: "Eindeutige Aufrufe",
+    totalViews: "Aufrufe gesamt",
+    empty:
+      "Noch keine Daten. Sobald Booklets ausgeliefert und angesehen werden, erscheinen hier die Kennzahlen.",
+  },
 } as const;

@@ -1936,4 +1936,45 @@ Verhindert, dass der **Betrieb** beim Öffnen/Testen des eigenen Booklets `viewe
 
 ---
 
+## Analytics-Dashboard (Schritt 10b)
+
+Die `/portal`-Startseite (vorher Platzhalter „Willkommen, {name}") wird die **business-weite Analytics-Übersicht** — die Anzeige-Seite des in 10a/10a.1 gebauten Write-Pfads. Plus das **Valooro-Logo** oben in der Sidebar. **Keine Migration** (`booklet_events` + Status-Enum aus 0001). Damit ist **Schritt 10 abgeschlossen**.
+
+### Daten ([app/portal/page.tsx](app/portal/page.tsx), Server Component)
+
+Alles über den **AUTHENTICATED Client** ([lib/supabase/server.ts](lib/supabase/server.ts)) — RLS skopiert auf den Betrieb des eingeloggten Nutzers, zusätzlich **defensiver `business_id`-Filter**; **KEIN** `service_role`. Funnel- und Events-Query laufen **parallel** (`Promise.all`).
+
+- **Funnel** aus `orders` über **drei head-`count`-Queries** (`select("*", { count: "exact", head: true })` — nur Zähler, keine Zeilen):
+  - **Ausgeliefert** = `status ∈ {sent, viewed, shared}`
+  - **Angesehen** = `status ∈ {viewed, shared}`
+  - **Geteilt** = `status = shared`
+- **Engagement** aus **EINER** `booklet_events`-Query (`event_type, channel, ip_hash`, `business_id`-gefiltert) → **Aggregation in JS**:
+  - **Views total** = `count(event_type = viewed)`
+  - **Views unique** = distinct `ip_hash` bei `viewed` (JS-`Set`; `null`/keine IP zählt nicht mit)
+  - **Shares/Kanal** = `count(event_type = shared)` je `channel` (`reel`/`story`/`whatsapp`/`copy`)
+  - **Klicks/Kanal** = `count(event_type = link_click)` je `channel` (`website`/`review`/`ig`)
+
+**Single-fetch + JS-Aggregation ist bewusst MVP** (Doc-Kommentar im Code): bei Skalierung später ein SQL-Aggregat/RPC — dann **mit der REVOKE-EXECUTE-Konvention** (§14.3, jede `SECURITY DEFINER`-Funktion braucht `revoke execute … from public` + gezielten Grant). Jetzt bewusst nicht.
+
+### Darstellung (Zahlen-Karten + CSS-Balken, KEINE Chart-Library)
+
+- **Headline** prominent oben (`.dashboard-hero`, gold akzentuiert): **Share-Rate** = `Math.round(Geteilt / Ausgeliefert × 100)` % (Division-Guard `delivered > 0`, sonst `0`) + die beiden Zahlen (Geteilt / Ausgeliefert) darunter. **Die Kernkennzahl der Produkt-These.**
+- **Funnel** (Ausgeliefert → Angesehen → Geteilt): drei `<BarRow>` mit CSS-Balken, Breite **relativ zu Ausgeliefert**.
+- **Shares nach Kanal** + **Klicks** je als `<BarRow>`-Gruppe; Balkenbreite relativ zum **Gruppen-Max** (`Math.max(1, …)` als Untergrenze gegen Division durch 0).
+- **Aufrufe** eindeutig vs. gesamt als zwei prominente `<Stat big>` nebeneinander.
+- **Leerer Zustand** (`hasData = delivered > 0 || events.length > 0` ⇒ sonst freundlicher `dashboard.empty`-Hinweis statt der Karten).
+- Begrüßungs-Header „Willkommen, {name}" (`portal.welcome`) bleibt oben.
+- **Desktop-first** 2-Spalten-Raster (`.dashboard-grid`), mobil **einspaltig stapelnd** (Breakpoint 768px, bestehende Tokens). Präsentations-Helfer `<Stat>`/`<BarRow>` server-seitig im selben File.
+
+### Valooro-Logo im Sidebar-Header ([app/portal/layout.tsx](app/portal/layout.tsx))
+
+`<img className="portal-sidebar-logo" src="/valooro.png" alt={app.name}>` **über** dem Brand-Text (Text bleibt als Fallback). Die Datei liegt unter **`/public/valooro.png`** (getracktes App-Branding) — **NICHT** die untracked `Logo.png` aus dem Repo-Root verwenden/anfassen. Fehlt die Datei, bricht **nur** das Bild; der Build bleibt grün. `eslint-disable @next/next/no-img-element` (statisches Branding-Asset, Muster wie die bestehenden `<img>`-Stellen).
+
+### i18n & CSS
+
+- i18n-Block `dashboard.*` in [lib/i18n/de.ts](lib/i18n/de.ts): `shareRate`/`shareRateHint`/`funnel`/`delivered`/`viewed`/`shared`/`sharesByChannel`/`clicks`/Kanal-Labels (`reel`/`story`/`whatsapp`/`copy`/`website`/`review`/`ig`)/`views`/`uniqueViews`/`totalViews`/`empty`. Kanal-Labels via `` t(…, `dashboard.${channel}`) `` (literale Channel-Unions ⇒ gültiger `DictKey`, Muster wie [reel-state-pill.tsx](components/reel-state-pill.tsx)). Keine Inline-Strings.
+- CSS: `.dashboard-*` + `.portal-sidebar-logo` in [app/globals.css](app/globals.css).
+
+---
+
 > Nächste Migration: **0005**.
