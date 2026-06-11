@@ -267,6 +267,111 @@ export function GeneratedBanner({
   );
 }
 
+/** Client-Timeout: der Render darf etwas dauern (Download + ffmpeg + Upload), aber nie ewig hängen. */
+const REEL_TEST_TIMEOUT_MS = 180_000;
+
+/**
+ * Provisorischer FFmpeg-Infra-Test (Schritt 8b-0v2): POST auf `render-reel-test`,
+ * zeigt bei Erfolg einen Link zum erzeugten Test-mp4. KEIN echtes Reel — beweist
+ * nur, dass ffmpeg in der Vercel-Function läuft (Binary zur Laufzeit aus dem
+ * Storage geladen) und der Output im Storage landet. Wird in 8b-1 durch das echte
+ * „Reel erstellen" ersetzt. Lade-/Fehler-State via try/finally (nie ein Dauer-
+ * „Rendere…"), mit AbortController-Timeout.
+ */
+export function ReelTestButton({ orderId }: { orderId: string }) {
+  const [busy, setBusy] = useState(false);
+  const [url, setUrl] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const handleRender = useCallback(() => {
+    setBusy(true);
+    setNotice(null);
+    setUrl(null);
+    void (async () => {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), REEL_TEST_TIMEOUT_MS);
+      try {
+        const res = await fetch(
+          `/api/portal/orders/${orderId}/render-reel-test`,
+          { method: "POST", signal: controller.signal },
+        );
+        if (!res.ok) {
+          let code = "";
+          try {
+            const body = (await res.json()) as { error?: unknown };
+            if (typeof body.error === "string") code = body.error;
+          } catch {
+            // kein/ungültiger Body → nur HTTP-Status zeigen
+          }
+          const detail = code ? `${res.status} ${code}` : String(res.status);
+          setNotice(`${t(DEFAULT_LOCALE, "reelTest.error")} (${detail})`);
+          return;
+        }
+        const body = (await res.json()) as { url?: unknown };
+        if (typeof body.url === "string") {
+          setUrl(body.url);
+        } else {
+          setNotice(t(DEFAULT_LOCALE, "reelTest.error"));
+        }
+      } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") {
+          setNotice(t(DEFAULT_LOCALE, "reelTest.timeout"));
+        } else {
+          console.error("reel-test: request failed", error);
+          setNotice(t(DEFAULT_LOCALE, "reelTest.error"));
+        }
+      } finally {
+        // Lade-Zustand IMMER zurücksetzen — nie ein Dauer-„Rendere…".
+        clearTimeout(timer);
+        setBusy(false);
+      }
+    })();
+  }, [orderId]);
+
+  return (
+    <div style={{ marginTop: 24 }}>
+      <div
+        style={{
+          display: "flex",
+          flexWrap: "wrap",
+          alignItems: "center",
+          gap: 10,
+        }}
+      >
+        <button
+          type="button"
+          className="btn-outline"
+          onClick={handleRender}
+          disabled={busy}
+          style={{
+            opacity: busy ? 0.6 : 1,
+            cursor: busy ? "default" : "pointer",
+          }}
+        >
+          {busy
+            ? t(DEFAULT_LOCALE, "reelTest.rendering")
+            : t(DEFAULT_LOCALE, "reelTest.button")}
+        </button>
+        {url ? (
+          <a
+            className="btn-gold"
+            href={url}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            <ExternalLinkIcon />
+            {t(DEFAULT_LOCALE, "reelTest.open")}
+          </a>
+        ) : null}
+      </div>
+      <p style={{ marginTop: 8, fontSize: 12, color: "var(--text-secondary)" }}>
+        {t(DEFAULT_LOCALE, "reelTest.hint")}
+      </p>
+      {notice ? <NoticeBox text={notice} /> : null}
+    </div>
+  );
+}
+
 /** Externer-Link-Symbol für „Vorschau öffnen". Reine Deko. */
 function ExternalLinkIcon() {
   return (

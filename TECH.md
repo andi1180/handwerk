@@ -1023,4 +1023,65 @@ Output → `order-media` per `service_role`, `business_id` aus der Order) bleibe
 
 ---
 
+## FFmpeg-Runtime-Download (Schritt 8b-0v2)
+
+Realisiert die in 8b-0 gezogene Lehre: **das Binary NICHT bundlen**, sondern zur
+**Laufzeit nach `/tmp` laden**. Damit bleibt der Vercel-Deploy schlank/grün —
+**keine** `next.config`-Änderung (kein `serverExternalPackages`, kein
+`outputFileTracingIncludes`), **keine** `ffmpeg-static`-Dependency, **keine**
+Migration. Weiterhin reiner **Machbarkeits-Spike**; die provisorische Route
+`…/render-reel-test` wird in 8b-1 durch das echte „Reel erstellen" ersetzt.
+
+### Binary-Quelle & Storage (`scripts/upload-ffmpeg.ts`, einmalig)
+
+- **Bucket `assets`** (privat, `public: false`): App-internes Infra-Asset, **kein**
+  Mandanten-Datum, **keine** RLS — wird ausschließlich serverseitig über
+  `service_role` gelesen. **Bewusst per Script statt SQL-Migration** angelegt
+  (`createBucket`, idempotent: „exists"-Fehler ignoriert), weil es nicht in die
+  tenant-orientierten Migrationen `0001…` gehört. Der Bucket bleibt damit **außerhalb**
+  der Migrations-Nummerierung; nächste Tenant-Migration bleibt `0004`.
+- **Gepinnte Quelle:** ffmpeg-static GitHub-Release `b6.1.1`, Asset
+  **`ffmpeg-linux-x64.gz`** (~28 MB gz, entpackt ~76 MB; `EXPECTED_GZ_BYTES = 29_354_986`,
+  `EXPECTED_BIN_BYTES = 79_826_272`). Das ist ein **statisch** gelinkter Build (John
+  Van Sickle) → läuft auf Vercels Amazon Linux ohne glibc-Probleme. **Warum gzip?**
+  Das rohe Binary (~76 MB) überschreitet das projektweite Supabase-Storage-Limit
+  (Default **50 MB**); die ~28-MB-gz passt darunter — **keine** Dashboard-Einstellung
+  nötig. Das Script prüft **gzip-Magic** (`1F 8B`) + erwartete gz-Größe, **entpackt**
+  und verifiziert das Ergebnis als **ELF** (`7F 45 4C 46`) + erwartete Größe, und lädt
+  die **gz** per `service_role` nach `assets/ffmpeg/linux-x64.gz` (`upsert`). Env aus
+  `.env.local` (`SUPABASE_URL`/`NEXT_PUBLIC_SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY`)
+  über einen minimalen, dependency-freien Loader. Run: `pnpm dlx tsx scripts/upload-ffmpeg.ts`.
+
+### Render-Route ([app/api/portal/orders/[id]/render-reel-test/route.ts](app/api/portal/orders/[id]/render-reel-test/route.ts))
+
+- `runtime = "nodejs"` (Edge kann kein `child_process`/Binary), `maxDuration = 300`
+  (Fluid Compute — Download + ffmpeg dürfen dauern). Auth wie Generate
+  (401/403/404; `business_id` aus der über RLS geladenen Order, **nie** aus dem Body).
+- **`ensureFfmpeg()`** — der Kern von v2:
+  - **Warme Instanz:** liegt `/tmp/ffmpeg` (ausführbar, `access X_OK`) schon vor ⇒
+    Download **überspringen** (Cache über Invocations).
+  - **Cold Start:** die **gz** aus `assets/ffmpeg/linux-x64.gz` (`service_role`,
+    `storage.download`) laden, zur Laufzeit **entpacken** (`gunzip`) und das Binary
+    **atomar** ablegen: Temp-Datei schreiben → `chmod 0o755` → `rename` auf
+    `/tmp/ffmpeg`. Das `rename` verhindert, dass ein halb geschriebenes Binary als
+    „vorhanden" gecacht wird, wenn zwei Cold-Starts gleichzeitig laden.
+  - Fehlschlag ⇒ **500 `ffmpeg_unavailable`** (+ Log; z. B. Asset fehlt / Script
+    noch nicht gelaufen).
+- ffmpeg wird von `/tmp/ffmpeg` gespawnt → triviales **1080×1920**-mp4 (~2 s,
+  `lavfi color`, h264, `yuv420p`, `+faststart`, **kein** Audio), Prozess-Timeout 120 s.
+  Output → `order-media` per `service_role` unter `{business_id}/{order_id}/reel-test.mp4`
+  (`upsert`, `video/mp4`); Antwort `createSignedUrl(3600)` → `{ ok, url }`.
+- **Jeder** Schritt `try/catch` + `console.error` (`order_id`, `step`, `message`)
+  mit JSON-Code (`ffmpeg_unavailable`/`ffmpeg_failed`/`upload_failed`/`sign_failed`);
+  `finally` räumt nur die **Temp-mp4** auf — **NICHT** `/tmp/ffmpeg` (bleibt gecacht).
+  **Kein** `order_media`-Row (Spike).
+
+### UI & i18n
+
+`<ReelTestButton>` ([generate-controls.tsx](app/portal/orders/[id]/generate-controls.tsx))
+im Status `generated` am Seitenende → POST → „Test-Reel öffnen"-Link, Lade-/
+Fehler-State (`try/finally` + AbortController, 180 s). i18n `reelTest.*`. Provisorisch.
+
+---
+
 > Nächste Migration: **0004**.

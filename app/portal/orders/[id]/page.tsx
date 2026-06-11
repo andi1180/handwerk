@@ -8,7 +8,11 @@ import { OrderStatusBadge } from "@/components/order-status-badge";
 import { Capture } from "./capture";
 import { MediaList, type MediaWithUrl } from "./media-list";
 import { FinalizeBanner, FinalizeButton } from "./finalize-controls";
-import { GenerateButton, GeneratedBanner } from "./generate-controls";
+import {
+  GenerateButton,
+  GeneratedBanner,
+  ReelTestButton,
+} from "./generate-controls";
 import { getOrderById, getOrderMedia } from "@/lib/orders/queries";
 
 const DATE_FORMAT = new Intl.DateTimeFormat("de-DE", {
@@ -199,6 +203,10 @@ export default async function OrderDetailPage({
       {isFinalized ? (
         <GenerateButton orderId={order.id} mediaCount={media.length} />
       ) : null}
+
+      {/* Provisorischer FFmpeg-Infra-Test (nur Status generated, 8b-0v2). Wird in
+          8b-1 durch das echte „Reel erstellen" ersetzt. */}
+      {isGenerated ? <ReelTestButton orderId={order.id} /> : null}
     </div>
   );
 }
