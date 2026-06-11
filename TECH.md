@@ -1051,6 +1051,9 @@ Migration. Weiterhin reiner **Machbarkeits-Spike**; die provisorische Route
   die **gz** per `service_role` nach `assets/ffmpeg/linux-x64.gz` (`upsert`). Env aus
   `.env.local` (`SUPABASE_URL`/`NEXT_PUBLIC_SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY`)
   über einen minimalen, dependency-freien Loader. Run: `pnpm dlx tsx scripts/upload-ffmpeg.ts`.
+  > **Quelle in 8b-1b gewechselt:** b6.1.1 war **ohne** libfreetype/`drawtext`
+  > gebaut → ersetzt durch den John-Van-Sickle-Static-Build `6.0.1` (drawtext-fähig).
+  > Details s. „FIX: drawtext-fähiges ffmpeg-Binary" (8b-1b).
 
 ### Render-Route ([app/api/portal/orders/[id]/render-reel-test/route.ts](app/api/portal/orders/[id]/render-reel-test/route.ts))
 
@@ -1240,6 +1243,48 @@ fehlt), endet der Job sichtbar auf `reel_status='failed'` mit klarem `reel_error
 (8.1.1) gegen Font + Scrim verifiziert: cover-crop, Scrim, Akzentbalken, weiße
 mehrzeilige Caption (inkl. Umlaute/`—`) lesbar; Assembly → 6 s, h264/yuv420p,
 1080×1920 (DAR 9:16), 30 fps, kein Audio.
+
+### FIX: drawtext-fähiges ffmpeg-Binary (Binary-Wechsel + Selbstcheck)
+
+**Symptom (Vercel-Log):** Der Render scheiterte bei `bake_frames` mit „No such
+filter: 'drawtext'". Die Render-Pipeline war korrekt — nur das **Binary** konnte
+den Filter nicht: der bisherige Build (`eugeneware/ffmpeg-static` `b6.1.1`) war
+**ohne libfreetype** kompiliert, also **ohne** `drawtext`.
+
+**Quelle gewechselt** ([scripts/upload-ffmpeg.ts](scripts/upload-ffmpeg.ts)): statt
+b6.1.1 jetzt der **John-Van-Sickle-Static-Build** `ffmpeg-6.0.1-amd64-static`
+(die `old-releases/`-URL ist versions-stabil — anders als der bewegliche
+`releases/…release…`-Link — daher gepinnt). **Voll ausgestattet**
+(`--enable-libfreetype --enable-fontconfig` → `drawtext` vorhanden, im Binary
+verifiziert), **statisch** gelinkt → läuft auf Vercels Amazon Linux ohne
+glibc-Probleme. Das Script lädt die **`tar.xz`**, prüft **xz-Magic**
+(`FD 37 7A 58 5A 00`) + Größe (`EXPECTED_TARXZ_BYTES = 41_164_188`), extrahiert
+**nur** das `ffmpeg`-Binary (`tar` — ffprobe verworfen), verifiziert es als **ELF**
+(`7F 45 4C 46`) + Größe (`EXPECTED_BIN_BYTES = 78_714_496`), **gzippt** es (Node
+`gzipSync`, ~28,9 MB — sicher unter dem **50-MB**-Supabase-Limit, das das Script
+zusätzlich prüft) und lädt es per `service_role` nach `assets/ffmpeg/linux-x64.gz`
+(`upsert`, überschreibt das alte Binary). Die **Pipeline** (drawtext, Scrim,
+Akzentbalken, Font, Frames, Assembly) bleibt **UNVERÄNDERT**.
+
+**Lizenz:** Es ist ein **GPLv3**-Static-Build (`--enable-gpl --enable-version3`).
+ffmpeg wird ausschließlich **server-seitig zum Rendern** genutzt und **nicht** an
+Endkunden weitergegeben → keine Distribution der Binary, keine Quelltext-
+Mitgabepflicht gegenüber Dritten. GPLv3 ist für diesen Server-Render-Einsatz in
+Ordnung.
+
+**drawtext-Selbstcheck** ([lib/reel/ffmpeg.ts](lib/reel/ffmpeg.ts)): `ensureFfmpeg()`
+führt beim **Cold-Start** (nach `gunzip`, **vor** dem atomaren `rename`) **einmal**
+`ffmpeg -hide_banner -filters` aus und verlangt `drawtext` im Listing — fehlt es,
+wird das Temp-Binary verworfen und ein klarer **`drawtext_missing`**-Fehler
+geworfen (statt erst spät bei `bake_frames` zu scheitern). Da der Check **vor**
+dem `rename` läuft, ist das gecachte `/tmp`-Binary **immer** geprüft-gut; warme
+Instanzen (Early-Return über `access X_OK`) überspringen ihn — der Check läuft
+**einmal pro Instanz**, nicht pro Render.
+
+**Cache versioniert:** Der `/tmp`-Cache-Pfad heißt jetzt **`/tmp/ffmpeg-v2`** (statt
+`/tmp/ffmpeg`). So lädt eine warme Instanz, die noch das alte (drawtext-lose)
+Binary hält, nach Re-Upload + Re-Deploy **garantiert** neu. Bei künftigen
+Binary-Wechseln hochzählen.
 
 ### Fallback (falls Vercel zickt)
 
