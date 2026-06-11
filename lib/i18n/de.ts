@@ -193,6 +193,14 @@ export const de = {
       "Die KI ist nicht konfiguriert. Bitte später erneut versuchen.",
     openPreview: "Vorschau öffnen",
   },
+  reelTest: {
+    button: "Reel-Test (FFmpeg)",
+    rendering: "Rendere…",
+    open: "Test-Reel öffnen",
+    hint: "Infra-Test (8b-0): erzeugt ein leeres 2-Sekunden-Video im Storage — kein echtes Reel.",
+    error: "Reel-Test fehlgeschlagen. Bitte erneut versuchen.",
+    timeout: "Zeitüberschreitung. Bitte erneut versuchen.",
+  },
   booklet: {
     scrollHint: "Nach unten wischen",
     contactEmail: "E-Mail",
