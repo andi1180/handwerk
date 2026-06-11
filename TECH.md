@@ -1807,4 +1807,39 @@ Der Portal-Vorschau-Link im Status `generated` ([generate-controls.tsx](app/port
 
 ---
 
+## Ausliefern — sent + Billing + E-Mail (Schritt 9c-1)
+
+Der **manuelle Auslieferungs-Pfad**: ein generierter Auftrag wird ausgeliefert → Status `generated → sent`, ein **Billing-Event** wird geschrieben und eine **E-Mail** mit dem Booklet-Link an den Kunden gesendet. **Keine Migration** (Spalten/Tabellen aus 0001: `orders.status`, `booklets.sent_at`, `billing_events`). Die **QR-Druckansicht** ist 9c-2; **View-/Share-Analytics** (`booklet_events`) und die Status-Stufen `viewed`/`shared` bleiben offen.
+
+### Setup
+
+- Dependency `resend` (pnpm; reines JS-Paket, **kein** Lifecycle-Script → **nicht** in `pnpm.onlyBuiltDependencies`).
+- Env: `RESEND_API_KEY` (server-only, **nie** `NEXT_PUBLIC`) und **neu** `BOOKLET_BASE_URL` (öffentliche Booklet-Domain für den E-Mail-Link, z. B. `https://b.valooro.com`) — beide in [.env.example](.env.example).
+
+### E-Mail-Schicht ([lib/email/](lib/email/), server-only)
+
+- [lib/email/resend.ts](lib/email/resend.ts): lazily gecachter Resend-Client (`getResend()`, Key **nur** aus `RESEND_API_KEY`) + `isEmailConfigured()` — Muster wie [lib/ai/anthropic.ts](lib/ai/anthropic.ts).
+- [lib/email/booklet-email.ts](lib/email/booklet-email.ts): `sendBookletEmail({ to, customerName, businessName, bookletUrl, replyTo? })`. **Absender** `"{Betrieb}" <hello@valooro.com>` (valooro.com ist die verifizierte SPF/DKIM-Domain; der Betriebsname ist nur der **Anzeigename**, RFC-5322-sicher gequotet, header-brechende Zeichen entfernt). **reply-to** = die öffentliche Betriebs-`contact_email` (falls gesetzt) → der Kunde antwortet an den Betrieb, nicht an Valooro. Inhalt DE, bewusst **rich** für Deliverability (nicht nur nackter Link): personalisierter Betreff („Ihr Booklet von {Betrieb}"), Anrede mit `customerName`, ein Satz Kontext, Link als beschrifteter **Button** „Booklet ansehen" + Klartext-Fallback, kurze Signatur. **HTML + Plaintext** (Tabellen-Layout, Inline-Styles; Name/Betrieb/URL HTML-escaped). i18n-ready (MVP de; `order.language` speist später einen Locale-Parameter).
+
+### Link-Bau
+
+`bookletUrl = ${BOOKLET_BASE_URL}/b/${access_token}?${CUSTOMER_VIEW_QUERY}` — mit **`?c=1`** (Kunden-Sicht, `CUSTOMER_VIEW_QUERY` aus [lib/booklet/customer-view.ts](lib/booklet/customer-view.ts) wiederverwendet, 9d). Ist `BOOKLET_BASE_URL` leer, fällt die Route auf den **Origin des Requests** zurück (dev: Portal + Booklet teilen den Host).
+
+### Route Handler ([app/api/portal/orders/[id]/deliver/route.ts](app/api/portal/orders/[id]/deliver/route.ts), `POST`)
+
+- AUTHENTICATED Client; kein User ⇒ **401**, kein Betrieb ⇒ **403**. Order über RLS (fremde/fehlende id ⇒ **404**). **`business_id` NUR aus der geladenen Order** (Session-Betrieb, §14.2), nie aus dem Body.
+- **Guard:** `order.status` muss `generated` sein (Booklet existiert) ⇒ sonst **409**. Booklet (`access_token`) über RLS laden ⇒ fehlt ⇒ **500 `no_booklet`** (bei `generated` nie zu erwarten).
+- **Ablauf:** (1) `orders.status → sent` (AUTHENTICATED, **defensiv `.eq('status','generated')`** → kein Doppel-Versand bei Races; ein zweiter Klick trifft 0 Zeilen) ⇒ Fehler ⇒ 500 `status_failed`. (2) `booklets.sent_at = now()` (AUTHENTICATED, `booklets_update`) — **nicht-blockierend** (nur geloggt). (3) **Billing-Event** `event_type 'booklet_sent'` (`business_id`/`booklet_id`/`order_id`) — über **`service_role`**, weil `billing_events` für `authenticated` **kein INSERT-Grant** hat (0001: nur SELECT, „Schreiben serverseitig"); `business_id` aus der Order. **Nicht-blockierend** (laut geloggt → Abrechnung manuell nachziehbar). (4) **E-Mail** nur wenn `customer_email` vorhanden; **NICHT-BLOCKIEREND** — ein Fehlschlag setzt `emailFailed:true`, `sent` steht trotzdem.
+- **Hinweis zur Spec:** Die ursprüngliche Vorgabe „alles AUTHENTICATED" trifft nicht zu — der Billing-Event-Insert **muss** über `service_role` laufen (RLS lässt keinen `authenticated`-INSERT auf `billing_events` zu). Status-/`sent_at`-Updates bleiben AUTHENTICATED.
+- **Response:** `{ sent:true, emailSent:bool, emailFailed?:true }`.
+
+### UI ([app/portal/orders/[id]/deliver-controls.tsx](app/portal/orders/[id]/deliver-controls.tsx) + [page.tsx](app/portal/orders/[id]/page.tsx))
+
+- `<DeliverButton>` (Status `generated`, am Seitenende, **die finale Aktion** nach Reel): prominenter „Booklet ausliefern" (`btn-gold capture-btn`, mobil groß; Muster wie `FinalizeButton`/`GenerateButton`). **Bestätigungsdialog** (`window.confirm`) mit **bewussten Warnungen, KEIN harter Block:** `reel_status != 'ready'` ⇒ „Das Reel ist noch nicht fertig. Trotzdem ausliefern?"; keine `customer_email` ⇒ „Keine E-Mail hinterlegt — Auslieferung per QR (folgt)." Bestätigen → `POST deliver` (AbortController-Timeout) → `router.refresh()`. `emailFailed` ⇒ einmaliger `window.alert` (nach dem Refresh ist der Button weg; die Auslieferung gilt trotzdem als erfolgt). Props `hasEmail`/`reelReady` aus der Seite (`reelStatus === 'ready'`).
+- `<DeliveredBanner>` (Status `sent`, am Seitenkopf): grünes Banner „Ausgeliefert am {Datum}" (`--green-*`-Tokens, 6c) + **Vorschau-Link** (`/b/[token]?c=1`, neuer Tab) — Ansehen bleibt. Status `sent` ist **read-only**: `isDraft=false` ⇒ Capture ausgeblendet, `<MediaList readOnly>`, keine Finalize-/Generate-/Reel-/Deliver-Controls. Die Seite lädt `access_token` + `sent_at` jetzt auch für `sent` (broadened auf `isGenerated || isSent`).
+
+i18n `deliver.*` ([lib/i18n/de.ts](lib/i18n/de.ts)). **KEIN Belohnungs-Bezug** (wie §8.6 für Reviews).
+
+---
+
 > Nächste Migration: **0005**.

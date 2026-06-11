@@ -235,6 +235,20 @@ export const de = {
     failed: "Reel-Erstellung fehlgeschlagen. Bitte erneut versuchen.",
     error: "Aktion fehlgeschlagen. Bitte erneut versuchen.",
   },
+  deliver: {
+    button: "Booklet ausliefern",
+    delivering: "Liefere aus…",
+    confirm: "Booklet jetzt ausliefern?",
+    confirmText: "Der Kunde erhält den Link zum Booklet per E-Mail.",
+    reelNotReady: "Das Reel ist noch nicht fertig. Trotzdem ausliefern?",
+    noEmail: "Keine E-Mail hinterlegt — Auslieferung per QR (folgt).",
+    delivered: "Ausgeliefert am {date}",
+    deliveredNoDate: "Ausgeliefert",
+    emailFailed:
+      "Die E-Mail konnte nicht gesendet werden. Der Auftrag gilt trotzdem als ausgeliefert.",
+    timeout: "Zeitüberschreitung. Bitte erneut versuchen.",
+    error: "Auslieferung fehlgeschlagen. Bitte erneut versuchen.",
+  },
   booklet: {
     scrollHint: "Nach unten wischen",
     contactEmail: "E-Mail",

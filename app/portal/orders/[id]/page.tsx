@@ -14,6 +14,7 @@ import {
   ReelButton,
   type ReelStatus,
 } from "./generate-controls";
+import { DeliverButton, DeliveredBanner } from "./deliver-controls";
 import { getOrderById, getOrderMedia } from "@/lib/orders/queries";
 
 const DATE_FORMAT = new Intl.DateTimeFormat("de-DE", {
@@ -72,27 +73,31 @@ export default async function OrderDetailPage({
   const isDraft = order.status === "draft";
   const isFinalized = order.status === "finalized";
   const isGenerated = order.status === "generated";
+  const isSent = order.status === "sent";
 
-  // Booklet-Token für den Vorschau-Link (8a-2) + Reel-Status (8b-1a) laden. RLS
-  // lässt Mitglieder die booklets-Row lesen — kein service_role nötig. Nur
-  // relevant, sobald generiert. reel_status ist persistent (Reload zeigt den
+  // Booklet-Token für den Vorschau-Link (8a-2) + Reel-Status (8b-1a) + sent_at
+  // (9c-1) laden. RLS lässt Mitglieder die booklets-Row lesen — kein service_role
+  // nötig. Relevant ab `generated`. reel_status ist persistent (Reload zeigt den
   // Render-Stand); bei `ready` zusätzlich eine frische Signed-URL des Reels.
   let bookletToken: string | null = null;
   let reelStatus: ReelStatus = "pending";
   let reelUrl: string | null = null;
-  if (isGenerated) {
+  let sentAt: string | null = null;
+  if (isGenerated || isSent) {
     const { data: booklet } = await supabase
       .from("booklets")
-      .select("access_token, reel_status, reel_url")
+      .select("access_token, reel_status, reel_url, sent_at")
       .eq("order_id", order.id)
       .maybeSingle<{
         access_token: string;
         reel_status: ReelStatus | null;
         reel_url: string | null;
+        sent_at: string | null;
       }>();
     bookletToken = booklet?.access_token ?? null;
     reelStatus = booklet?.reel_status ?? "pending";
-    if (reelStatus === "ready" && booklet?.reel_url) {
+    sentAt = booklet?.sent_at ?? null;
+    if (isGenerated && reelStatus === "ready" && booklet?.reel_url) {
       const { data } = await supabase.storage
         .from("order-media")
         .createSignedUrl(booklet.reel_url, SIGNED_URL_TTL_SECONDS);
@@ -150,6 +155,14 @@ export default async function OrderDetailPage({
       {/* Generiert-Banner + „Vorschau öffnen"/„Neu generieren"/„Wieder bearbeiten". */}
       {isGenerated ? (
         <GeneratedBanner orderId={order.id} token={bookletToken} />
+      ) : null}
+
+      {/* Ausgeliefert-Banner + Vorschau-Link (nur Status sent, 9c-1, read-only). */}
+      {isSent ? (
+        <DeliveredBanner
+          deliveredAt={sentAt ? DATE_FORMAT.format(new Date(sentAt)) : null}
+          token={bookletToken}
+        />
       ) : null}
 
       {/* Stammdaten. */}
@@ -238,6 +251,16 @@ export default async function OrderDetailPage({
           orderId={order.id}
           initialStatus={reelStatus}
           initialUrl={reelUrl}
+        />
+      ) : null}
+
+      {/* Auslieferung (nur Status generated, 9c-1): die finale Aktion. Warnt,
+          wenn das Reel noch rendert oder keine E-Mail hinterlegt ist (kein Block). */}
+      {isGenerated ? (
+        <DeliverButton
+          orderId={order.id}
+          hasEmail={Boolean(order.customer_email)}
+          reelReady={reelStatus === "ready"}
         />
       ) : null}
     </div>
