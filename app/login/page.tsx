@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { DEFAULT_LOCALE, t } from "@/lib/i18n";
 
@@ -112,6 +113,20 @@ export default function LoginPage() {
           >
             {t(DEFAULT_LOCALE, "login.submit")}
           </div>
+
+          <p
+            style={{
+              margin: "4px 0 0",
+              fontSize: 13,
+              textAlign: "center",
+              color: "var(--text-secondary)",
+            }}
+          >
+            {t(DEFAULT_LOCALE, "login.noAccount")}{" "}
+            <Link href="/register" style={{ color: "var(--gold)" }}>
+              {t(DEFAULT_LOCALE, "login.register")}
+            </Link>
+          </p>
         </div>
       </div>
     </main>

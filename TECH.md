@@ -1977,4 +1977,44 @@ Alles über den **AUTHENTICATED Client** ([lib/supabase/server.ts](lib/supabase/
 
 ---
 
-> Nächste Migration: **0005**.
+## Self-Service-Registrierung (Option C — pending bis manuelle Freischaltung)
+
+Neue Betriebe registrieren sich selbst. Ein registrierter Betrieb startet auf **`status='pending'`** und ist **gesperrt**, bis ein Admin ihn **manuell** im Supabase-SQL-Editor freischaltet (`update businesses set status='active' …`). Kein Auto-Login, kein automatischer Portal-Zugang.
+
+### Migration 0005 ([supabase/migrations/0005_pending_status.sql](supabase/migrations/0005_pending_status.sql))
+
+- Erweitert **nur** den CHECK-Constraint auf `businesses.status` um `'pending'`: `drop constraint if exists businesses_status_check` → `add constraint … check (status in ('pending','active','suspended'))`.
+- **DEFAULT bleibt `'active'`** — bestehende/manuell angelegte Betriebe sind unverändert aktiv; nur der Registrierungs-Endpoint setzt explizit `status='pending'`.
+- **Keine** neue Tabelle/Policy/GRANT. Verify-Gate [supabase/verify/0005_pending_status_checks.sql](supabase/verify/0005_pending_status_checks.sql) (Constraint nennt alle drei Werte + Default = `active`). Manuell im SQL-Editor anwenden.
+
+### Registrierungs-Seite ([app/register/page.tsx](app/register/page.tsx), Client)
+
+- Felder: Betriebsname, E-Mail, Passwort (min 8 Zeichen), Passwort wiederholen. **`div + onClick`, kein `<form>`**; Styling/Card-Optik wie [/login](app/login/page.tsx).
+- Client-Validierung (Felder nicht leer, E-Mail-Format, Passwort-Mindestlänge, Passwörter gleich) **vor** dem Request.
+- Ablauf: (1) `supabase.auth.signUp({ email, password })` (Browser-Client) → bei Fehler Meldung (`emailTaken` bei „already registered/exists", sonst `error`); (2) bei Erfolg `POST /api/auth/register` mit `{ businessName, email, userId }` (aus der signUp-Response); (3) Erfolgsmeldung `register.success` (kein Auto-Login, kein Redirect ins Portal).
+- Bereits eingeloggte Nutzer werden beim Laden nach `/portal` umgeleitet (aktive → Portal, pending → von dort weiter nach `/pending`). Link „Bereits registriert? Anmelden" → `/login`.
+
+### Route Handler ([app/api/auth/register/route.ts](app/api/auth/register/route.ts), `POST`, `service_role`)
+
+Liegt **bewusst nicht** unter `/portal` (öffentlich erreichbar, noch keine/pending Session). Schreibt über **`service_role`** (RLS umgangen).
+
+- Validierung: `businessName`/`email`/`userId` vorhanden (sonst 400 `missing_fields`), `businessName` ≤ 100 (sonst 400 `name_too_long`), E-Mail-Format (sonst 400 `invalid_email`).
+- Prüft, ob `businesses.business_email` bereits existiert ⇒ **409 `email_taken`**.
+- `slug` = `name.toLowerCase().replace(/[^a-z0-9]+/g,'-')` (getrimmt, ≤ 50) + zufällige 4-stellige Zahl (Kollisions-Schutz); leerer Fall ⇒ `betrieb-####`.
+- Insert `businesses` `{ name, business_email, slug, status:'pending', default_language:'de' }` (unique-Violation `23505` ⇒ 409 `email_taken`), dann Insert `business_users` `{ business_id, user_id, role:'owner' }`.
+- **Rollback:** `business_users.user_id` ist per FK an `auth.users` gebunden — ein erfundener `userId` scheitert beim Insert; dann wird der `businesses`-Insert **zurückgerollt** (`delete`), sonst bliebe ein verwaister Betrieb, der die E-Mail dauerhaft mit 409 blockiert.
+- **Admin-Benachrichtigung (NON-FATAL):** E-Mail via Resend an die **fest hinterlegte** Adresse `andreas.dax@valooro.com` ([lib/email/admin-notification.ts](lib/email/admin-notification.ts)) — Betreff „Neue Registrierung: {name}", Body mit Betriebsname/E-Mail + SQL-Schnipsel zum Freischalten. **Kein `ADMIN_EMAIL`-Env** (Adresse hardcodiert); Fehlschlag wird nur geloggt, die Registrierung steht trotzdem. Response `{ ok: true }`.
+
+### pending = gesperrt (zweistufiger Guard)
+
+- **[middleware.ts](middleware.ts):** für **eingeloggte** Nutzer auf Portal-**Seiten** (`startsWith('/portal')`) wird der Betriebs-Status geladen (`business_users → businesses(status)`, ein Round-Trip, RLS); `status === 'pending'` ⇒ **`redirect('/pending')`**. **FAIL-SAFE:** fehlt/erroriert die Abfrage, wird **nicht** umgeleitet (das Layout prüft erneut). Fängt pending-Seiten früh ab, bevor das Layout rendert. `/pending`+`/register` liegen außerhalb `/portal` ⇒ keine Schleife.
+- **[getCurrentBusiness](lib/auth/current-business.ts):** lädt die `businesses`-Row inkl. `status`; ist `status === 'pending'` ⇒ **`redirect('/pending')`** (nicht 403). Backup für die Portal-**Seiten** (Layout awaitet `getCurrentBusiness`) **und** — der eigentliche Grund — der Guard für alle `/api/portal/*`-**Route-Handler** (sie rufen `getCurrentBusiness`, fallen aber nicht unter den `/portal`-Match der Middleware; `redirect()` liefert dort eine 307 — keine Mutation läuft, kein Datenleck).
+- **[app/pending/page.tsx](app/pending/page.tsx)** (Server Component): liegt **nicht** unter `/portal` und ruft `getCurrentBusiness` **NICHT** auf (sonst Endlos-Redirect) — prüft nur `auth.getUser()` (kein User ⇒ `/login`), zeigt `pending.title`/`pending.message` + den geteilten [LogoutButton](app/portal/logout-button.tsx) (`nav.logout`).
+
+### i18n
+
+Neue Blöcke in [lib/i18n/de.ts](lib/i18n/de.ts): `register.*` (`title`/`intro`/`businessName`/`email`/`password`/`passwordRepeat`/`submit`/`submitting`/`fieldsRequired`/`emailInvalid`/`passwordMin`/`passwordMismatch`/`emailTaken`/`error`/`success`/`alreadyRegistered`/`loginLink`), `pending.*` (`title`/`message`) und die Login-Link-Schlüssel `login.noAccount`/`login.register`. Keine Inline-Strings.
+
+---
+
+> Nächste Migration: **0006**.

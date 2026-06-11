@@ -13,6 +13,34 @@ export const de = {
     password: "Passwort",
     submit: "Anmelden",
     error: "Anmeldung fehlgeschlagen. Bitte E-Mail und Passwort prüfen.",
+    noAccount: "Noch kein Account?",
+    register: "Jetzt registrieren",
+  },
+  register: {
+    title: "Registrieren",
+    intro:
+      "Legen Sie Ihren Betrieb an. Wir schalten Ihren Zugang nach einer kurzen Prüfung frei.",
+    businessName: "Betriebsname",
+    email: "E-Mail",
+    password: "Passwort",
+    passwordRepeat: "Passwort wiederholen",
+    submit: "Registrieren",
+    submitting: "Wird gesendet…",
+    fieldsRequired: "Bitte alle Felder ausfüllen.",
+    emailInvalid: "Bitte eine gültige E-Mail-Adresse angeben.",
+    passwordMin: "Das Passwort muss mindestens {min} Zeichen lang sein.",
+    passwordMismatch: "Die Passwörter stimmen nicht überein.",
+    emailTaken: "Diese E-Mail-Adresse ist bereits registriert.",
+    error: "Registrierung fehlgeschlagen. Bitte erneut versuchen.",
+    success:
+      "Ihr Account wurde angelegt. Wir schalten ihn in Kürze frei und melden uns per E-Mail.",
+    alreadyRegistered: "Bereits registriert?",
+    loginLink: "Anmelden",
+  },
+  pending: {
+    title: "Account wird freigeschaltet",
+    message:
+      "Ihr Account wird gerade geprüft. Sobald er freigeschaltet ist, melden wir uns per E-Mail — dann können Sie sich anmelden.",
   },
   portal: {
     welcome: "Willkommen, {name}",

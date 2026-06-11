@@ -43,6 +43,29 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
+  // Self-Service-Registrierung (Option C): pending-Betriebe sind gesperrt. Für
+  // eingeloggte Nutzer auf Portal-SEITEN den Status prüfen und nach /pending
+  // umleiten. getCurrentBusiness erzwingt dasselbe als Fallback (und deckt die
+  // /api/portal/*-Routen ab, die hier nicht unter /portal fallen). /pending und
+  // /register liegen außerhalb /portal ⇒ keine Schleife. FAIL-SAFE: fehlt oder
+  // erroriert die Abfrage, wird NICHT umgeleitet (das Layout prüft erneut).
+  if (user && request.nextUrl.pathname.startsWith("/portal")) {
+    const { data: row } = await supabase
+      .from("business_users")
+      .select("businesses(status)")
+      .eq("user_id", user.id)
+      .maybeSingle<{
+        businesses: { status: string } | { status: string }[] | null;
+      }>();
+    const biz = row?.businesses;
+    const status = Array.isArray(biz) ? biz[0]?.status : biz?.status;
+    if (status === "pending") {
+      const url = request.nextUrl.clone();
+      url.pathname = "/pending";
+      return NextResponse.redirect(url);
+    }
+  }
+
   return supabaseResponse;
 }
 

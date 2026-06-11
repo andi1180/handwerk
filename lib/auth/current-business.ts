@@ -1,3 +1,4 @@
+import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import {
   DEFAULT_BRANDING,
@@ -191,6 +192,14 @@ export async function getCurrentBusiness(): Promise<CurrentBusiness | null> {
     .eq("id", membership.business_id)
     .maybeSingle<BusinessRow>();
   if (!business) return null;
+
+  // Self-Service-Registrierung (Option C): pending-Betriebe sind gesperrt, bis
+  // ein Admin manuell freischaltet ⇒ raus aus dem Portal nach /pending. Greift
+  // sowohl für Portal-Seiten (Layout awaitet diese Funktion) als auch für alle
+  // /api/portal/*-Route-Handler (sie rufen ebenfalls getCurrentBusiness) —
+  // redirect() liefert dort eine 307, keine Mutation läuft. Die /pending-Seite
+  // selbst ruft getCurrentBusiness NICHT auf (keine Schleife).
+  if (business.status === "pending") redirect("/pending");
 
   return {
     id: business.id,
