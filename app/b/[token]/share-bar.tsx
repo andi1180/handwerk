@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { t, type Locale } from "@/lib/i18n";
+import { trackBookletEvent } from "@/lib/booklet/track";
 
 /** Welcher „✓ kopiert"-Flash gerade aktiv ist (immer nur einer). */
 type CopiedKey = "link" | "ig" | "review";
@@ -30,6 +31,7 @@ type CopiedKey = "link" | "ig" | "review";
  *   einfügen"), und NIEMALS an eine Belohnung gekoppelt (harter Google-ToS-Verstoß).
  */
 export function ShareBar({
+  token,
   storyUrl,
   reelSignedUrl,
   reviewDraft,
@@ -37,6 +39,7 @@ export function ShareBar({
   igCaption,
   locale,
 }: {
+  token: string;
   storyUrl: string;
   reelSignedUrl: string | null;
   reviewDraft: string | null;
@@ -88,16 +91,27 @@ export function ShareBar({
     }
   }
 
+  /** Pures Kopieren der Story-URL (auch Fallback von „Story teilen"). */
   function copyLink() {
     void copyText(storyUrl, "link");
   }
 
+  /** Button „Link kopieren": Event (shared/copy) + Kopieren. */
+  function handleCopyLink() {
+    trackBookletEvent(token, "shared", "copy");
+    copyLink();
+  }
+
   function copyIgCaption() {
-    if (igCaption) void copyText(igCaption, "ig");
+    if (!igCaption) return;
+    // IG-Caption kopiert = link_click/ig (der @-Handle ist der Tagging-Multiplikator).
+    trackBookletEvent(token, "link_click", "ig");
+    void copyText(igCaption, "ig");
   }
 
   async function writeReview() {
     if (!reviewDraft || !googleReviewUrl) return;
+    trackBookletEvent(token, "link_click", "review");
     // §8.6: Entwurf bereitstellen (Clipboard, Doc ist hier noch fokussiert ⇒
     // zuverlässig) und DANN das Google-Profil im neuen Tab öffnen.
     await copyText(reviewDraft, "review");
@@ -116,6 +130,8 @@ export function ShareBar({
 
   async function handleShareReel() {
     if (!reelSignedUrl || reelBusy) return;
+    // Reel teilen/Download zählt als shared/reel (Intent, unabhängig vom Pfad).
+    trackBookletEvent(token, "shared", "reel");
     setReelBusy(true);
     try {
       const res = await fetch(reelSignedUrl);
@@ -145,6 +161,7 @@ export function ShareBar({
   }
 
   async function handleShareStory() {
+    trackBookletEvent(token, "shared", "story");
     if (typeof navigator.share === "function") {
       try {
         await navigator.share({
@@ -161,6 +178,7 @@ export function ShareBar({
   }
 
   function handleWhatsApp() {
+    trackBookletEvent(token, "shared", "whatsapp");
     const text = `${t(locale, "share.message")} ${storyUrl}`;
     const href = `https://wa.me/?text=${encodeURIComponent(text)}`;
     window.open(href, "_blank", "noopener,noreferrer");
@@ -216,7 +234,7 @@ export function ShareBar({
           <WhatsAppIcon />
           <span>{t(locale, "share.whatsapp")}</span>
         </Pressable>
-        <Pressable className="booklet-share-btn" onPress={copyLink}>
+        <Pressable className="booklet-share-btn" onPress={handleCopyLink}>
           <LinkIcon />
           <span>{copiedKey === "link" ? t(locale, "share.copied") : t(locale, "share.copyLink")}</span>
         </Pressable>

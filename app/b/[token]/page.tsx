@@ -10,6 +10,8 @@ import {
   type PublicBookletMedia,
 } from "@/lib/booklet/load";
 import { ShareBar } from "./share-bar";
+import { ViewTracker } from "./view-tracker";
+import { TrackedLink } from "./tracked-link";
 import "./booklet.css";
 
 /* Pro Request frisch rendern — die Signed-URLs sind kurzlebig, nichts cachen. */
@@ -73,6 +75,9 @@ export default async function PublicBookletPage({
       className={`booklet ${bookletFontClass(data.branding.font)}`}
       style={rootStyle}
     >
+      {/* Analytics (10a): feuert beim Mount EINMALIG `viewed` — für ALLE Öffner
+          (Kunde UND Empfänger), unabhängig von `?c=1`. Reichweite zählt. */}
+      <ViewTracker token={token} />
       <main className="booklet-scroll">
         <IntroSection data={data} locale={locale} />
         {data.media.map((item) => (
@@ -81,6 +86,7 @@ export default async function PublicBookletPage({
         <OutroSection
           data={data}
           locale={locale}
+          token={token}
           storyUrl={storyUrl}
           reelSignedUrl={data.reelSignedUrl}
           isCustomerView={isCustomerView}
@@ -196,12 +202,14 @@ function MediaSection({
 function OutroSection({
   data,
   locale,
+  token,
   storyUrl,
   reelSignedUrl,
   isCustomerView,
 }: {
   data: PublicBookletData;
   locale: Locale;
+  token: string;
   storyUrl: string;
   reelSignedUrl: string | null;
   isCustomerView: boolean;
@@ -236,6 +244,7 @@ function OutroSection({
             normale Settings-Outro ohne Teilen-Schicht. */}
         {isCustomerView ? (
           <ShareBar
+            token={token}
             storyUrl={storyUrl}
             reelSignedUrl={reelSignedUrl}
             reviewDraft={data.reviewDraft}
@@ -266,15 +275,16 @@ function OutroSection({
               </a>
             ) : null}
             {website_url ? (
-              <a
+              // §10a: Outro-Website-Klick → link_click/website (für alle Öffner).
+              <TrackedLink
+                token={token}
+                channel="website"
                 href={externalHref(website_url)}
-                target="_blank"
-                rel="noopener noreferrer"
-                aria-label={`${t(locale, "booklet.contactWebsite")}: ${displayHost(website_url)}`}
+                ariaLabel={`${t(locale, "booklet.contactWebsite")}: ${displayHost(website_url)}`}
               >
                 <GlobeIcon />
                 <span>{displayHost(website_url)}</span>
-              </a>
+              </TrackedLink>
             ) : null}
           </div>
         ) : null}

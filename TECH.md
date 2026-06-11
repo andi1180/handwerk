@@ -1870,4 +1870,48 @@ i18n `qr.*` ([lib/i18n/de.ts](lib/i18n/de.ts)): `printButton`, `forCustomer` (`{
 
 ---
 
+## Analytics Write-Pfad — booklet_events + Lifecycle viewed/shared (Schritt 10a)
+
+Erfasst Booklet-Interaktionen in `booklet_events` und rückt den Auftragsstatus monoton vorwärts (`sent → viewed → shared`). **Keine Migration** (Tabelle `booklet_events` + Spalten `event_type`/`channel`/`ip_hash` aus 0001, Status-Enum aus 0001). Das **Dashboard** (Aggregation/Anzeige der Events) folgt in 10b und bleibt offen.
+
+### Event-Taxonomie (`event_type` / `channel`)
+
+`event_type` bleibt im 0001-erlaubten Wertebereich (`viewed`/`shared`/`qr_click`/`link_click`); genutzt werden `viewed`/`shared`/`link_click`, die feinere Spezifik trägt der `channel`:
+
+| `event_type` | `channel` | Auslöser |
+| --- | --- | --- |
+| `viewed` | — (null) | Seite geöffnet (alle Öffner) |
+| `shared` | `reel` | Reel teilen/Download |
+| `shared` | `story` | Story teilen |
+| `shared` | `whatsapp` | WhatsApp |
+| `shared` | `copy` | Link kopieren |
+| `link_click` | `website` | Outro-Website-Klick |
+| `link_click` | `review` | Google-Review-Klick |
+| `link_click` | `ig` | IG-Caption kopiert |
+
+Geteilte, **plain** (secret-freie, client-importierbare) Quelle: [lib/booklet/events.ts](lib/booklet/events.ts) — `EVENT_TYPES`/`EVENT_CHANNELS` (typsichere Literale) + `parseBookletEvent(eventType, channel)`. Letzteres prüft Typ **und** die erlaubte (event_type → channel)-Kombination gegen eine feste Whitelist (`null`-channel nur für `viewed`); ungültig ⇒ `null` (Endpoint → 400). Der Client nutzt nur die Typliterale (`import type`), die Validierung läuft server-seitig.
+
+### Öffentlicher Event-Endpoint ([app/api/b/[token]/event/route.ts](app/api/b/[token]/event/route.ts), `POST`)
+
+- **SICHERHEIT (§14.2):** ausschließlich **`service_role`**. Der **Token** aus dem URL-Pfad ist die **EINZIGE** vertrauenswürdige Quelle: `token → booklets-Row → business_id`/`order_id` — **nie** ein Client-Wert. Ungültiger Token ⇒ **404**, **kein** Write.
+- **Body** `{ event_type, channel? }` → `parseBookletEvent`; unerlaubte Kombi ⇒ **400**, **kein** Write. Defektes JSON ⇒ 400.
+- **`ip_hash`:** die Request-IP (`x-forwarded-for` erster Eintrag, sonst `x-real-ip`) wird **server-seitig gesalzen-gehasht** (`sha256("{IP_HASH_SALT}:{ip}")`, `node:crypto`) — **nie roh** gespeichert; ohne IP ⇒ `null`. Salt aus `IP_HASH_SALT` (server-only; fehlend ⇒ leerer Salt, Hash bleibt deterministisch).
+- **Insert** (`service_role` — `booklet_events` hat **kein** `authenticated`-INSERT-Grant): `{ booklet_id, business_id, event_type, channel, ip_hash }`, `business_id`/`booklet_id` aus der Booklet-Row.
+- **Lifecycle-Vorrücken** (monoton vorwärts, defensiv gefiltert — nie zurück, nie überspringen):
+  - `viewed` → `orders.status 'sent' → 'viewed'` (nur wenn aktuell `sent`, `.eq('status','sent')`); `booklets.viewed_at` setzen falls `null`.
+  - `shared` → `orders.status ∈ {'sent','viewed'} → 'shared'` (`.in('status',['sent','viewed'])`); `booklets.first_shared_at` setzen falls `null`.
+  - `link_click` rückt den Status **nicht** vor.
+- **Fire-and-forget:** der Endpoint antwortet schnell (`{ ok:true }`); nicht-kritische Insert-/Update-Fehler werden nur geloggt (Kontext `order_id`/`step`/`message`), brechen aber nicht ab.
+
+### Client feuert Events (fire-and-forget)
+
+- Geteilter Helfer [lib/booklet/track.ts](lib/booklet/track.ts): `trackBookletEvent(token, eventType, channel?)` — POST an `/api/b/[token]/event`, **nicht awaitable**, schluckt jeden Fehler (Analytics darf die UI nie stören), `keepalive:true` (überlebt Navigation: Share-Sheet/WhatsApp/neuer Tab). Der **Token kommt aus dem URL-Pfad** (die Seite kennt ihn), **kein** `business_id` im Client.
+- **Seitenaufruf** ([view-tracker.tsx](app/b/[token]/view-tracker.tsx), Client, rendert nichts): feuert beim Mount **einmalig** `viewed` (Guard via `useRef` gegen StrictMode-Doppel-Mount). Mountet in der Story-Wurzel — gilt für **ALLE** Öffner (Kunde UND Empfänger), unabhängig von `?c=1` (Reichweite zählt).
+- **Teilen** ([share-bar.tsx](app/b/[token]/share-bar.tsx)): „Reel teilen" → `shared/reel`, „Story teilen" → `shared/story`, „WhatsApp" → `shared/whatsapp`, „Link kopieren" → `shared/copy`, IG-Caption kopieren → `link_click/ig`, Google-Bewertung → `link_click/review`. (Der interne Copy-Fallback von „Story teilen" feuert **kein** zweites `copy`-Event — `story` ist bereits gezählt.)
+- **Outro-Website-Klick** ([tracked-link.tsx](app/b/[token]/tracked-link.tsx), Client-`<a>`): `link_click/website` beim Klick (für **alle** Öffner). Das native Navigieren bleibt unverändert.
+
+`IP_HASH_SALT` neu in [.env.example](.env.example) (server-only).
+
+---
+
 > Nächste Migration: **0005**.
