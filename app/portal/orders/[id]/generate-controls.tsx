@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { DEFAULT_LOCALE, t } from "@/lib/i18n";
+import { CUSTOMER_VIEW_QUERY } from "@/lib/booklet/customer-view";
 import { postAction } from "./finalize-controls";
 
 /**
@@ -221,11 +222,13 @@ export function GeneratedBanner({
         </span>
 
         <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 2 }}>
-          {/* Primär-Aktion: die fertige Story prüfen (öffnet /b/[token]). */}
+          {/* Primär-Aktion: die fertige Story prüfen (öffnet /b/[token]).
+              Marker `?c=1` (§9d) → der Betrieb sieht die volle Kunden-Sicht
+              inkl. Teilen-Sektion. */}
           {token ? (
             <a
               className="btn-gold"
-              href={`/b/${token}`}
+              href={`/b/${token}?${CUSTOMER_VIEW_QUERY}`}
               target="_blank"
               rel="noopener noreferrer"
             >

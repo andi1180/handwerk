@@ -1781,4 +1781,30 @@ Neue Blöcke in [lib/i18n/de.ts](lib/i18n/de.ts): `review.*` (`button`, `hint` �
 
 ---
 
+## Teilen-Sektion nur für den Kunden (Schritt 9d)
+
+Die Teilen-Aktionen (9a/9b) erscheinen **nur auf dem ausgelieferten Link** (der Kunde, der das Booklet bekommt) — **nicht** auf dem **geteilten** Link (die Empfänger, denen der Kunde die Story schickt). Unterschieden wird über einen **URL-Marker**, **nicht** über Share-State: **kein** `first_shared_at`, **keine** DB-Spalte, **keine Migration**.
+
+### Marker = UI-Schalter, KEIN Auth-Gate
+
+- **`?c=1`** schaltet die Kunden-Sicht ein. Quelle/Guard liegen geteilt in [lib/booklet/customer-view.ts](lib/booklet/customer-view.ts): `CUSTOMER_VIEW_PARAM`/`CUSTOMER_VIEW_VALUE`, `CUSTOMER_VIEW_QUERY` (`"c=1"`, an Links gehängt) und `isCustomerViewParam(searchParams)` — **eine** Quelle für Lesen (Seite) und Schreiben (Vorschau-Link). Plain-Modul ohne `service_role`/Secrets → auch im Client importierbar.
+- **WICHTIG (§14.2):** Der Marker ist **kein Sicherheits-Gate**. Der `access_token` bleibt der **alleinige** Zugriffsschutz; der Marker schaltet **ausschließlich UI**. **Kein DB-Zugriff** hängt daran (`loadPublicBooklet` ist unverändert, der Marker fließt nirgends in eine Query).
+
+### Sichtbarkeit ([app/b/[token]/page.tsx](app/b/[token]/page.tsx), Server Component)
+
+Die Seite liest jetzt zusätzlich `searchParams` (Next-15-`Promise`) → `isCustomerView = isCustomerViewParam(...)` → Prop an `OutroSection`:
+
+- **`isCustomerView = true`** (Kunde, markierter Link): normales Outro **+ volle Teilen-Sektion** (`<ShareBar>`: Reel/Story/WhatsApp/Link + IG-Caption + Google-Bewertung, 9a/9b **unverändert**).
+- **`isCustomerView = false`** (Empfänger, nackter Link): **NUR** `<ShareBar>` wird weggelassen (`{isCustomerView ? <ShareBar … /> : null}`). Das **normale Settings-Outro** (Logo, `outro_message`, Website/E-Mail/Telefon-Pills) bleibt **exakt** wie definiert — sonst ändert sich nichts. Intro + Medien-Sektionen sind in beiden Sichten identisch.
+
+### Share teilt die NACKTE URL
+
+`storyUrl` (kanonisch aus den Request-Headern) wird bewusst **ohne** Marker gebaut (`/b/[token]`, kein `?c=1`). „Story teilen", „Link kopieren" und WhatsApp in [share-bar.tsx](app/b/[token]/share-bar.tsx) teilen damit **immer** die nackte URL → jeder Empfänger landet automatisch in der **Empfänger-Sicht** (keine Teilen-Schicht). `share-bar.tsx` selbst ist unverändert (es bekam schon immer die nackte `storyUrl`).
+
+### Vorschau-Link (Test-Zugang vor 9c)
+
+Der Portal-Vorschau-Link im Status `generated` ([generate-controls.tsx](app/portal/orders/[id]/generate-controls.tsx)) hängt den Marker an (`/b/${token}?${CUSTOMER_VIEW_QUERY}`), damit der Betrieb in der Vorschau die **volle Kunden-Sicht** sieht. (Den ausgelieferten Kunden-Link mit Marker erzeugen E-Mail/QR in **9c**.)
+
+---
+
 > Nächste Migration: **0005**.

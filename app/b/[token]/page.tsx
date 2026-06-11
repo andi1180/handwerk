@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { DEFAULT_LOCALE, t, type Locale } from "@/lib/i18n";
 import { bookletFontClass } from "@/lib/booklet/fonts";
 import { displayCaption } from "@/lib/booklet/caption";
+import { isCustomerViewParam } from "@/lib/booklet/customer-view";
 import {
   loadPublicBooklet,
   type PublicBookletData,
@@ -24,15 +25,24 @@ export const dynamic = "force-dynamic";
  * der Middleware-Guard greift also nicht — die Seite ist öffentlich erreichbar.
  *
  * Komposition: Vollbild-Scroll-Story (scroll-snap, je Sektion 100dvh):
- * Intro → eine Sektion pro Medium (sort_order) → Outro. KEIN Reel (8b), KEINE
- * Share-/Review-Buttons (Step 9), KEIN View-/Analytics-Tracking (Step 9/10).
+ * Intro → eine Sektion pro Medium (sort_order) → Outro. KEIN View-/Analytics-
+ * Tracking (Step 9/10).
+ *
+ * KUNDEN- vs. EMPFÄNGER-SICHT (§9d): Der URL-Marker `?c=1` (searchParams)
+ * schaltet die Teilen-Sektion EIN — NUR auf dem ausgelieferten Kunden-Link.
+ * Der nackte Link (`/b/[token]`, den der Kunde teilt) zeigt das normale Outro
+ * OHNE Teilen-Schicht. Der Marker ist KEIN Auth-Gate (der Token bleibt der
+ * alleinige Zugriffsschutz, §14.2) — er schaltet ausschließlich UI.
  */
 export default async function PublicBookletPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ token: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const { token } = await params;
+  const isCustomerView = isCustomerViewParam(await searchParams);
   const result = await loadPublicBooklet(token);
 
   if (result.status === "not_found") notFound();
@@ -43,8 +53,10 @@ export default async function PublicBookletPage({
   // aus der DB. Der i18n-Layer kennt aktuell nur 'de' → unbekannt ⇒ Default.
   const locale = (["de"] as const).find((l) => l === data.language) ?? DEFAULT_LOCALE;
 
-  // Kanonische absolute Story-URL fürs Teilen. Auf Vercel liefern die
-  // x-forwarded-*-Header Host/Protokoll; die Seite ist ohnehin force-dynamic.
+  // Kanonische absolute Story-URL fürs Teilen — bewusst die NACKTE URL OHNE
+  // Marker (`/b/[token]`, kein `?c=1`): so landet jeder Empfänger automatisch
+  // in der Empfänger-Sicht (§9d). Auf Vercel liefern die x-forwarded-*-Header
+  // Host/Protokoll; die Seite ist ohnehin force-dynamic.
   const h = await headers();
   const host = h.get("x-forwarded-host") ?? h.get("host") ?? "";
   const proto = h.get("x-forwarded-proto") ?? "https";
@@ -71,6 +83,7 @@ export default async function PublicBookletPage({
           locale={locale}
           storyUrl={storyUrl}
           reelSignedUrl={data.reelSignedUrl}
+          isCustomerView={isCustomerView}
         />
       </main>
     </div>
@@ -185,11 +198,13 @@ function OutroSection({
   locale,
   storyUrl,
   reelSignedUrl,
+  isCustomerView,
 }: {
   data: PublicBookletData;
   locale: Locale;
   storyUrl: string;
   reelSignedUrl: string | null;
+  isCustomerView: boolean;
 }) {
   const { contact_email, contact_phone, website_url } = data.settings;
   const hasContact = Boolean(contact_email || contact_phone || website_url);
@@ -216,14 +231,19 @@ function OutroSection({
           <p className="booklet-outro-message">{data.settings.outro_message}</p>
         ) : null}
 
-        <ShareBar
-          storyUrl={storyUrl}
-          reelSignedUrl={reelSignedUrl}
-          reviewDraft={data.reviewDraft}
-          googleReviewUrl={data.settings.google_review_url}
-          igCaption={data.igCaption}
-          locale={locale}
-        />
+        {/* §9d: Teilen-Sektion (+ IG-Caption + Review) NUR in der Kunden-Sicht
+            (markierter Link `?c=1`). Empfänger des nackten Links sehen das
+            normale Settings-Outro ohne Teilen-Schicht. */}
+        {isCustomerView ? (
+          <ShareBar
+            storyUrl={storyUrl}
+            reelSignedUrl={reelSignedUrl}
+            reviewDraft={data.reviewDraft}
+            googleReviewUrl={data.settings.google_review_url}
+            igCaption={data.igCaption}
+            locale={locale}
+          />
+        ) : null}
 
         {hasContact ? (
           <div className="booklet-contact">
