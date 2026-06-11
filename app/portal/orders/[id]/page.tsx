@@ -165,6 +165,21 @@ export default async function OrderDetailPage({
         />
       ) : null}
 
+      {/* QR-Druckansicht (9c-2): Handover am Tresen — öffnet die Bon-taugliche
+          QR-Seite in neuem Tab. Nur sobald ein Booklet existiert (generated/sent). */}
+      {(isGenerated || isSent) && bookletToken ? (
+        <div style={{ marginBottom: 20 }}>
+          <a
+            className="btn-outline"
+            href={`/portal/orders/${order.id}/qr`}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            {t(DEFAULT_LOCALE, "qr.printButton")}
+          </a>
+        </div>
+      ) : null}
+
       {/* Stammdaten. */}
       <div
         className="card"

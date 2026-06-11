@@ -1842,4 +1842,32 @@ i18n `deliver.*` ([lib/i18n/de.ts](lib/i18n/de.ts)). **KEIN Belohnungs-Bezug** (
 
 ---
 
+## QR-Druckansicht — Handover am Tresen (Schritt 9c-2)
+
+Druckoptimierte, **Bon-Drucker-taugliche** Ansicht (QR + Kundenname + kurzer Hinweis), die den **No-E-Mail-Auslieferungspfad** schließt: scannen statt mailen. Der QR kodiert den **Kunden-Booklet-Link** (`?c=1`). **Keine Migration.** Damit ist der manuelle Auslieferungs-Pfad (9c) vollständig; **View-/Share-Analytics** (`booklet_events`) + Stufen `viewed`/`shared` bleiben offen.
+
+### Setup
+
+Dependencies `qrcode` + `@types/qrcode` (pnpm; reines JS-Paket, **kein** Lifecycle-Script → **nicht** in `pnpm.onlyBuiltDependencies`).
+
+### QR-Druckseite ([app/portal/orders/[id]/qr/page.tsx](app/portal/orders/[id]/qr/page.tsx), Server Component, `force-dynamic`)
+
+- **ISOLATION (RLS):** `getCurrentBusiness` (kein Betrieb ⇒ `notFound()`; die Middleware schützt `/portal/*` ohnehin schon vor anonymem Zugriff). Order (`customer_name`, `status`) und Booklet (`access_token`) werden über den **AUTHENTICATED Client** geladen (RLS skopiert auf den Betrieb; fremde/fehlende ⇒ `notFound()`). **Guard:** ein Booklet muss existieren **und** der Auftrag muss `generated` **oder** `sent` sein — sonst `notFound()` (vor der Generierung gibt es keinen Link zum Drucken).
+- **Link:** `customerUrl = ${BOOKLET_BASE_URL}/b/${access_token}?${CUSTOMER_VIEW_QUERY}` — derselbe **`?c=1`**-Kunden-Link wie die E-Mail (9c-1), `CUSTOMER_VIEW_QUERY` aus [lib/booklet/customer-view.ts](lib/booklet/customer-view.ts) (9d). Basis-URL bevorzugt `BOOKLET_BASE_URL`, sonst Fallback auf den Request-Origin (x-forwarded-host/proto) — **identische Logik** zur deliver-Route.
+- **QR SERVER-SEITIG** via `QRCode.toString(customerUrl, { type:'svg', errorCorrectionLevel:'M', margin:1, width:256, color:{ dark:'#000', light:'#fff' } })` → das SVG wird per `dangerouslySetInnerHTML` eingebettet (scharf dank viewBox + `shape-rendering:crispEdges`, **kein** Client-JS für den Code nötig; `errorCorrectionLevel 'M'` robust gegen leichte Druck-/Scan-Fehler). Server-generiert + nicht nutzergesteuert ⇒ XSS-unkritisch.
+- **Druck-Karte** (schmal + S/W, `.qr-card` in [app/globals.css](app/globals.css)): Betriebsname, „Für {customer_name}", der QR (CSS-fix 240px, das SVG füllt den Container), kurzer Hinweis. **Kein Logo** (Thermodruck ist S/W — kein Verlass auf Farbe/Logo; der Betriebsname als Text ist der verlässliche Identifier).
+
+### Druck-Verhalten
+
+- Kleiner Client-Button „Drucken" ([qr-print-button.tsx](app/portal/orders/[id]/qr/qr-print-button.tsx), `window.print()`) — die einzige Client-Komponente, damit die Seite Server Component bleibt.
+- **`@media print`** ([app/globals.css](app/globals.css)): Portal-Chrome (`.portal-sidebar`, `.portal-topbar`, `.portal-tabnav`) **und** der Druck-Button (`.qr-no-print`) werden `display:none`; `.portal-main`-Padding auf 0, die Karte randlos/zentriert → **nur** die QR-Karte druckt.
+
+### Zugang ([app/portal/orders/[id]/page.tsx](app/portal/orders/[id]/page.tsx))
+
+Link „QR drucken" (`btn-outline`, neuer Tab) auf der Detailseite, sobald ein Booklet existiert (`(isGenerated || isSent) && bookletToken`) → öffnet `/portal/orders/[id]/qr`.
+
+i18n `qr.*` ([lib/i18n/de.ts](lib/i18n/de.ts)): `printButton`, `forCustomer` (`{name}`), `hint`. Keine Inline-Strings.
+
+---
+
 > Nächste Migration: **0005**.

@@ -282,4 +282,11 @@ export const de = {
     copy: "Caption kopieren",
     copied: "✓ Kopiert",
   },
+  qr: {
+    // QR-Druckansicht (9c-2): Handover am Tresen. Der QR kodiert den
+    // Kunden-Booklet-Link (?c=1). Bon-Drucker-tauglich, S/W.
+    printButton: "QR drucken",
+    forCustomer: "Für {name}",
+    hint: "Scannen Sie den Code für Ihr persönliches Booklet",
+  },
 } as const;
