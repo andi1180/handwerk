@@ -1574,6 +1574,38 @@ Tracing (Font + beide Scrims) unverändert.
 
 ---
 
+## Intro-Frame-Layout robust (Schritt 8b-2c)
+
+Behebt den **Überlapp** zwischen KI-Beschreibung und Settings-Tagline im Reel-**Intro**
+([bakeIntroFrame](lib/reel/frames.ts)). Reines Layout — **keine** Migration, **keine**
+Pipeline-/Assembly-/Reihenfolge-Änderung, **Web-Story unverändert** (sie nutzt weiter die
+volle Beschreibung). Betrifft nur das Intro-Frame, nicht Foto-/Clip-/Outro-Frames.
+
+**Problem:** Reihenfolge Logo → Titel → Beschreibung (KI, variabel lang) → Tagline
+(Settings). Beschreibung war top-anchored (`y=952`), Tagline an festem `y=1240` direkt
+darunter → eine lange Beschreibung wuchs in die Tagline-Zone (feste y + variabler Text).
+
+**Fix (zwei entkoppelnde Maßnahmen):**
+
+1. **Tagline FEST nahe dem unteren Rand gepinnt** statt darunterfließend: `TAGLINE_TOP`
+   (1240, top-anchored) → `TAGLINE_BOTTOM` (1760, **bottom-anchored** via `y=${TAGLINE_BOTTOM}-text_h`).
+   Damit ist die Tagline-Position von der Beschreibungslänge **entkoppelt**.
+2. **Beschreibung NUR fürs Reel-Intro gekürzt** (`truncateForIntro`,
+   `REEL_DESCRIPTION_MAX_CHARS = 140` ≈ ≤ 4 gewrappte Zeilen): am letzten Wortende vor dem
+   Limit schneiden (kein abgehacktes Wort), Satz-/Trennzeichen am Ende strippen, „…"
+   anhängen; kurze Beschreibungen bleiben unverändert. Die in `booklets` gespeicherte
+   `intro_description` wird **NICHT** angefasst — nur die Render-Kopie wird gekürzt, die
+   Web-Story zeigt weiter die volle Länge.
+
+Mit beidem endet die (gekürzte) Beschreibung weit oberhalb der unten gepinnten Tagline →
+**kein Überlapp**, egal wie lang die KI-Ausgabe ist. **Leere Blöcke unverändert sauber**
+(bestehende `if (description)`/`if (tagline)`-Guards): fehlt einer, entsteht durch die
+festen Positionen **keine Geisterlücke**. **6.0.1-sicher** beibehalten: literales `x`,
+links-bündig, `textfile`/`fontfile`, keine zentrierten Ausdrücke. `pnpm typecheck` +
+`pnpm build` grün.
+
+---
+
 ## Medien-Anzahl-Limit (Schritt 8c)
 
 Pro-Betrieb-Limit für die **Anzahl** Fotos/Videos je Auftrag, unter einem harten

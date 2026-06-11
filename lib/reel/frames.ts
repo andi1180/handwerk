@@ -92,26 +92,40 @@ const WATERMARK_MARGIN = 44;
 /** Branding-Akzentbalken (links-bündig am SIDE_MARGIN) unter Titel/Name. */
 const CENTER_ACCENT_W = 120;
 const CENTER_ACCENT_H = 6;
-/** Intro (FIX 8b-1c): Logo oben → Titel → Beschreibung → Tagline (top-down).
+/** Intro (FIX 8b-2c): Logo oben → Titel → Beschreibung → Tagline.
  *  Der Titel ist bottom-anchored (Block wächst zum Logo hoch, hält Titel↔Akzent
- *  eng, egal ob 1 oder 2 Zeilen); Beschreibung + Tagline darunter top-anchored an
- *  festen y. Die Beschreibung ist die persönliche 1–2-Satz-Ich-Story — das Herz
- *  des Intros (war in 8b-1c bewusst weg, kommt jetzt zurück; Intro-Dauer ~4 s). */
+ *  eng, egal ob 1 oder 2 Zeilen); die Beschreibung ist top-anchored unter dem
+ *  Akzent — die persönliche 1–2-Satz-Ich-Story, das Herz des Intros (Dauer ~4 s).
+ *
+ *  ÜBERLAPP-FIX 8b-2c: Die KI-Beschreibung ist variabel lang; früher floss die
+ *  Tagline an festem y (1240) direkt darunter → eine lange Beschreibung wuchs in
+ *  die Tagline. Jetzt (1) ist die Tagline FEST nahe dem unteren Rand gepinnt
+ *  (bottom-anchored, von der Beschreibungslänge entkoppelt) und (2) wird die
+ *  Beschreibung NUR fürs Reel-Intro auf REEL_DESCRIPTION_MAX_CHARS gekürzt (mit
+ *  „…"), sodass Titel+Beschreibung nie in die Tagline-Zone wachsen. Die in
+ *  `booklets` gespeicherte intro_description bleibt unberührt — die Web-Story
+ *  nutzt weiter die volle Länge (nur diese Render-Kopie wird gekürzt). */
 const TITLE_FONT_SIZE = 72;
 const TITLE_LINE_SPACING = 14;
 const TITLE_MAX_CHARS = 18;
 const TITLE_BOTTOM = 860;
 const INTRO_ACCENT_Y = 896;
 /** Beschreibung: kleiner als der Titel, weiß, links-bündig, top-anchored unter
- *  dem Akzent. Großzügige Reserve nach unten (1–2 Sätze ≈ 3–5 Zeilen). */
+ *  dem Akzent. Auf REEL_DESCRIPTION_MAX_CHARS gekürzt (≤ ~4 gewrappte Zeilen) →
+ *  endet weit oberhalb der unten gepinnten Tagline. */
 const DESCRIPTION_FONT_SIZE = 38;
 const DESCRIPTION_LINE_SPACING = 12;
 const DESCRIPTION_MAX_CHARS = 36;
 const DESCRIPTION_TOP = 952;
+/** Reel-Intro kürzt eine lange KI-Beschreibung auf diese Länge (die Web-Story
+ *  bleibt voll). ~140 Zeichen ≈ ≤ 4 gewrappte Zeilen bei DESCRIPTION_MAX_CHARS. */
+const REEL_DESCRIPTION_MAX_CHARS = 140;
+/** Tagline FEST nahe dem unteren Rand (bottom-anchored), unabhängig von der
+ *  Beschreibungslänge → kein Überlapp. */
 const TAGLINE_FONT_SIZE = 34;
 const TAGLINE_LINE_SPACING = 8;
 const TAGLINE_MAX_CHARS = 32;
-const TAGLINE_TOP = 1240;
+const TAGLINE_BOTTOM = 1760;
 /** Outro: Name oben, Nachricht darunter, Kontakt unten in der Safe-Zone. */
 const NAME_FONT_SIZE = 64;
 const NAME_LINE_SPACING = 12;
@@ -153,6 +167,25 @@ function wrapText(text: string, maxChars: number): string {
   }
   if (line) lines.push(line);
   return lines.join("\n");
+}
+
+/**
+ * Beschreibung NUR fürs Reel-Intro auf eine sichere Maximallänge kürzen (8b-2c):
+ * eine lange KI-Beschreibung darf nicht in die unten gepinnte Tagline-Zone wachsen.
+ * Am letzten Wortende vor dem Limit schneiden (kein abgehacktes Wort), Satz-/
+ * Trennzeichen am Ende strippen, „…" anhängen. Kurze Beschreibungen bleiben
+ * unverändert. Die in `booklets` gespeicherte intro_description wird NICHT
+ * angefasst — nur diese Render-Kopie wird gekürzt; die Web-Story nutzt die volle
+ * Länge.
+ */
+function truncateForIntro(text: string, maxChars: number): string {
+  const trimmed = text.trim();
+  if (trimmed.length <= maxChars) return trimmed;
+  const slice = trimmed.slice(0, maxChars);
+  const lastSpace = slice.lastIndexOf(" ");
+  // Nur am Wortende schneiden, wenn dabei nicht zu viel verloren geht; sonst hart.
+  const cut = lastSpace > maxChars * 0.6 ? slice.slice(0, lastSpace) : slice;
+  return `${cut.replace(/[\s.,;:!?…–—-]+$/u, "")}…`;
 }
 
 /** `#RRGGBB` → ffmpeg-Farbe `0xRRGGBB` (defensiv auf den Fallback fallen). */
@@ -406,12 +439,16 @@ export async function bakePhotoFrame({
 }
 
 /**
- * Intro-Frame (1080x1920) backen (8b-1c, FIX): Hintergrund (Bild cover-crop oder
+ * Intro-Frame (1080x1920) backen (8b-1c/2c): Hintergrund (Bild cover-crop oder
  * Verlauf) → Vollflächen-Scrim → Logo prominent oben (zentriert) → Titel (groß,
  * links-bündig) → Akzentbalken → Beschreibung (1–2 Sätze, die persönliche
- * Ich-Story) → Tagline darunter. Die Beschreibung war in 8b-1c bewusst weg, ist
- * aber das Herz der Personalisierung — sie kommt mit längerer Intro-Dauer (~4 s)
- * zurück. Alle drawtext links-bündig mit literalem x (auf 6.0.1 bewährt).
+ * Ich-Story, gekürzt) → Tagline FEST nahe dem unteren Rand.
+ *
+ * 8b-2c (Überlapp-Fix): Die Beschreibung wird NUR hier (beim Rendern) auf
+ * REEL_DESCRIPTION_MAX_CHARS gekürzt und die Tagline ist bottom-anchored — so
+ * wächst eine lange KI-Beschreibung nie in die Tagline. Die gespeicherte
+ * intro_description bleibt unberührt (Web-Story nutzt die volle Länge). Alle
+ * drawtext links-bündig mit literalem x (auf 6.0.1 bewährt).
  */
 export async function bakeIntroFrame({
   ffmpegBin,
@@ -471,7 +508,10 @@ export async function bakeIntroFrame({
     ];
     if (description) {
       const descriptionFile = await writeTmpText(
-        wrapText(description, DESCRIPTION_MAX_CHARS),
+        wrapText(
+          truncateForIntro(description, REEL_DESCRIPTION_MAX_CHARS),
+          DESCRIPTION_MAX_CHARS,
+        ),
         textfiles,
       );
       draws.push(
@@ -498,7 +538,7 @@ export async function bakeIntroFrame({
           fontsize: TAGLINE_FONT_SIZE,
           lineSpacing: TAGLINE_LINE_SPACING,
           x: String(SIDE_MARGIN),
-          y: String(TAGLINE_TOP),
+          y: `${TAGLINE_BOTTOM}-text_h`,
           shadowAlpha: 0.5,
         }),
       );
