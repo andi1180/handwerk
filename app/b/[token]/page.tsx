@@ -4,6 +4,7 @@ import { DEFAULT_LOCALE, t, type Locale } from "@/lib/i18n";
 import { bookletFontClass } from "@/lib/booklet/fonts";
 import { displayCaption } from "@/lib/booklet/caption";
 import { isCustomerViewParam } from "@/lib/booklet/customer-view";
+import { bookletShareLink } from "@/lib/booklet/share-link";
 import {
   loadPublicBooklet,
   type PublicBookletData,
@@ -55,14 +56,20 @@ export default async function PublicBookletPage({
   // aus der DB. Der i18n-Layer kennt aktuell nur 'de' → unbekannt ⇒ Default.
   const locale = (["de"] as const).find((l) => l === data.language) ?? DEFAULT_LOCALE;
 
-  // Kanonische absolute Story-URL fürs Teilen — bewusst die NACKTE URL OHNE
-  // Marker (`/b/[token]`, kein `?c=1`): so landet jeder Empfänger automatisch
-  // in der Empfänger-Sicht (§9d). Auf Vercel liefern die x-forwarded-*-Header
-  // Host/Protokoll; die Seite ist ohnehin force-dynamic.
+  // Kanonische absolute Story-URL fürs Teilen (Block C: kurzer `/s/<code>`,
+  // Fallback langer `/b/<token>` für alte Booklets ohne Code). Bewusst die NACKTE
+  // URL OHNE Marker (customerView=false): so landet jeder Empfänger automatisch in
+  // der Empfänger-Sicht (§9d) — der Redirect reicht das Fehlen des Markers durch.
+  // Auf Vercel liefern die x-forwarded-*-Header Host/Protokoll; force-dynamic.
   const h = await headers();
   const host = h.get("x-forwarded-host") ?? h.get("host") ?? "";
   const proto = h.get("x-forwarded-proto") ?? "https";
-  const storyUrl = `${proto}://${host}/b/${token}`;
+  const storyUrl = bookletShareLink({
+    base: `${proto}://${host}`,
+    accessToken: token,
+    shortCode: data.shortCode,
+    customerView: false,
+  });
 
   // Branding-Farben als CSS-Variablen an den Story-Wurzel-Container.
   const rootStyle = {

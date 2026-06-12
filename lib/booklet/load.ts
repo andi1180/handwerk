@@ -34,6 +34,8 @@ export type PublicBookletData = {
   reviewDraft: string | null;
   /** IG-Caption-Vorschlag (Schritt 9b, Template) — Kunde kopiert ihn für den IG-Post. */
   igCaption: string | null;
+  /** Kurzer Kurzlink-Code (Block C) — die Share-Bar teilt den nackten `/s/<code>`. */
+  shortCode: string | null;
   language: string;
   /** Server-seitig signierte URLs (privater Bucket `branding`), sonst null. */
   logoUrl: string | null;
@@ -62,6 +64,7 @@ type BookletRow = {
   intro_description: string | null;
   review_draft: string | null;
   ig_caption: string | null;
+  short_code: string | null;
   language: string;
   expires_at: string | null;
   reel_status: string | null;
@@ -125,7 +128,7 @@ export async function loadPublicBooklet(
   const { data: booklet } = await service
     .from("booklets")
     .select(
-      "business_id, order_id, intro_title, intro_description, review_draft, ig_caption, language, expires_at, reel_status, reel_url",
+      "business_id, order_id, intro_title, intro_description, review_draft, ig_caption, short_code, language, expires_at, reel_status, reel_url",
     )
     .eq("access_token", token)
     .maybeSingle<BookletRow>();
@@ -194,6 +197,7 @@ export async function loadPublicBooklet(
       introDescription: booklet.intro_description,
       reviewDraft: booklet.review_draft,
       igCaption: booklet.ig_caption,
+      shortCode: booklet.short_code,
       language: booklet.language,
       logoUrl: signedBranding(branding.logo_url),
       introBgUrl: signedBranding(branding.intro_bg_url),

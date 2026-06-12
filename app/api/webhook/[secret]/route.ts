@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { normalizeSettings } from "@/lib/auth/current-business";
-import { CUSTOMER_VIEW_QUERY } from "@/lib/booklet/customer-view";
+import { bookletShareLink } from "@/lib/booklet/share-link";
 import { sendBookletEmail } from "@/lib/email/booklet-email";
 import { generateShortSummary } from "@/lib/ai/short-summary";
 import { classifyEvent, parseWebhookBody } from "@/lib/roapp/events";
@@ -344,10 +344,14 @@ async function handleOrderPickedUp(
   // Booklet (access_token) laden — service_role, auf business_id gescoped.
   const { data: booklet } = await service
     .from("booklets")
-    .select("id, access_token")
+    .select("id, access_token, short_code")
     .eq("order_id", order.id)
     .eq("business_id", business.id)
-    .maybeSingle<{ id: string; access_token: string }>();
+    .maybeSingle<{
+      id: string;
+      access_token: string;
+      short_code: string | null;
+    }>();
   if (!booklet) {
     console.error("webhook: booklet missing", {
       business_id: business.id,
@@ -418,7 +422,13 @@ async function handleOrderPickedUp(
     try {
       const settings = normalizeSettings(business.settings);
       const base = bookletBaseUrl(request);
-      const bookletUrl = `${base}/b/${booklet.access_token}?${CUSTOMER_VIEW_QUERY}`;
+      // Block C: Kurzlink (Fallback langer Link für alte Booklets), Kunden-Sicht.
+      const bookletUrl = bookletShareLink({
+        base,
+        accessToken: booklet.access_token,
+        shortCode: booklet.short_code,
+        customerView: true,
+      });
       await sendBookletEmail({
         to: order.customer_email,
         customerName: order.customer_name,

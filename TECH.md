@@ -2190,6 +2190,40 @@ Einfaches `<select>` (EINE Auswahl) über der Liste: **„Alle"** (Default) + al
 
 ---
 
-> Nächste Migration: **0008**.
+## Block C / Schritt 1 — Kurzlink /s/<code> für Booklets
 
-> **WICHTIG:** Migration 0007 (`orders.short_summary`) muss vor dem Live-Gang manuell im Supabase-SQL-Editor angewendet werden (+ Verify-Gate ausführen), bevor die Kachel `short_summary` liest bzw. die Anlage-Pfade es schreiben. (Migration 0006 — `analytics_events` — ebenfalls, falls noch nicht geschehen.)
+Statt des langen, kryptischen Booklet-Links (`/b/<24-Byte-Token>?c=1`) wird **überall, wo der Link geteilt/kopiert/versendet wird** (E-Mail, WhatsApp-Share, Kopieren-Button, QR) ein kurzer Link `https://handwerk.valooro.com/s/<code>` verwendet, der **serverseitig** auf das echte Booklet weiterleitet. Die interne Route `/b/[token]` bleibt unverändert erreichbar — nur der **geteilte** Link wird ersetzt.
+
+### Migration 0008 ([0008_booklet_short_code.sql](supabase/migrations/0008_booklet_short_code.sql))
+
+Eine Spalte `booklets.short_code text` (nullable) **mit inline-`unique`**. Das UNIQUE erzeugt zugleich den B-Tree-Index, den der Redirect-Lookup (`where short_code = $1`) braucht — **kein separater Index nötig**. Mehrere NULLs sind im UNIQUE erlaubt (NULLs gelten als verschieden), Booklets ohne Code kollidieren nie. **Nullable + kein Backfill:** alte Booklets (vor 0008) haben keinen Code und fallen auf den langen `/b/<token>`-Link zurück (Teil 4); neue bekommen bei der Generierung einen. **Keine neue Policy/GRANT** — `booklets`-RLS (member select/update) + `service_role` (grant all) decken die Spalte. Verify-Gate [0008_booklet_short_code_checks.sql](supabase/verify/0008_booklet_short_code_checks.sql) (Spalte text/nullable, UNIQUE-Index auf `short_code`, Kommentar). **Manuell anwenden** (SQL-Editor), bevor der Code live geht — sonst scheitert der `short_code`-Insert/-Lookup.
+
+### Code-Generierung ([lib/booklet/short-code.ts](lib/booklet/short-code.ts))
+
+`generateShortCode()` (server-only, `node:crypto`) → 7 Zeichen aus einem **56-Symbol-Alphabet ohne verwechselbare Zeichen** (`0/O`, `1/l/I` entfernt) → vorlesbar/abtippbar, ≈ 1.7e12 Kombinationen. Anders als der sicherheitskritische `access_token` (24 Byte, [token.ts](lib/booklet/token.ts)) ist der Code nur ein kurzer Lookup-Schlüssel — die Eindeutigkeit erzwingt das DB-UNIQUE **plus ein Retry**. Die leichte Modulo-Verzerrung ist unkritisch (kein Sicherheits-Token; die DB garantiert Eindeutigkeit).
+
+**Kollisions-sicherer Insert** ([generate/route.ts](app/api/portal/orders/[id]/generate/route.ts), Insert-Zweig): der Booklet-Insert läuft in einer Schleife (max. `SHORT_CODE_MAX_ATTEMPTS = 5`) — bei einem `23505` **auf `short_code`** (erkannt an `error.code === "23505"` + `short_code` in `message`/`details`) wird ein **neuer Code** generiert und erneut versucht; jeder **andere** Fehler bricht sofort ab. `order_id`-Kollision ist durch den vorgelagerten `existing`-Check ausgeschlossen, `access_token`-Kollision bei 24 Byte praktisch unmöglich → ein `23505` hier betrifft den Kurzcode. Der **Re-Generate-Pfad (Update-Zweig)** lässt `short_code` unberührt (bestehender Code/Token bleiben; alte Booklets ohne Code behalten keinen — Fallback greift).
+
+### Redirect-Route ([app/s/[code]/page.tsx](app/s/[code]/page.tsx))
+
+Server Component (`force-dynamic`), **öffentlich, KEINE Session** (liegt nicht unter `/portal`, Middleware-Guard greift nicht). Schlägt `short_code` über **`service_role`** nach (öffentlich, kein User-Kontext — analog zum `/b/[token]`-Read), **liest NUR** `access_token` (kein Schreiben, gibt außer dem Redirect nichts preis) und leitet via `redirect()` (307) auf `/b/<access_token>` weiter. Nicht gefunden ⇒ `notFound()` (Next-404-Seite, kein Stacktrace). Eine **Page** statt Route-Handler bewusst, damit `notFound()` die saubere 404-Seite rendert. **Token bleibt alleiniger Zugriffsschutz** (§14.2) — der Code ist kein Auth-Gate.
+
+### §9d-Marker durchgereicht (Entscheidung: „§9d wahren, alles kürzen")
+
+Der Redirect **reicht den Kunden-Marker `?c=1` durch** (`isCustomerViewParam` aus [customer-view.ts](lib/booklet/customer-view.ts) wiederverwendet): ein **markierter** Kurzlink (`/s/<code>?c=1`, E-Mail/QR) landet in der **Kunden-Sicht** (volle Teilen-Sektion); ein **nackter** Kurzlink (`/s/<code>`, vom Kunden geteilt) in der **Empfänger-Sicht** (ohne Teilen-/Google-Bewertungs-Sektion). So bleibt das §9d/§8.6-Verhalten (kein Bewertungs-Prompt für Nicht-Kunden, Google-ToS) **intakt**, obwohl alle Links gekürzt werden. (Die `&p=1`-No-Track-Vorschau-Links im Portal werden **nicht** über den Kurzlink geführt — sie tragen den `p=1`-Marker, den der Redirect nicht durchreicht, und bleiben darum die langen `/b/...?c=1&p=1`-Links.)
+
+### Zentraler Link-Helfer ([lib/booklet/share-link.ts](lib/booklet/share-link.ts))
+
+`bookletShareLink({ base, accessToken, shortCode, customerView })` — die **einzige Quelle** dafür, welcher Link geteilt/versendet wird: `shortCode` gesetzt ⇒ `${base}/s/<code>`, sonst Fallback `${base}/b/<token>` (alte Booklets). `customerView` hängt den `?c=1`-Marker an (true für E-Mail/QR, false für die Share-Bar). Plain-Modul (kein `service_role`/Secret) → server-seitig überall importierbar; `base` bleibt beim Aufrufer (`bookletBaseUrl` / Request-Origin, unverändert). **Eingesetzt an allen Versand-/Teilen-Stellen:**
+
+- **E-Mail** — [deliver/route.ts](app/api/portal/orders/[id]/deliver/route.ts) + Webhook-Deliver-Pfad [webhook/[secret]/route.ts](app/api/webhook/[secret]/route.ts): laden zusätzlich `short_code`, bauen `bookletUrl` über den Helfer (`customerView: true`). [booklet-email.ts](lib/email/booklet-email.ts) nutzt diese eine URL bereits für **Button-href UND sichtbaren Link-Text** ⇒ beide werden automatisch der Kurzlink.
+- **QR** — [qr/page.tsx](app/portal/orders/[id]/qr/page.tsx): lädt `short_code`, kodiert den Kurzlink (`customerView: true`) statt des langen Links.
+- **Share-Bar (WhatsApp / Kopieren / Story teilen)** — [load.ts](lib/booklet/load.ts) reicht `shortCode` in `PublicBookletData` durch; [b/[token]/page.tsx](app/b/[token]/page.tsx) baut `storyUrl` über den Helfer (`customerView: false`, **nackt**). [share-bar.tsx](app/b/[token]/share-bar.tsx) unverändert — sie bekommt die (nun kurze, nackte) `storyUrl` über die bestehende Prop.
+
+`pnpm typecheck` + `pnpm build` grün.
+
+---
+
+> Nächste Migration: **0009**.
+
+> **WICHTIG:** Migration 0008 (`booklets.short_code`) muss vor dem Live-Gang manuell im Supabase-SQL-Editor angewendet werden (+ Verify-Gate ausführen), bevor die Generierung `short_code` schreibt bzw. der `/s/<code>`-Redirect ihn liest. (Migrationen 0006 `analytics_events` + 0007 `orders.short_summary` ebenfalls, falls noch nicht geschehen.)

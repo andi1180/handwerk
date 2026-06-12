@@ -7,11 +7,15 @@ import { generateIntro, IntroParseError } from "@/lib/ai/intro";
 import { generateReviewDraft } from "@/lib/ai/review";
 import { buildIgCaption } from "@/lib/booklet/ig-caption";
 import { generateAccessToken } from "@/lib/booklet/token";
+import { generateShortCode } from "@/lib/booklet/short-code";
 
 /** Echte Fehlermeldung für die Server-Logs (Vercel) extrahieren. */
 function errMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
+
+/** Wie oft ein neuer short_code bei (sehr seltener) UNIQUE-Kollision versucht wird. */
+const SHORT_CODE_MAX_ATTEMPTS = 5;
 
 /**
  * POST /api/portal/orders/[id]/generate — erzeugt die Booklet-Daten eines
@@ -209,7 +213,11 @@ export async function POST(
   } else {
     // reel_url/image_urls/expires_at bleiben null (8b/9). review_draft/ig_caption
     // werden jetzt mitgeschrieben (9b). web_story_ready = true: renderbar (8a-2).
-    const { error: insertError } = await service.from("booklets").insert({
+    // short_code (Block C): kurzer Kurzlink-Code, kollisions-sicher. order_id-
+    // Kollision ist oben (existing-Check) ausgeschlossen, access_token-Kollision
+    // bei 24 Byte praktisch unmöglich → ein 23505 hier betrifft den short_code:
+    // neuen Code generieren + erneut versuchen (jeder andere Fehler bricht ab).
+    const bookletRow = {
       order_id: order.id,
       business_id: order.business_id,
       access_token: token,
@@ -219,12 +227,29 @@ export async function POST(
       ig_caption: igCaption,
       language: order.language,
       web_story_ready: true,
-    });
-    if (insertError) {
+    };
+
+    let saved = false;
+    let lastMessage = "unknown";
+    for (let attempt = 0; attempt < SHORT_CODE_MAX_ATTEMPTS; attempt++) {
+      const { error } = await service
+        .from("booklets")
+        .insert({ ...bookletRow, short_code: generateShortCode() });
+      if (!error) {
+        saved = true;
+        break;
+      }
+      lastMessage = error.message;
+      const shortCodeCollision =
+        error.code === "23505" &&
+        `${error.message} ${error.details ?? ""}`.includes("short_code");
+      if (!shortCodeCollision) break; // anderer Fehler → nicht weiter versuchen
+    }
+    if (!saved) {
       console.error("generate: booklet insert failed", {
         order_id: order.id,
         step: "booklet_insert",
-        message: insertError.message,
+        message: lastMessage,
       });
       return NextResponse.json({ error: "upsert_failed" }, { status: 500 });
     }

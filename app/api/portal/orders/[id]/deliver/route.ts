@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { getCurrentBusiness } from "@/lib/auth/current-business";
-import { CUSTOMER_VIEW_QUERY } from "@/lib/booklet/customer-view";
+import { bookletShareLink } from "@/lib/booklet/share-link";
 import { sendBookletEmail } from "@/lib/email/booklet-email";
 
 /** Echte Fehlermeldung für die Server-Logs (Vercel) extrahieren. */
@@ -90,9 +90,13 @@ export async function POST(
   // Booklet (access_token) über RLS laden — Mitglieder dürfen booklets lesen.
   const { data: booklet } = await supabase
     .from("booklets")
-    .select("id, access_token")
+    .select("id, access_token, short_code")
     .eq("order_id", order.id)
-    .maybeSingle<{ id: string; access_token: string }>();
+    .maybeSingle<{
+      id: string;
+      access_token: string;
+      short_code: string | null;
+    }>();
   if (!booklet) {
     console.error("deliver: booklet missing", {
       order_id: order.id,
@@ -160,7 +164,14 @@ export async function POST(
   if (order.customer_email) {
     try {
       const base = bookletBaseUrl(request);
-      const bookletUrl = `${base}/b/${booklet.access_token}?${CUSTOMER_VIEW_QUERY}`;
+      // Block C: kurzer Kurzlink (Fallback auf den langen /b/-Link für alte
+      // Booklets ohne Code). customerView=true → ?c=1 (volle Kunden-Sicht).
+      const bookletUrl = bookletShareLink({
+        base,
+        accessToken: booklet.access_token,
+        shortCode: booklet.short_code,
+        customerView: true,
+      });
       await sendBookletEmail({
         to: order.customer_email,
         customerName: order.customer_name,

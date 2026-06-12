@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import QRCode from "qrcode";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentBusiness } from "@/lib/auth/current-business";
-import { CUSTOMER_VIEW_QUERY } from "@/lib/booklet/customer-view";
+import { bookletShareLink } from "@/lib/booklet/share-link";
 import { DEFAULT_LOCALE, t } from "@/lib/i18n";
 import { QrPrintButton } from "./qr-print-button";
 
@@ -63,9 +63,9 @@ export default async function QrPrintPage({
   // Booklet (access_token) über RLS — Mitglieder dürfen booklets lesen.
   const { data: booklet } = await supabase
     .from("booklets")
-    .select("access_token")
+    .select("access_token, short_code")
     .eq("order_id", order.id)
-    .maybeSingle<{ access_token: string }>();
+    .maybeSingle<{ access_token: string; short_code: string | null }>();
   if (!booklet) notFound();
 
   const h = await headers();
@@ -74,8 +74,14 @@ export default async function QrPrintPage({
   const base = bookletBaseUrl(host, proto);
 
   // KUNDEN-Link (Marker `?c=1`, §9d): der Empfänger sieht die volle Kunden-Sicht
-  // inkl. Teilen-Sektion — wie der E-Mail-Link.
-  const customerUrl = `${base}/b/${booklet.access_token}?${CUSTOMER_VIEW_QUERY}`;
+  // inkl. Teilen-Sektion — wie der E-Mail-Link. Block C: kurzer Kurzlink (Fallback
+  // auf den langen /b/-Link für alte Booklets ohne Code).
+  const customerUrl = bookletShareLink({
+    base,
+    accessToken: booklet.access_token,
+    shortCode: booklet.short_code,
+    customerView: true,
+  });
 
   // QR server-seitig als SVG. errorCorrectionLevel 'M' = robust gegen leichte
   // Druck-/Scan-Fehler; schwarz auf weiß (Thermodruck ist S/W).
