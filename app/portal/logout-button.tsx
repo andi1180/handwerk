@@ -6,16 +6,27 @@ import { createClient } from "@/lib/supabase/client";
 import { DEFAULT_LOCALE, t } from "@/lib/i18n";
 
 /**
- * Meldet den Nutzer ab und leitet zurück zum Login.
- * `compact` = kompakter Icon-Button für die mobile Top-Bar; sonst der
- * vollbreite Text-Button der Desktop-Sidebar.
+ * Meldet den Nutzer ab und leitet zurück zum Login. Mit Soft-Confirm
+ * (`window.confirm`) — ein versehentlicher Klick beendet die Session nicht.
+ * Kein `<form>`: reiner `onClick`-Handler + State.
+ *
+ * `variant`:
+ *  - `full` (Default) — vollbreiter Text-Button, unten in der Desktop-Sidebar.
+ *  - `tab`  — als Eintrag der mobilen Bottom-Tab-Nav (Icon + Label, dezent,
+ *             optisch wie die übrigen Tabs).
  */
-export default function LogoutButton({ compact = false }: { compact?: boolean }) {
+export default function LogoutButton({
+  variant = "full",
+}: {
+  variant?: "full" | "tab";
+}) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
 
   const handleLogout = async () => {
     if (loading) return;
+    // Soft-Confirm vor dem Session-Ende (Konvention im Projekt: window.confirm).
+    if (!window.confirm(t(DEFAULT_LOCALE, "nav.logoutConfirm"))) return;
     setLoading(true);
     const supabase = createClient();
     await supabase.auth.signOut();
@@ -25,23 +36,18 @@ export default function LogoutButton({ compact = false }: { compact?: boolean })
 
   const label = t(DEFAULT_LOCALE, "nav.logout");
 
-  if (compact) {
+  if (variant === "tab") {
     return (
       <button
         type="button"
-        className="btn-outline"
+        className="portal-tab"
         aria-label={label}
-        title={label}
-        style={{
-          flexShrink: 0,
-          padding: 8,
-          border: "none",
-          opacity: loading ? 0.7 : 1,
-        }}
+        style={{ opacity: loading ? 0.6 : 1 }}
         disabled={loading}
         onClick={() => void handleLogout()}
       >
         <LogoutIcon />
+        {label}
       </button>
     );
   }

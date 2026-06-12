@@ -155,7 +155,10 @@ export default async function OrdersPage({
 
         {showFilter ? (
           <>
-            <OrderStatusFilter value={activeStatus ?? "all"} />
+            <OrderStatusFilter
+              value={activeStatus ?? "all"}
+              quick={activeQuick}
+            />
             <Link href="/portal/orders/new" className="btn-dark orders-new-btn">
               {t(DEFAULT_LOCALE, "orders.new")}
             </Link>

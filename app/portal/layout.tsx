@@ -60,10 +60,10 @@ export default async function PortalLayout({
         </div>
       </aside>
 
-      {/* Mobile: schlanke Top-Bar (auf Desktop per CSS ausgeblendet). */}
+      {/* Mobile: schlanke Top-Bar (auf Desktop per CSS ausgeblendet). Logout
+          wohnt jetzt in der Bottom-Tab-Nav (dezent), nicht mehr hier oben. */}
       <header className="portal-topbar">
         <span className="portal-topbar-brand">{business.name}</span>
-        <LogoutButton compact />
       </header>
 
       <main className="portal-main">{children}</main>

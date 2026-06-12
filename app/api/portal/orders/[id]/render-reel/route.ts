@@ -64,6 +64,10 @@ const MAX_CLIP_SECONDS = 6;
  *  muss lesbar sein. Outro bleibt knapp (nur Marke + ein paar Zeilen). */
 const INTRO_SECONDS = 4;
 const OUTRO_SECONDS = 2.5;
+/** Status, in denen ein Reel renderbar ist (Booklet existiert) — FIX 7.1: auch
+ *  nach dem Versand, damit ein vor dem Render ausgelieferter Auftrag keine
+ *  Sackgasse ist. Der Order-Status wird vom Render NICHT verändert. */
+const RENDERABLE_STATUSES = ["generated", "sent", "viewed", "shared"];
 
 type OrderRow = { id: string; business_id: string; status: string };
 type BookletRow = {
@@ -131,8 +135,15 @@ export async function POST(
     return NextResponse.json({ error: "not_found" }, { status: 404 });
   }
 
-  // Reel erst nach der Generierung — vorher gibt es kein Booklet/Intro.
-  if (order.status !== "generated") {
+  // Reel ist ab der Generierung renderbar — AUCH nach dem Versand (FIX 7.1,
+  // REVIEW): liefert ein Betrieb VOR dem Reel-Render aus (Status → sent, nicht
+  // mehr reopenbar), bliebe das Reel sonst dauerhaft un-renderbar (Sackgasse).
+  // Erlaubt sind alle Stufen, in denen ein Booklet existiert: generated, sent,
+  // viewed, shared. WICHTIG: Dieser Render erzeugt NUR das Reel-Artefakt
+  // (booklets.reel_* + Storage) und lässt den Order-STATUS UNBERÜHRT — kein
+  // Zurücksetzen auf `generated`, kein Nachversand, keine erneute E-Mail. Das
+  // Reel erscheint im bestehenden Booklet unter demselben Link.
+  if (!RENDERABLE_STATUSES.includes(order.status)) {
     return NextResponse.json({ error: "invalid_status" }, { status: 409 });
   }
 

@@ -111,9 +111,13 @@ export async function POST(
   //    Doppel-Versand bei Races; ein zweiter Klick trifft 0 Zeilen). picked_up_at
   //    mit auf null: ein etwaiges Warn-Flag „abgeholt, noch nicht versendet"
   //    (Block C / Schritt 2) verschwindet, sobald nachversendet wurde.
-  const { error: statusError } = await supabase
+  //    `count: "exact"` (REVIEW 3.1): bei Doppelklick/Race passieren zwei Requests
+  //    den `generated`-Guard oben, der erste setzt `sent`, der zweite trifft 0
+  //    Zeilen — exakt wie der Webhook-Pfad (handlePickedUp) frühzeitig abbrechen,
+  //    BEVOR Billing-Event + Kunden-E-Mail ein zweites Mal laufen.
+  const { count, error: statusError } = await supabase
     .from("orders")
-    .update({ status: "sent", picked_up_at: null })
+    .update({ status: "sent", picked_up_at: null }, { count: "exact" })
     .eq("id", order.id)
     .eq("status", "generated");
   if (statusError) {
@@ -123,6 +127,11 @@ export async function POST(
       message: statusError.message,
     });
     return NextResponse.json({ error: "status_failed" }, { status: 500 });
+  }
+  if (!count) {
+    // Race verloren — bereits ausgeliefert. Keine Nebenwirkungen (Billing/E-Mail)
+    // wiederholen; aus Aufrufer-Sicht ist der Auftrag versendet.
+    return NextResponse.json({ sent: true, alreadySent: true }, { status: 200 });
   }
 
   // 2. booklets.sent_at = now (AUTHENTICATED, booklets_update). Nicht-blockierend:

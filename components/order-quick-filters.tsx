@@ -1,6 +1,10 @@
 import Link from "next/link";
 import { DEFAULT_LOCALE, t } from "@/lib/i18n";
-import { QUICK_FILTERS, type QuickFilter } from "@/lib/orders/filters";
+import {
+  QUICK_FILTERS,
+  buildOrdersUrl,
+  type QuickFilter,
+} from "@/lib/orders/filters";
 
 /**
  * Drei Schnellfilter-Buttons über der Auftragsliste (Block C / Schritt 3).
@@ -38,7 +42,12 @@ export function OrderQuickFilters({ active }: { active: QuickFilter | null }) {
         return (
           <Link
             key={key}
-            href={isActive ? "/portal/orders" : `/portal/orders?quick=${key}`}
+            href={
+              // buildOrdersUrl als EINE URL-Quelle: aktiver Quick ⇒ nackte Liste
+              // (Toggle aus), sonst ?quick=<key> (droppt ?status=). Filterwechsel
+              // lässt ?page= weg ⇒ zurück auf Seite 1.
+              isActive ? buildOrdersUrl({}) : buildOrdersUrl({ quick: key })
+            }
             className="quick-filter"
             data-active={isActive}
             aria-current={isActive ? "true" : undefined}

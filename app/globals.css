@@ -261,7 +261,10 @@ body {
 }
 
 /* Ein Tab-Eintrag — immer im DOM (Layout teilt die Items), aber nur in der
-   Bottom-Nav sichtbar (die selbst nur auf Mobile angezeigt wird). */
+   Bottom-Nav sichtbar (die selbst nur auf Mobile angezeigt wird). Gilt für
+   <a> (Navigation) UND <button> (Logout-Tab) gleichermaßen — die Reset-Regeln
+   (background/border/font/cursor) lassen den Button optisch wie ein Link-Tab
+   wirken. */
 .portal-tab {
   flex: 1;
   display: flex;
@@ -272,8 +275,12 @@ body {
   padding: 8px 4px;
   font-size: 11px;
   font-weight: 600;
+  font-family: inherit;
   text-decoration: none;
   color: var(--text-secondary);
+  background: none;
+  border: none;
+  cursor: pointer;
 }
 
 .portal-tab[data-active="true"] {

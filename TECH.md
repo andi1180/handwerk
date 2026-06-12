@@ -2303,6 +2303,30 @@ Neue Schlüssel in [lib/i18n/de.ts](lib/i18n/de.ts) (`orders.*`): `quickLabel`, 
 
 ---
 
+## Pre-E2E-Fixes (Review-Befunde 3.1 + 7.1 + zwei UX-Bugs)
+
+Vier gezielte Korrekturen vor dem End-to-End-Test (Befunde aus [REVIEW.md](REVIEW.md)). **Keine Migration, kein Webhook-Pfad geändert.** Isolationsregeln unangetastet (`business_id` aus Session/RLS, `service_role` nur serverseitig, kein `<form>`, kein `any`).
+
+### Fix 1 — Deliver-Doppelversand-Schutz ([deliver/route.ts](app/api/portal/orders/[id]/deliver/route.ts))
+
+REVIEW 3.1 (mittel): Das `generated→sent`-Update prüfte **nicht**, ob eine Zeile getroffen wurde. Bei Doppelklick/Race lasen zwei Requests `status='generated'`, beide passierten den Guard, der zweite traf 0 Zeilen — `statusError` blieb `null` und der Handler lief weiter zu **doppeltem Billing-Event** + **zweiter Kunden-E-Mail**. Fix **exakt wie der Webhook-Pfad** (`handlePickedUp`): das Update läuft jetzt mit `{ count: "exact" }`; `count === 0` ⇒ sofort `{ sent: true, alreadySent: true }` (200) zurück, **bevor** `billing_events`-Insert und `sendBookletEmail` laufen. Der `picked_up_at = null`-Reset im selben Update bleibt erhalten.
+
+### Fix 2 — Status-Dropdown ↔ Quick-Filter synchronisiert ([order-status-filter.tsx](components/order-status-filter.tsx), [order-quick-filters.tsx](components/order-quick-filters.tsx), [orders/page.tsx](app/portal/orders/page.tsx))
+
+UX-Bug: Bei aktivem Quick-Filter zeigte das Status-Dropdown „Alle"; ein erneutes Wählen von „Alle" war ein **No-op** (das HTML-`<select>` feuert kein `onChange` für den bereits gesetzten Wert) — zurück zur ungefilterten Liste ging nur umständlich (erst anderen Status, dann „Alle"). **Ursache war nicht die URL-Baulogik** (der „Alle"-Pfad ging schon immer auf die nackte `/portal/orders`), sondern dass „Alle" gar nicht erst auslösbar war. Fix: Beide Filter-Komponenten bauen ihre Ziel-URL jetzt über **`buildOrdersUrl`** (eine Quelle) — jede Dropdown-Wahl droppt damit garantiert `?quick=`, jede Quick-Wahl `?status=`. Damit „Alle" auch bei aktivem Quick **wählbar** ist, zeigt das Dropdown dann eine **deaktivierte Platzhalter-Option** (`__quick__`, Label `orders.filterQuickActive`) als ausgewählten Wert statt „Alle" — so ist „Alle" ein echter Zustandswechsel und setzt **beide Achsen in EINEM Schritt** zurück. `onChange` nutzt `isOrderStatus(next)` (filtert „all" UND den Platzhalter aus ⇒ `status: null` ⇒ nackte Liste; kein Cast, kein `any`). Die Seite reicht `quick={activeQuick}` zusätzlich an `<OrderStatusFilter>`.
+
+### Fix 3 — Logout aus der Top-Bar in die Bottom-Tab-Nav + Soft-Confirm ([logout-button.tsx](app/portal/logout-button.tsx), [layout.tsx](app/portal/layout.tsx), [portal-nav.tsx](app/portal/portal-nav.tsx), [globals.css](app/globals.css))
+
+Der prominente Logout-Button der mobilen Top-Bar (`<LogoutButton compact />`) ist **entfernt**; die Top-Bar zeigt nur noch den Betriebsnamen. Logout wohnt jetzt **dezent als vierter Tab** in der Bottom-Tab-Nav (`PortalTabNav` rendert `<LogoutButton variant="tab" />` nach den drei Nav-Items — Icon + Label, inaktiv-Farbe wie die übrigen Tabs). `LogoutButton`: `compact: boolean` → `variant: "full" | "tab"` (`full` = vollbreiter Sidebar-Button unverändert, `tab` = `<button className="portal-tab">`). **Soft-Confirm** vor dem Session-Ende: `window.confirm(t("nav.logoutConfirm"))` im `onClick`-Handler (Projekt-Konvention wie Deliver/Finalize/Media-Delete; kein `<form>`, State + onClick) — greift in **beiden** Varianten (auch der Desktop-Sidebar-Logout fragt jetzt nach). CSS: `.portal-tab` bekam `background:none; border:none; font-family:inherit; cursor:pointer`, damit die `<button>`-Variante optisch identisch zu den `<a>`-Tabs ist. Neuer i18n-Schlüssel `nav.logoutConfirm`.
+
+### Fix 4 — Reel auch nach dem Versand renderbar ([render-reel/route.ts](app/api/portal/orders/[id]/render-reel/route.ts), [orders/[id]/page.tsx](app/portal/orders/[id]/page.tsx))
+
+REVIEW 7.1 (UX-Sackgasse): Reel-Render war nur bei `status='generated'` erlaubt (409 sonst). Liefert ein Betrieb **vor** dem Reel-Render aus (Status → `sent`, nicht mehr reopenbar), blieb das Reel **dauerhaft un-renderbar**. Fix: Der 409-Guard erlaubt jetzt **`RENDERABLE_STATUSES = [generated, sent, viewed, shared]`** (alle Stufen, in denen ein Booklet existiert). **KRITISCH — Reel-Render status-unabhängig ab `generated`, Order-Status UNBERÜHRT:** der Render erzeugt ausschließlich das Reel-Artefakt (`booklets.reel_*` + Storage), er setzt den Order-Status **nicht** zurück auf `generated` und löst **keinen** Statuswechsel aus — **kein Nachversand, keine erneute E-Mail**. Das Reel erscheint im **bestehenden** Booklet unter demselben Link (der Kunde sieht es beim nächsten Öffnen). Damit der Route-Guard auch erreichbar ist, surface die Detailseite den `<ReelButton>` jetzt für `canRenderReel = generated|sent|viewed|shared` (statt nur `generated`); Booklet-/Reel-Daten + die `ready`-Signed-URL werden für alle diese Stufen geladen. `reel-status`-Poll war bereits status-agnostisch.
+
+`pnpm typecheck` + `pnpm build` grün.
+
+---
+
 > Nächste Migration: **0010**.
 
 > **WICHTIG:** Migration 0009 (`orders.picked_up_at`) muss vor dem Live-Gang manuell im Supabase-SQL-Editor angewendet werden (+ Verify-Gate ausführen), sonst scheitert das `picked_up_at`-Update im Webhook — es bleibt zwar non-fatal, aber der Warn-Badge erscheint nie. (Migration 0008 `booklets.short_code` ebenso, falls noch nicht geschehen; 0006 `analytics_events` + 0007 `orders.short_summary` ebenfalls.)

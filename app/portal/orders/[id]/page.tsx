@@ -75,15 +75,27 @@ export default async function OrderDetailPage({
   const isGenerated = order.status === "generated";
   const isSent = order.status === "sent";
 
+  // Reel ist ab der Generierung renderbar — auch nach dem Versand
+  // (sent/viewed/shared). FIX 7.1 (REVIEW): liefert ein Betrieb VOR dem
+  // Reel-Render aus, wäre das Reel sonst dauerhaft un-renderbar (Sackgasse).
+  // Der Render lässt den Order-Status unberührt; das Reel erscheint im
+  // bestehenden Booklet unter demselben Link (kein Nachversand, keine E-Mail).
+  const canRenderReel =
+    isGenerated ||
+    isSent ||
+    order.status === "viewed" ||
+    order.status === "shared";
+
   // Booklet-Token für den Vorschau-Link (8a-2) + Reel-Status (8b-1a) + sent_at
   // (9c-1) laden. RLS lässt Mitglieder die booklets-Row lesen — kein service_role
-  // nötig. Relevant ab `generated`. reel_status ist persistent (Reload zeigt den
-  // Render-Stand); bei `ready` zusätzlich eine frische Signed-URL des Reels.
+  // nötig. Relevant ab `generated` (auch nach Versand für den Reel-Render).
+  // reel_status ist persistent (Reload zeigt den Render-Stand); bei `ready`
+  // zusätzlich eine frische Signed-URL des Reels.
   let bookletToken: string | null = null;
   let reelStatus: ReelStatus = "pending";
   let reelUrl: string | null = null;
   let sentAt: string | null = null;
-  if (isGenerated || isSent) {
+  if (canRenderReel) {
     const { data: booklet } = await supabase
       .from("booklets")
       .select("access_token, reel_status, reel_url, sent_at")
@@ -97,7 +109,7 @@ export default async function OrderDetailPage({
     bookletToken = booklet?.access_token ?? null;
     reelStatus = booklet?.reel_status ?? "pending";
     sentAt = booklet?.sent_at ?? null;
-    if (isGenerated && reelStatus === "ready" && booklet?.reel_url) {
+    if (reelStatus === "ready" && booklet?.reel_url) {
       const { data } = await supabase.storage
         .from("order-media")
         .createSignedUrl(booklet.reel_url, SIGNED_URL_TTL_SECONDS);
@@ -260,8 +272,11 @@ export default async function OrderDetailPage({
         <GenerateButton orderId={order.id} mediaCount={media.length} />
       ) : null}
 
-      {/* Echtes Foto-Reel (nur Status generated, 8b-1a): async Render + Poll. */}
-      {isGenerated ? (
+      {/* Echtes Foto-Reel (8b-1a): async Render + Poll. Ab `generated` und AUCH
+          nach dem Versand (FIX 7.1) — so lässt sich ein Reel nachträglich
+          erzeugen, falls vor dem Render ausgeliefert wurde. Der Render ändert den
+          Order-Status nicht; das Reel erscheint im bestehenden Booklet-Link. */}
+      {canRenderReel ? (
         <ReelButton
           orderId={order.id}
           initialStatus={reelStatus}

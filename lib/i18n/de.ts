@@ -52,6 +52,7 @@ export const de = {
     orders: "Aufträge",
     settings: "Einstellungen",
     logout: "Abmelden",
+    logoutConfirm: "Wirklich abmelden?",
   },
   orders: {
     title: "Aufträge",
@@ -60,6 +61,7 @@ export const de = {
     emptyFiltered: "Keine Aufträge für diese Auswahl.",
     filterLabel: "Status",
     filterAll: "Alle",
+    filterQuickActive: "Schnellfilter aktiv",
     quickLabel: "Schnellfilter",
     quickFlagged: "Geflaggt",
     quickDrafts: "Entwürfe",

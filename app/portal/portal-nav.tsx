@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { DEFAULT_LOCALE, t } from "@/lib/i18n";
 import type { Dictionary } from "@/lib/i18n";
 import type { DictKey } from "@/lib/i18n/types";
+import LogoutButton from "./logout-button";
 
 /** Ein Nav-Eintrag: Ziel, i18n-Label-Schlüssel, Aktiv-Erkennung und Tab-Icon. */
 type NavItem = {
@@ -74,7 +75,9 @@ export default function PortalNav() {
 /**
  * App-artige Bottom-Tab-Nav (Client Component) — nur auf Mobile sichtbar (per
  * CSS in [app/globals.css]). Aktiver Tab = --gold (Icon + Text), inaktiv
- * --text-secondary. Teilt sich die Item-Definition mit der Sidebar.
+ * --text-secondary. Teilt sich die Item-Definition mit der Sidebar; ganz rechts
+ * der dezente Logout-Tab (mit Soft-Confirm) — er ersetzt den früheren
+ * Logout-Button der mobilen Top-Bar.
  */
 export function PortalTabNav() {
   const pathname = usePathname();
@@ -96,6 +99,7 @@ export function PortalTabNav() {
           </Link>
         );
       })}
+      <LogoutButton variant="tab" />
     </nav>
   );
 }
