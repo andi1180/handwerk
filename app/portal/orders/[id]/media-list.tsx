@@ -276,42 +276,32 @@ export function MediaList({
 
   return (
     <div>
-      {/* Mutations-Kopf (Reorder-/Auswahl-Hinweis + Alle-auswählen + Batch-Captions)
-          — im Abgeschlossen-Modus ausgeblendet. */}
+      {/* Aktions-Kopf — im Abgeschlossen-Modus ausgeblendet. Enthält nur noch zwei
+          gleich breite Buttons („Alle auswählen" + „Captions generieren"), die auf
+          schmalen Viewports umbrechen statt überzulaufen. Der Reorder-Hinweis sitzt
+          jetzt als dezenter Text UNTER dem Raster (siehe unten). */}
       {!readOnly ? (
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: 12,
-            marginBottom: 10,
-          }}
-        >
-          <p style={{ margin: 0, fontSize: 12, color: "var(--text-secondary)" }}>
-            {selectedCount > 0
-              ? t(DEFAULT_LOCALE, "captions.selected", { count: selectedCount })
-              : t(DEFAULT_LOCALE, "assembler.reorderHint")}
-          </p>
-          <div
-            style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}
-          >
+        <div style={{ marginBottom: 10 }}>
+          {selectedCount > 0 ? (
+            <p
+              style={{
+                margin: "0 0 8px",
+                fontSize: 12,
+                color: "var(--text-secondary)",
+              }}
+            >
+              {t(DEFAULT_LOCALE, "captions.selected", { count: selectedCount })}
+            </p>
+          ) : null}
+          <div className="media-actions">
             {/* Toggle: nichts ausgewählt ⇒ „Alle auswählen" (alle ohne Caption);
                 etwas ausgewählt ⇒ „Auswahl aufheben". So bleibt „alle captionen"
                 = zwei Taps. Versteckt, wenn nichts zu beschriften ist. */}
             {missingCount > 0 ? (
               <button
                 type="button"
+                className="btn-outline media-action-btn"
                 onClick={selectedCount > 0 ? clearSelection : selectAll}
-                style={{
-                  padding: "8px 10px",
-                  fontSize: 13,
-                  fontWeight: 600,
-                  color: "var(--text-secondary)",
-                  background: "transparent",
-                  border: "none",
-                  cursor: "pointer",
-                }}
               >
                 {selectedCount > 0
                   ? t(DEFAULT_LOCALE, "captions.deselectAll")
@@ -320,7 +310,7 @@ export function MediaList({
             ) : null}
             <button
               type="button"
-              className="btn-dark"
+              className="btn-dark media-action-btn"
               onClick={handleGenerate}
               disabled={disableGenerate}
               style={{
@@ -373,6 +363,14 @@ export function MediaList({
           </div>
         </SortableContext>
       </DndContext>
+
+      {/* Dezenter Bedien-Hinweis unter den Thumbnails (kein Button) — im
+          Abgeschlossen-Modus ohne Reorder ausgeblendet. */}
+      {!readOnly ? (
+        <p className="media-reorder-hint">
+          {t(DEFAULT_LOCALE, "assembler.reorderHint")}
+        </p>
+      ) : null}
 
       {notice ? (
         <div

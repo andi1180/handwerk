@@ -297,13 +297,16 @@ export const de = {
     sharing: "Wird vorbereitet…",
     // Titel/Text für navigator.share + WhatsApp-Deeplink (Kunden-Perspektive).
     shareTitle: "Mein Booklet",
-    message: "Schau dir das an:",
+    // Fester, schlichter Teilen-Text (kein dynamischer Kontext) — neugierig
+    // machend, nicht spammy. Sprache = Booklet-Sprache.
+    message: "Ein kleines Booklet zu meiner Maßarbeit – schau mal rein",
   },
   review: {
     // §8.6-PFLICHT: „Vorschlag, gern in deinen Worten anpassen" — NIE „Text
     // einfügen", und NIEMALS an eine Belohnung gekoppelt (harter Google-ToS-Verstoß).
-    button: "Google-Bewertung schreiben",
-    hint: "Vorschlag — pass ihn gern in deinen Worten an.",
+    // „Google" trägt im Button der farbige Wortmarken-Schriftzug, daher hier ohne.
+    button: "Bewertung schreiben",
+    hint: "Wir haben dir einen Bewertungstext vorbereitet und kopiert – einfach einfügen und gern in deinen Worten anpassen.",
     copied: "✓ Entwurf kopiert",
   },
   igCaption: {

@@ -273,22 +273,38 @@
   overflow: visible;
 }
 
+/* Die Teilen-Sektion sitzt als helle „Karte" über dem (oft unruhigen) Outro-
+   Hintergrund — so bleiben Texte/Buttons lesbar und das Outro-Design schimmert
+   ringsum durch (kompakt, nicht bildschirmfüllend). Innerhalb der Karte gelten
+   dunkle Schriftfarben (das Outro selbst ist hell auf dunkel). */
 .booklet-share {
+  /* TODO (später): Hintergrund-Deckkraft/-Farbe der Teilen-Karte pro Betrieb in
+     den Einstellungen konfigurierbar machen (aktuell fest ~88 % Weiß). */
+  --share-surface: rgba(255, 255, 255, 0.88);
+  --share-ink: #1a1814;
+  --share-ink-soft: rgba(26, 24, 20, 0.62);
+  --share-line: rgba(0, 0, 0, 0.13);
   width: 100%;
-  max-width: 340px;
+  max-width: 360px;
   margin-top: 18px;
+  padding: 15px 14px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
+  background: var(--share-surface);
+  border-radius: 18px;
+  box-shadow: 0 10px 34px rgba(0, 0, 0, 0.28);
+  -webkit-backdrop-filter: blur(3px);
+  backdrop-filter: blur(3px);
 }
 
 .booklet-share-heading {
   margin: 0 0 1px;
-  font-size: clamp(0.78rem, 3.2vw, 0.92rem);
+  font-size: clamp(0.82rem, 3.3vw, 0.95rem);
   font-weight: 700;
   letter-spacing: 0.01em;
-  color: var(--bk-ink);
-  opacity: 0.95;
+  text-align: center;
+  color: var(--share-ink);
 }
 
 /* Hauptaktion: Reel teilen — Branding-Farbe, prominent. */
@@ -336,13 +352,14 @@
   gap: 4px;
   min-height: 48px;
   padding: 7px 5px;
-  color: var(--bk-ink);
+  color: var(--share-ink);
   font-size: 0.72rem;
-  font-weight: 500;
+  font-weight: 600;
   text-align: center;
   cursor: pointer;
   user-select: none;
-  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.5);
+  border: 1px solid var(--share-line);
   border-radius: 14px;
   transition:
     border-color 0.15s ease,
@@ -350,7 +367,7 @@
 }
 .booklet-share-btn:hover {
   border-color: var(--bk-primary);
-  background: rgba(255, 255, 255, 0.06);
+  background: rgba(0, 0, 0, 0.04);
 }
 .booklet-share-btn svg {
   color: var(--bk-primary);
@@ -362,14 +379,13 @@
 /* --- IG-Caption-Vorschlag (Schritt 9b) — nahe „Reel teilen", zum Kopieren --- */
 .booklet-ig {
   width: 100%;
-  max-width: 340px;
   display: flex;
   flex-direction: column;
   gap: 8px;
   padding: 11px 13px;
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  border: 1px solid var(--share-line);
   border-radius: 14px;
-  background: rgba(255, 255, 255, 0.04);
+  background: rgba(0, 0, 0, 0.03);
 }
 .booklet-ig-head {
   display: inline-flex;
@@ -378,7 +394,7 @@
   font-size: 0.78rem;
   font-weight: 700;
   letter-spacing: 0.01em;
-  color: var(--bk-ink);
+  color: var(--share-ink);
 }
 .booklet-ig-head svg {
   color: var(--bk-primary);
@@ -389,8 +405,8 @@
   white-space: pre-line;
   font-size: 0.8rem;
   line-height: 1.5;
-  color: var(--bk-ink);
-  opacity: 0.9;
+  color: var(--share-ink);
+  opacity: 0.85;
 }
 .booklet-ig-copy {
   display: inline-flex;
@@ -401,8 +417,8 @@
   min-height: 34px;
   padding: 6px 13px;
   border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.22);
-  color: var(--bk-ink);
+  border: 1px solid var(--share-line);
+  color: var(--share-ink);
   font-size: 0.76rem;
   font-weight: 600;
   cursor: pointer;
@@ -413,7 +429,7 @@
 }
 .booklet-ig-copy:hover {
   border-color: var(--bk-primary);
-  background: rgba(255, 255, 255, 0.06);
+  background: rgba(0, 0, 0, 0.04);
 }
 .booklet-ig-copy svg {
   color: var(--bk-primary);
@@ -423,44 +439,49 @@
 /* --- Google-Bewertung (Schritt 9b, §8.6) — Vorschlag, NIE „einfügen"/Belohnung --- */
 .booklet-review {
   width: 100%;
-  max-width: 340px;
   display: flex;
   flex-direction: column;
   gap: 6px;
   margin-top: 2px;
 }
+/* Google-Bewertung — als weißer Button mit dezenter Erhebung hervorgehoben
+   (sticht aus den Outline-Sekundäraktionen heraus); der farbige „Google"-
+   Schriftzug macht ihn sofort erkennbar. */
 .booklet-review-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 9px;
-  min-height: 46px;
+  gap: 8px;
+  min-height: 48px;
   padding: 11px 18px;
   border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.22);
-  color: var(--bk-ink);
+  border: 1px solid var(--share-line);
+  background: #ffffff;
+  color: var(--share-ink);
   font-size: 0.92rem;
   font-weight: 600;
   cursor: pointer;
   user-select: none;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.12);
   transition:
     border-color 0.15s ease,
-    background 0.15s ease;
+    box-shadow 0.15s ease;
 }
 .booklet-review-btn:hover {
-  border-color: var(--bk-primary);
-  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(0, 0, 0, 0.28);
+  box-shadow: 0 3px 14px rgba(0, 0, 0, 0.16);
 }
-.booklet-review-btn svg {
-  color: var(--bk-primary);
-  flex-shrink: 0;
+/* Farbiger „Google"-Wortmarken-Schriftzug (kein offizielles Logo-Asset). */
+.booklet-google {
+  font-weight: 700;
+  font-size: 1.02rem;
+  letter-spacing: -0.01em;
 }
 .booklet-review-hint {
   margin: 0;
   font-size: 0.72rem;
   line-height: 1.4;
-  color: var(--bk-ink);
-  opacity: 0.7;
+  color: var(--share-ink-soft);
   text-align: center;
 }
 

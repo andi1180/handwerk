@@ -391,6 +391,29 @@ body {
   }
 }
 
+/* Aktions-Zeile über dem Raster: zwei gleich breite Buttons, die auf schmalen
+   Viewports (~380px) umbrechen statt über den Rand zu laufen. */
+.media-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.media-action-btn {
+  flex: 1 1 140px;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Dezenter Bedien-Hinweis unter den Thumbnails (kein Button). */
+.media-reorder-hint {
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+  text-align: center;
+}
+
 .media-tile {
   position: relative;
   aspect-ratio: 1 / 1;

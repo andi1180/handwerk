@@ -2144,6 +2144,30 @@ Die Auftragsliste (Server Component, AUTHENTICATED Client, RLS) lädt `short_sum
 
 ---
 
+## Block A — UI-Verbesserungen (Teilen-Sektion + Medien-Aktionen)
+
+Reine Frontend-Politur, **keine** DB/Migration/Webhook-Berührung. Vier Punkte:
+
+### Punkt 9 — Google-Bewertungs-Button mit Markenwiedererkennung ([app/b/[token]/share-bar.tsx](app/b/[token]/share-bar.tsx), [booklet.css](app/b/[token]/booklet.css))
+
+Der „Bewertung schreiben"-Button (im Outro-Share-Sheet) trägt jetzt einen farbigen **„Google"-Wortmarken-Schriftzug** (G blau, o rot, o gelb, g blau, l grün, e rot) statt des bisherigen Stern-Icons — sofort als Google erkennbar, **ohne** das offizielle Logo-Asset einzubetten (Markenrichtlinien): pro Buchstabe ein `<span>` mit Brand-Hex, `aria-hidden` (der lesbare Button-Text steht daneben). Komponente `GoogleWordmark` ersetzt `StarIcon`. Der Button ist als **weißer Button mit dezenter Erhebung** (`box-shadow`) gestylt und sticht damit aus den Outline-Sekundäraktionen heraus. i18n: `review.button` „Google-Bewertung schreiben" → **„Bewertung schreiben"** (das „Google" trägt nun der Schriftzug). **Hinweistext** (`review.hint`) kommuniziert den Clipboard-Mechanismus: der Entwurf wird bei Klick via `writeReview` ins Clipboard gelegt, dann das Google-Profil geöffnet — der Hinweis erklärt, dass nur noch eingefügt werden muss. **§8.6 eingehalten:** Framing „Vorschlag, in deinen Worten" bleibt, **kein** Belohnungs-Bezug.
+
+### Punkt 10 — Teilen-Sektion als helle, kompakte Karte ([booklet.css](app/b/[token]/booklet.css))
+
+Die gesamte `.booklet-share`-Sektion bekommt einen **halbtransparenten weißen Hintergrund** (`--share-surface: rgba(255,255,255,0.88)`), `border-radius: 18px`, dezenten Schatten + `backdrop-filter: blur(3px)` — eine „Karte", die sich vom (oft unruhigen) Outro-Hintergrund abhebt und Texte/Buttons lesbar macht. Da das Outro selbst hell-auf-dunkel ist, gelten **innerhalb der Karte dunkle Schriftfarben** (lokale CSS-Variablen `--share-ink`/`--share-ink-soft`/`--share-line`): Heading, Sekundär-Buttons (Story/WhatsApp/Link), IG-Panel und Review-Hint von Weiß auf Dunkel umgestellt; die Reel-Hauptaktion (Gold-BG, dunkler Text) bleibt unverändert. Karte ist **kompakt** (`max-width: 360px`, knappe Paddings/Gaps) und nimmt nicht die ganze Seite ein. **TODO-Kommentar** (nur Kommentar, NICHT gebaut): Hintergrund-Deckkraft/-Farbe der Karte soll künftig pro Betrieb in den Einstellungen konfigurierbar sein.
+
+### Punkt 11 — WhatsApp-/Teilen-Text fest und schlicht ([lib/i18n/de.ts](lib/i18n/de.ts))
+
+`share.message` „Schau dir das an:" → ein fester, schlichter Text **ohne** dynamischen Kontext (kein Kleidungsstück/Atelier-Name), neugierig machend statt spammy. Sprache = Booklet-Sprache. Wird sowohl im WhatsApp-Deeplink als auch im `navigator.share({ text })` der „Story teilen"-Aktion verwendet.
+
+### Punkt 13 — Medien-Aktionszeile aufgeräumt ([app/portal/orders/[id]/media-list.tsx](app/portal/orders/[id]/media-list.tsx), [globals.css](app/globals.css))
+
+Die Zeile über dem Thumbnail-Raster lief auf schmalen Viewports über den rechten Rand. Umbau: Der Bedien-Hinweis **„Halten zum Verschieben"** (`assembler.reorderHint`) ist aus der Aktionszeile **entfernt** und sitzt jetzt als dezenter, zentrierter Hinweistext (`.media-reorder-hint`) **UNTER** dem Raster (kein Button). Die Aktionszeile (`.media-actions`) enthält nur noch **zwei gleich breite Buttons** — „Alle auswählen" (`btn-outline`) + „Captions generieren" (`btn-dark`) — via `flex: 1 1 140px` + `flex-wrap`: sie teilen sich die Breite gleichmäßig und **stapeln** auf ~380px-Viewports statt überzulaufen (`min-width: 0` + `text-overflow: ellipsis` als zusätzliche Absicherung). Die Auswahl-Zähl-Info (`captions.selected`) steht als kleine Textzeile **über** den Buttons (nur bei Auswahl), nicht mehr in der Zeile. Button-Stile aus den bestehenden `btn-*`-Klassen (Konsistenz mit dem restlichen Design).
+
+`pnpm typecheck` + `pnpm build` grün.
+
+---
+
 > Nächste Migration: **0008**.
 
 > **WICHTIG:** Migration 0007 (`orders.short_summary`) muss vor dem Live-Gang manuell im Supabase-SQL-Editor angewendet werden (+ Verify-Gate ausführen), bevor die Kachel `short_summary` liest bzw. die Anlage-Pfade es schreiben. (Migration 0006 — `analytics_events` — ebenfalls, falls noch nicht geschehen.)

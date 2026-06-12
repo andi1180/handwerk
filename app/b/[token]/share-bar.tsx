@@ -243,7 +243,7 @@ export function ShareBar({
       {showReview ? (
         <div className="booklet-review">
           <Pressable className="booklet-review-btn" onPress={writeReview}>
-            <StarIcon />
+            <GoogleWordmark />
             <span>
               {copiedKey === "review"
                 ? t(locale, "review.copied")
@@ -404,20 +404,28 @@ function CopyIcon() {
   );
 }
 
-function StarIcon() {
+/**
+ * „Google" als farbiger Wortmarken-Schriftzug (G blau, o rot, o gelb, g blau,
+ * l grün, e rot) — sofort als Google erkennbar, ohne das offizielle Logo-Asset
+ * einzubetten (Markenrichtlinien). Rein dekorativ; der lesbare Button-Text steht
+ * daneben (`aria-hidden`).
+ */
+function GoogleWordmark() {
+  const letters: [string, string][] = [
+    ["G", "#4285F4"],
+    ["o", "#EA4335"],
+    ["o", "#FBBC05"],
+    ["g", "#4285F4"],
+    ["l", "#34A853"],
+    ["e", "#EA4335"],
+  ];
   return (
-    <svg
-      width={20}
-      height={20}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={1.8}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden
-    >
-      <path d="M12 3l2.7 5.5 6 .9-4.35 4.24 1.03 5.97L12 17.8l-5.38 2.8 1.03-5.97L3.3 9.4l6-.9L12 3z" />
-    </svg>
+    <span className="booklet-google" aria-hidden>
+      {letters.map(([ch, color], i) => (
+        <span key={i} style={{ color }}>
+          {ch}
+        </span>
+      ))}
+    </span>
   );
 }
