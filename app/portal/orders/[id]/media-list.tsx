@@ -276,6 +276,12 @@ export function MediaList({
 
   return (
     <div>
+      {/* Sanfte Trennlinie zwischen dem Capture-Button-Block (darüber) und der
+          Aktionszeile. Nur wenn mindestens ein Medium da ist — sonst würde sie
+          eine leere Zeile abtrennen. */}
+      {!readOnly && items.length > 0 ? (
+        <hr className="media-section-divider" />
+      ) : null}
       {/* Aktions-Kopf — im Abgeschlossen-Modus ausgeblendet. Enthält nur noch zwei
           gleich breite Buttons („Alle auswählen" + „Captions generieren"), die auf
           schmalen Viewports umbrechen statt überzulaufen. Der Reorder-Hinweis sitzt

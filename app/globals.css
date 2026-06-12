@@ -393,6 +393,13 @@ body {
 
 /* Aktions-Zeile über dem Raster: zwei gleich breite Buttons, die auf schmalen
    Viewports (~380px) umbrechen statt über den Rand zu laufen. */
+/* Sanfte Trennlinie zwischen Capture-Buttons und der Aktionszeile. */
+.media-section-divider {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 16px 0;
+}
+
 .media-actions {
   display: flex;
   flex-wrap: wrap;
