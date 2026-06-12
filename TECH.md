@@ -2019,7 +2019,12 @@ Neue Blöcke in [lib/i18n/de.ts](lib/i18n/de.ts): `register.*` (`title`/`intro`/
 
 ## Inbound-Webhook / roapp-Connector (§12)
 
-Vendor-neutraler Inbound-Webhook, der Aufträge **automatisch anlegt** (`order.created`) und **ausliefert** (`order.picked_up`). Additiv zum manuellen Pfad (§12.5). **Keine Migration** — `businesses.webhook_secret` existiert aus 0001. **Pro Betrieb, Secret-authentifiziert, tenant-gescoped** (§12.3 / §14.2).
+**✅ LIVE — beide Events end-to-end verifiziert.** Vendor-neutraler Inbound-Webhook, der Aufträge **automatisch anlegt** (`order.created`) und **ausliefert** (`order.picked_up`). Additiv zum manuellen Pfad (§12.5). **Keine Migration** — `businesses.webhook_secret` existiert aus 0001. **Pro Betrieb, Secret-authentifiziert, tenant-gescoped** (§12.3 / §14.2).
+
+**Verifiziert (end-to-end):**
+- `order.created` → Auftrag wird automatisch als `draft` angelegt (Name/E-Mail aus der roapp-API, `consent_given=false`, `external_ref=id_label`).
+- `order.picked_up` → Booklet-E-Mail geht raus, aber **nur** wenn API-`status.name === "Abgeholt"`; Zwischenstatus (z. B. „Fertig zur Abholung") lösen einen No-op aus (`noop_status`).
+- Auth via Pfad-Secret, Anreicherung über **einen** roapp-API-Call, Doppelversand-Schutz über defensiven Status-Filter + `count`-Check.
 
 ### Endpoint ([app/api/webhook/[secret]/route.ts](app/api/webhook/[secret]/route.ts), `POST`)
 
@@ -2063,9 +2068,11 @@ Die deliver-Logik ([app/api/portal/orders/[id]/deliver/route.ts](app/api/portal/
 - **Env:** `ROAPP_API_KEY` (server-only, neu) + optional `ROAPP_PICKED_UP_STATUS_NAME` — dokumentiert in [.env.example](.env.example). `BOOKLET_BASE_URL` existiert bereits.
 - **Secret setzen** (keine Migration, ops): [supabase/scripts/set_webhook_secret.sql](supabase/scripts/set_webhook_secret.sql) setzt per `gen_random_uuid()` ein Secret für **einen** Betrieb (`where business_email = …`, nur wenn `webhook_secret is null` ⇒ **überschreibt bestehende nie**) und liest es aus. Webhook-URL: `https://handwerk.valooro.com/api/webhook/<webhook_secret>`.
 
-### Offener Folgeschritt
+### Offene Folgeschritte
 
-- **`x-signature` (HMAC) wird NICHT geprüft** — das Pfad-Secret ist die Auth fürs MVP. Eine zusätzliche HMAC-Signaturprüfung des Payloads (gegen ein pro-Betrieb-Shared-Secret) ist ein sinnvoller Härtungs-Folgeschritt.
+1. **`x-signature` (HMAC) wird NICHT geprüft** — das Pfad-Secret ist die **einzige** Auth fürs MVP. Eine zusätzliche HMAC-Signaturprüfung des Payloads (gegen ein pro-Betrieb-Shared-Secret) ist ein sinnvoller Härtungs-Folgeschritt.
+2. **`item_description` bleibt bei der Auto-Anlage leer** — roapp-Custom-Field-IDs sind pro Betrieb verschieden, daher gibt es noch kein zuverlässiges `custom_fields`-Mapping. Folgeschritt: pro-Betrieb-Feld-Mapping, damit der KI-Kontext auch bei Auto-Aufträgen befüllt wird.
+3. **`ROAPP_API_KEY` ist global (Single-Tenant)** — ein Key für die ganze Instanz. Bei Betrieb #2 auf eine **pro-Betrieb-Spalte** (z. B. `businesses.roapp_api_key`) umstellen, damit jeder Betrieb seinen eigenen roapp-Account anbinden kann.
 
 ---
 
