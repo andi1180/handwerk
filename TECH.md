@@ -2076,4 +2076,47 @@ Die deliver-Logik ([app/api/portal/orders/[id]/deliver/route.ts](app/api/portal/
 
 ---
 
-> Nächste Migration: **0006**.
+## analytics_events-Fundament + roapp-Description + Intro-Umbau (Schritt 11)
+
+Drei zusammenhängende Änderungen: ein generisches Event-Fundament (Migration 0006), das Mapping des roapp-Beschreibungstexts in die Auto-Anlage, und der Umbau des KI-Intros auf einen zusammenhängenden Anrede-Absatz.
+
+### Migration 0006 — analytics_events ([supabase/migrations/0006_analytics_events.sql](supabase/migrations/0006_analytics_events.sql))
+
+Schlanke, betriebs-skopierte Ablage für **Sach-Events**, die weder Abrechnung (`billing_events`) noch Booklet-Interaktion (`booklet_events`) sind. Spalten: `id`, `business_id` (FK → businesses, `on delete cascade`), `event_type text not null`, `source text not null`, `external_ref text` (nullable), `payload jsonb not null default '{}'`, `created_at`. Indizes: `(business_id, created_at)`, `(business_id, event_type)`.
+
+**RLS-/GRANT-Stil EXAKT wie billing_events (0001):** RLS an; **eine** Policy `analytics_events_select` (SELECT für `authenticated`, `business_id` über `business_users` gescoped); `revoke all from anon/public`; Grants **nur** `select` für `authenticated` (**kein** INSERT/UPDATE/DELETE — Schreiben ausschließlich serverseitig über `service_role`); `service_role` voll. Verify-Gate [0006_analytics_events_checks.sql](supabase/verify/0006_analytics_events_checks.sql) (Spalten, RLS an, genau die eine SELECT-Policy, Grant-Matrix ohne anon, beide Indizes).
+
+**ZWEI nicht verhandelbare Eigenschaften** (im Migrations-Kommentar festgehalten):
+1. **RETENTION-FEST:** `analytics_events` wird vom Retention-Löschjob (§13.4) **NIEMALS** gelöscht — anders als `order_media`/`orders` (an die 12-Monats-Retention gekoppelt). **Aktuell existiert noch kein Retention-Cleanup-Job**; wird einer gebaut, MUSS er `analytics_events` explizit ausnehmen.
+2. **PII-FREI:** `payload` und `external_ref` enthalten **NIE** Name/E-Mail/Telefon — nur Sachtext (Art der Arbeit) und technische Referenzen (Auftragsnummer). Diese PII-Freiheit ist die **Bedingung** für die Retention-Ausnahme.
+
+**Offener Folgeschritt:** weitere Module schreiben künftig eigene `event_type`s in **dieselbe** Tabelle (z. B. KI-Generierungs-Telemetrie, Import-Quellen). Die Tabelle ist bewusst generisch (`event_type`/`source`/`payload`), kein `analytics_events`-pro-Domäne.
+
+### roapp-Beschreibungstext ([lib/roapp/client.ts](lib/roapp/client.ts))
+
+`RoappOrder` bekommt `raw_description: string | null`. Die Beschreibung steckt in `custom_fields` unter einer **betriebs-spezifischen Feld-ID** (Atelier Dax: `f842212`), **nicht hardcodet** → Env `ROAPP_DESCRIPTION_FIELD_ID` (Default `"f842212"`, neue Konstante `ROAPP_DESCRIPTION_FIELD_ID`). `parseRoappOrder` liest `order.custom_fields` defensiv (`asRecord`, **kein `any`**) und extrahiert via Helfer `readCustomField` den getrimmten String — deckt sowohl direkten String-Wert als auch `{ value: "…" }`-Objekt ab; leer/fehlend/Zahl ⇒ `null`. `.env.example` um `ROAPP_DESCRIPTION_FIELD_ID` ergänzt.
+
+### Webhook handleCreated befüllt item_description + analytics_event ([app/api/webhook/[secret]/route.ts](app/api/webhook/[secret]/route.ts))
+
+Im `order.created`-Branch, **nach** dem Idempotenz-Check:
+1. **`item_description` = `roappOrder.raw_description`** (parser-getrimmt, sonst `null`) — **ROH-Text, bewusst unverändert** (die KI filtert Zahlen/Maße/Kürzel erst bei der Generierung). `consent_given` bleibt `false` (§13.5), unverändert.
+2. **Zusätzlich** (nur wenn `raw_description` nicht leer): `analytics_events`-Insert via `service_role`, **NICHT-BLOCKIEREND** (wie der Billing-Insert im deliver-Pfad — Fehler ⇒ `console.error`, kein Abbruch): `business_id` = aufgelöste Betriebs-ID (**§14.2, NIE aus dem Payload**), `event_type='order_description'`, `source='roapp'`, `external_ref=id_label`, `payload={ raw_text: <raw_description> }`. **PII-frei.** Bei `already_exists` greift der frühe Return oben ⇒ hier wird nie doppelt geschrieben.
+
+### KI-Intro-Umbau ([lib/ai/intro.ts](lib/ai/intro.ts))
+
+Weg von der Ich-Perspektive („Ich habe bei {Betrieb} … lassen") hin zu einem **Geschenk-Text vom Atelier AN den Kunden**: das Modell schreibt den **GANZEN Absatz inkl. persönlicher Anrede** als **einen zusammenhängenden Text** (KEIN hartkodierter Anrede-Satz, der an KI-Text konkateniert wird).
+
+- **Neue Inputs:** `customerName` (`orders.customer_name`) → **Vorname** = erster Namensteil (trim, split, first), **WÖRTLICH** übernommen (Helfer `firstName`, korrigiert nie — „Doroyhea" bleibt „Doroyhea"; kein Vorname ⇒ Anrede ohne Namen). `itemDescription` als **gefilterter Kontext** (kann leer sein). `businessName` als Intro-Input **entfernt** (die Ich-Perspektive nutzte ihn; das Atelier wird jetzt nicht mehr namentlich im Anrede-Absatz genannt). `ai_context` (8a-1b) bleibt optionaler Fach-Kontext-Block.
+- **Prompt-Struktur** (in `orders.language`): TITEL (kurze Überschrift, ≤ ~6 Wörter, keine Anrede/Zahlen) **+** ABSATZ mit (1) Anrede „Hallo {Vorname}," — WÖRTLICH; (2) Einleitungssatz, dass dies das persönliche Booklet über die Schneiderarbeit an der Kleidung ist — Kleidungsstück **nur konkret nennen**, wenn es aus der Notiz **eindeutig** hervorgeht (Hose/Jacke/Kleid/Hemd/Bluse), sonst neutral „an deiner Kleidung" (lieber neutral als falsch raten); (3) beschreibender Detailteil aus Kundensicht („deine"/„dein"), keine Werbung. **Notiz-Regeln:** nur die Art der Arbeit extrahieren; Preise/Zahlen/Maße/Kürzel **strikt ignorieren** (KEINE Zahl im Text); Wortlaut/Stil **nicht** übernehmen.
+- **`title`/`description` bleiben erhalten** (`IntroResult` unverändert, → `booklets.intro_title`/`intro_description`): die Web-Story-Überschrift, das Reel-Intro-Frame und die IG-Caption (`buildIgCaption`) hängen am `title`; `description` trägt jetzt den **vollständigen Anrede-Absatz**. Output weiter **pures JSON** (`{title, description}`), defensives Parsen unverändert; `max_tokens` 300 → 400.
+- **LEERER FALL** (item_description leer/null): Notiz-Block GANZ weggelassen (Modell nicht mit leerem String füttern), Intro trotzdem sinnvoll (Anrede + allgemeine Einleitung). Captions bleiben optionaler Zusatz-Kontext im User-Prompt.
+- Die `generate`-Route lädt `customer_name` zusätzlich und reicht `customerName` (statt `businessName`) durch. Greift nur bei **NEU** generierten Intros (gespeicherte `booklets`-Werte bleiben).
+- **TAILOR-FRAMING bewusst:** der Prompt ist auf ein Schneideratelier zugeschnitten (Kleidungsstück-Beispiele). Aktueller Tenant ist Atelier Dax; `ai_context` erdet die Fachsprache. Für nicht-textile Betriebe später zu generalisieren.
+
+`pnpm typecheck` + `pnpm build` grün.
+
+---
+
+> Nächste Migration: **0007**.
+
+> **WICHTIG:** Migration 0006 muss vor dem Live-Gang manuell im Supabase-SQL-Editor angewendet werden (+ Verify-Gate ausführen), bevor der Webhook `analytics_events` schreibt.

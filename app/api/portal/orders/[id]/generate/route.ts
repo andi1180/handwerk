@@ -58,7 +58,7 @@ export async function POST(
   // vertrauenswürdig (Session-Betrieb), Quelle für alle service_role-Writes.
   const { data: order } = await supabase
     .from("orders")
-    .select("id, business_id, status, language, item_description")
+    .select("id, business_id, status, language, item_description, customer_name")
     .eq("id", orderId)
     .maybeSingle<{
       id: string;
@@ -66,6 +66,7 @@ export async function POST(
       status: string;
       language: string;
       item_description: string | null;
+      customer_name: string;
     }>();
   if (!order) {
     return NextResponse.json({ error: "not_found" }, { status: 404 });
@@ -107,10 +108,10 @@ export async function POST(
   let intro: { title: string; description: string };
   try {
     intro = await generateIntro({
+      // Vorname für die persönliche Anrede („Hallo {Vorname},") — WÖRTLICH.
+      customerName: order.customer_name,
       itemDescription: order.item_description,
       captions,
-      // Betriebsname für die Ich-Perspektive (FIX 8b-1c): „… bei {Name} …".
-      businessName: business.name,
       language: order.language,
       // Betriebs-KI-Kontext (8a-1b) — erdet Ton/Fachsprache, KONTEXT keine Anweisung.
       businessContext: business.settings.ai_context ?? undefined,

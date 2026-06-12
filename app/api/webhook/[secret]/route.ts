@@ -185,9 +185,10 @@ async function handleOrderCreated(
     customer_email: roappOrder.client?.email ?? null,
     customer_phone: null,
     external_ref: externalRef,
-    // roapp-Custom-Field-IDs sind pro Betrieb verschieden ⇒ kein zuverlässiges
-    // Mapping. item_description bleibt leer; der Betrieb pflegt es ggf. nach.
-    item_description: null,
+    // Roh-Beschreibungstext aus dem betriebs-spezifischen roapp-Custom-Field
+    // (parser-getrimmt, sonst null). BEWUSST unverändert übernommen — die KI
+    // filtert ihn erst bei der Generierung (Maße/Zahlen/Kürzel).
+    item_description: roappOrder.raw_description,
     language: business.default_language,
     status: "draft",
     consent_given: false, // §13.5: NIE per Webhook
@@ -200,6 +201,32 @@ async function handleOrderCreated(
       message: insertError.message,
     });
     return ok("insert_failed");
+  }
+
+  // ZUSÄTZLICH (nur bei vorhandenem Roh-Text): den Sachtext als analytics_event
+  // festhalten (0006). NICHT-BLOCKIEREND wie der Billing-Insert im deliver-Pfad —
+  // ein Fehler hier wird geloggt, der Auftrag ist bereits angelegt. business_id
+  // aus dem aufgelösten Betrieb (§14.2), NIE aus dem Payload. payload ist PII-FREI
+  // (nur Sachtext); external_ref = id_label (technische Referenz). Bei
+  // `already_exists` greift der frühe Return oben ⇒ hier wird nie doppelt geschrieben.
+  if (roappOrder.raw_description) {
+    const { error: analyticsError } = await service
+      .from("analytics_events")
+      .insert({
+        business_id: business.id,
+        event_type: "order_description",
+        source: "roapp",
+        external_ref: externalRef,
+        payload: { raw_text: roappOrder.raw_description },
+      });
+    if (analyticsError) {
+      console.error("webhook: analytics insert failed", {
+        business_id: business.id,
+        step: "analytics_insert",
+        external_ref: externalRef,
+        message: analyticsError.message,
+      });
+    }
   }
 
   return ok("created");

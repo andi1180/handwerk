@@ -34,6 +34,13 @@ export type RoappOrder = {
   id_label: string | null;
   status: RoappOrderStatus | null;
   client: RoappOrderClient | null;
+  /**
+   * Roh-Beschreibungstext der Arbeit, aus `custom_fields[<ID>]` (getrimmt, sonst
+   * null). Die Feld-ID ist betriebs-spezifisch (Atelier Dax: `f842212`) und per
+   * Env `ROAPP_DESCRIPTION_FIELD_ID` konfigurierbar. Bewusst UNVERÄNDERTER Roh-Text
+   * (Tippfehler/Dialekt/Maße bleiben) — die KI filtert ihn erst bei der Generierung.
+   */
+  raw_description: string | null;
 };
 
 /**
@@ -43,6 +50,14 @@ export type RoappOrder = {
  */
 export const ROAPP_PICKED_UP_STATUS_NAME =
   process.env.ROAPP_PICKED_UP_STATUS_NAME?.trim() || "Abgeholt";
+
+/**
+ * ID des roapp-Custom-Fields, das den Beschreibungstext der Arbeit trägt. Die ID
+ * ist pro Betrieb verschieden (NICHT hardcoden) — per Env überschreibbar, Default
+ * `f842212` (Atelier Dax).
+ */
+export const ROAPP_DESCRIPTION_FIELD_ID =
+  process.env.ROAPP_DESCRIPTION_FIELD_ID?.trim() || "f842212";
 
 const ROAPP_API_BASE = "https://api.roapp.io";
 
@@ -83,11 +98,26 @@ function pickOrderObject(raw: unknown): Record<string, unknown> {
   return root;
 }
 
+/**
+ * Liest ein roapp-Custom-Field defensiv als getrimmten String. roapp liefert
+ * den Wert mal direkt als String, mal als `{ value: "..." }`-Objekt — beides wird
+ * abgedeckt; sonst (Zahl, Objekt ohne value, fehlend) ⇒ null. Kein `any`.
+ */
+function readCustomField(
+  customFields: Record<string, unknown>,
+  fieldId: string,
+): string | null {
+  const value = customFields[fieldId];
+  if (typeof value === "string") return asString(value);
+  return asString(asRecord(value).value);
+}
+
 /** Defensive, typsichere Extraktion der relevanten Order-Felder (kein `any`). */
 export function parseRoappOrder(raw: unknown): RoappOrder {
   const order = pickOrderObject(raw);
   const client = asRecord(order.client);
   const status = asRecord(order.status);
+  const customFields = asRecord(order.custom_fields);
 
   const hasClient =
     order.client !== undefined && order.client !== null;
@@ -108,6 +138,7 @@ export function parseRoappOrder(raw: unknown): RoappOrder {
           name: asString(client.name),
         }
       : null,
+    raw_description: readCustomField(customFields, ROAPP_DESCRIPTION_FIELD_ID),
   };
 }
 
