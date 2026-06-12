@@ -57,6 +57,7 @@ export const de = {
     title: "Aufträge",
     new: "Neuer Auftrag",
     empty: "Noch keine Aufträge angelegt.",
+    noDescription: "Keine Beschreibung",
     customerName: "Kundenname",
     email: "E-Mail",
     phone: "Telefon",

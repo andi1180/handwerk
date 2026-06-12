@@ -2117,6 +2117,33 @@ Weg von der Ich-Perspektive („Ich habe bei {Betrieb} … lassen") hin zu einem
 
 ---
 
-> Nächste Migration: **0007**.
+## KI-Kurzbeschreibung auf der Auftragskachel (Schritt 12)
 
-> **WICHTIG:** Migration 0006 muss vor dem Live-Gang manuell im Supabase-SQL-Editor angewendet werden (+ Verify-Gate ausführen), bevor der Webhook `analytics_events` schreibt.
+Ein sehr kurzer, KI-generierter Einzeiler (Art der Arbeit, ~3–6 Wörter) auf jeder Auftragskachel, damit Mitarbeiter in der Liste auf einen Blick sehen, worum es geht. Erzeugt **EINMALIG bei der Auftragsanlage** aus der Roh-Beschreibung via Haiku und gespeichert — **NICHT** beim Rendern der Liste (sonst ein KI-Call pro Kachel pro Seitenaufruf). Beide Anlage-Pfade (manuell + roapp-Webhook) hängen sich **nicht-blockierend** ein.
+
+### Migration 0007 — orders.short_summary ([supabase/migrations/0007_order_short_summary.sql](supabase/migrations/0007_order_short_summary.sql))
+
+Eine Spalte: `orders.short_summary text default null` (nullable). Bewusst nullable + Default null: scheitert/entfällt die Generierung (leere Notiz, KI-Fehler), bleibt das Feld `null` und die Kachel zeigt einen dezenten Platzhalter. `comment on column` dokumentiert Herkunft (aus `item_description` via Haiku, bei Anlage einmalig). **Keine** neue Policy/GRANT/Index nötig — die `orders`-RLS aus 0001 (`for all` für Mitglieder) deckt die Spalte für Lesen (Liste, AUTHENTICATED) und Schreiben (manuelle Anlage, AUTHENTICATED; Webhook, `service_role`) ab. Verify-Gate [0007_order_short_summary_checks.sql](supabase/verify/0007_order_short_summary_checks.sql): Spalte vorhanden (text, nullable, Default null) + Spaltenkommentar gesetzt.
+
+### Kurztext-Generierung ([lib/ai/short-summary.ts](lib/ai/short-summary.ts))
+
+`generateShortSummary(rawDescription, language) → Promise<string | null>` (server-only, Anthropic-Key nie im Client). Modell **Haiku 4.5** (`HAIKU_MODEL`, schlichter `messages.create`, kein Thinking/effort — wie die Captions 6b), `max_tokens: 48`. **Leerer Input ⇒ sofort `null`** (kein sinnloser Call). Sprache = `orders.language` (§15, über `languageName`). System-Prompt-Regeln **analog zum Intro** ([lib/ai/intro.ts](lib/ai/intro.ts)): NUR die Art der Arbeit, extrem knapp (Stichwort-Fragment, kein Satz, keine Anrede); Preise/Zahlen/Maße (`-2cm`, `VM 110`)/Kürzel/interne Vermerke **strikt ignorieren**, **keine Zahl im Output**; Wortlaut/Stil der Notiz nicht übernehmen; keine Anführungszeichen/Emojis/Punkt. `cleanSummary` strippt umschließende Quotes + abschließenden Punkt, kollabiert Whitespace und cappt defensiv auf `SHORT_SUMMARY_MAX_LENGTH = 60`. Liefert das Modell nach dem Cleanup nichts ⇒ `null`.
+
+### Einhängen an beiden Anlage-Pfaden (nicht-blockierend)
+
+**`short_summary` wird EINMALIG bei der Anlage erzeugt und gespeichert** — nie beim Listen-Rendern. Beide Pfade sind **nicht-blockierend**: scheitert der Haiku-Call (oder das Update), wird geloggt, der Auftrag bleibt angelegt, `short_summary` bleibt `null`.
+
+- **Manuelle Anlage** ([app/api/portal/orders/route.ts](app/api/portal/orders/route.ts)): `item_description` einmal getrimmt; ist es gesetzt, wird `generateShortSummary` **vor** dem Insert aufgerufen (in `try/catch` ⇒ Fehler loggt, `shortSummary` bleibt `null`) und **in den Insert mitgeschrieben** (`short_summary: shortSummary`). Über den **AUTHENTICATED** Client (RLS, kein `service_role`) — konsistent mit dem Rest der Route. Vor-dem-Insert (statt Update danach), weil die Anlage hier nicht idempotenz-gegated ist und der Redirect zur Liste die Kachel sofort mit Kurztext zeigen soll.
+- **roapp-Webhook** ([app/api/webhook/[secret]/route.ts](app/api/webhook/[secret]/route.ts), `handleOrderCreated`): der Order-Insert gibt jetzt die `id` zurück (`.select("id").single`). **Nach** dem Insert (und nach dem nicht-blockierenden `analytics_events`-Insert), nur bei vorhandenem `raw_description`: `generateShortSummary` → bei Erfolg ein **`service_role`-Update** `short_summary` **strikt auf die gerade angelegte Order + `business_id` gescoped** (§14.2 — `business_id` aus dem aufgelösten Betrieb, NIE aus dem Payload). Update-nach-Insert (nicht in den Insert gefaltet), weil der Insert idempotenz-gegated ist: so läuft der Haiku-Call nur für **genuin neue** Aufträge (nach Dedup + erfolgreichem Insert), nie für `already_exists`-Duplikate. Beides geloggt, beides nicht-blockierend (`ok("created")` wird unverändert zurückgegeben).
+
+### Kachel-Anzeige ([app/portal/orders/page.tsx](app/portal/orders/page.tsx))
+
+Die Auftragsliste (Server Component, AUTHENTICATED Client, RLS) lädt `short_summary` zusätzlich (Select + `OrderListRow`) und zeigt es **nur als gespeichertes Feld** — **KEINE** Live-Generierung beim Rendern. Pro Kachel unter dem Kundennamen: ist `short_summary` gesetzt ⇒ Kurztext (13px, `--text-primary`, einzeilig mit Ellipsis); sonst ⇒ **dezenter Platzhalter** „Keine Beschreibung" (`orders.noDescription`, `--text-secondary` + `italic` + `opacity 0.7`, damit klar als Platzhalter erkennbar). `external_ref` rückt darunter (12px). i18n-Schlüssel `orders.noDescription`.
+
+`pnpm typecheck` + `pnpm build` grün.
+
+---
+
+> Nächste Migration: **0008**.
+
+> **WICHTIG:** Migration 0007 (`orders.short_summary`) muss vor dem Live-Gang manuell im Supabase-SQL-Editor angewendet werden (+ Verify-Gate ausführen), bevor die Kachel `short_summary` liest bzw. die Anlage-Pfade es schreiben. (Migration 0006 — `analytics_events` — ebenfalls, falls noch nicht geschehen.)

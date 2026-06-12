@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentBusiness } from "@/lib/auth/current-business";
+import { generateShortSummary } from "@/lib/ai/short-summary";
 
 /** Trimmt einen String-Wert; leere/Nicht-String-Werte → null. */
 function trimmedOrNull(value: unknown): string | null {
@@ -45,6 +46,25 @@ export async function POST(request: Request) {
   }
 
   const consentGiven = payload.consent_given === true;
+  const itemDescription = trimmedOrNull(payload.item_description);
+
+  // KI-Kurzbeschreibung für die Auftragskachel — EINMALIG bei der Anlage erzeugt
+  // und mitgeschrieben (NICHT beim Listen-Rendern). NICHT-BLOCKIEREND: scheitert
+  // der Haiku-Call, bleibt short_summary null und der Auftrag wird normal angelegt.
+  let shortSummary: string | null = null;
+  if (itemDescription) {
+    try {
+      shortSummary = await generateShortSummary(
+        itemDescription,
+        business.default_language,
+      );
+    } catch (error) {
+      console.error("orders: short_summary generation failed", {
+        business_id: business.id,
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
 
   const { data, error } = await supabase
     .from("orders")
@@ -54,7 +74,8 @@ export async function POST(request: Request) {
       customer_email: trimmedOrNull(payload.customer_email),
       customer_phone: trimmedOrNull(payload.customer_phone),
       external_ref: trimmedOrNull(payload.external_ref),
-      item_description: trimmedOrNull(payload.item_description),
+      item_description: itemDescription,
+      short_summary: shortSummary,
       language: business.default_language,
       status: "draft",
       consent_given: consentGiven,

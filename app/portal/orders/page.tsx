@@ -16,6 +16,7 @@ type OrderListRow = {
   id: string;
   customer_name: string;
   external_ref: string | null;
+  short_summary: string | null;
   status: OrderStatus;
   created_at: string;
 };
@@ -38,7 +39,7 @@ export default async function OrdersPage() {
   const supabase = await createClient();
   const { data } = await supabase
     .from("orders")
-    .select("id, customer_name, external_ref, status, created_at")
+    .select("id, customer_name, external_ref, short_summary, status, created_at")
     .eq("business_id", business.id)
     .order("created_at", { ascending: false })
     .returns<OrderListRow[]>();
@@ -117,9 +118,33 @@ export default async function OrdersPage() {
                 >
                   {order.customer_name}
                 </div>
+                {order.short_summary ? (
+                  <div
+                    style={{
+                      fontSize: 13,
+                      color: "var(--text-primary)",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {order.short_summary}
+                  </div>
+                ) : (
+                  <div
+                    style={{
+                      fontSize: 13,
+                      color: "var(--text-secondary)",
+                      fontStyle: "italic",
+                      opacity: 0.7,
+                    }}
+                  >
+                    {t(DEFAULT_LOCALE, "orders.noDescription")}
+                  </div>
+                )}
                 {order.external_ref ? (
                   <div
-                    style={{ fontSize: 13, color: "var(--text-secondary)" }}
+                    style={{ fontSize: 12, color: "var(--text-secondary)" }}
                   >
                     {order.external_ref}
                   </div>

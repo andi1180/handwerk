@@ -3,6 +3,7 @@ import { createServiceClient } from "@/lib/supabase/service";
 import { normalizeSettings } from "@/lib/auth/current-business";
 import { CUSTOMER_VIEW_QUERY } from "@/lib/booklet/customer-view";
 import { sendBookletEmail } from "@/lib/email/booklet-email";
+import { generateShortSummary } from "@/lib/ai/short-summary";
 import { classifyEvent, parseWebhookBody } from "@/lib/roapp/events";
 import {
   getRoappOrder,
@@ -179,26 +180,30 @@ async function handleOrderCreated(
     if (existing) return ok("already_exists");
   }
 
-  const { error: insertError } = await service.from("orders").insert({
-    business_id: business.id,
-    customer_name: buildCustomerName(roappOrder, externalRef),
-    customer_email: roappOrder.client?.email ?? null,
-    customer_phone: null,
-    external_ref: externalRef,
-    // Roh-Beschreibungstext aus dem betriebs-spezifischen roapp-Custom-Field
-    // (parser-getrimmt, sonst null). BEWUSST unverändert übernommen — die KI
-    // filtert ihn erst bei der Generierung (Maße/Zahlen/Kürzel).
-    item_description: roappOrder.raw_description,
-    language: business.default_language,
-    status: "draft",
-    consent_given: false, // §13.5: NIE per Webhook
-    consent_at: null,
-  });
-  if (insertError) {
+  const { data: inserted, error: insertError } = await service
+    .from("orders")
+    .insert({
+      business_id: business.id,
+      customer_name: buildCustomerName(roappOrder, externalRef),
+      customer_email: roappOrder.client?.email ?? null,
+      customer_phone: null,
+      external_ref: externalRef,
+      // Roh-Beschreibungstext aus dem betriebs-spezifischen roapp-Custom-Field
+      // (parser-getrimmt, sonst null). BEWUSST unverändert übernommen — die KI
+      // filtert ihn erst bei der Generierung (Maße/Zahlen/Kürzel).
+      item_description: roappOrder.raw_description,
+      language: business.default_language,
+      status: "draft",
+      consent_given: false, // §13.5: NIE per Webhook
+      consent_at: null,
+    })
+    .select("id")
+    .single<{ id: string }>();
+  if (insertError || !inserted) {
     console.error("webhook: order insert failed", {
       business_id: business.id,
       step: "created_insert",
-      message: insertError.message,
+      message: insertError?.message ?? "no row returned",
     });
     return ok("insert_failed");
   }
@@ -225,6 +230,43 @@ async function handleOrderCreated(
         step: "analytics_insert",
         external_ref: externalRef,
         message: analyticsError.message,
+      });
+    }
+  }
+
+  // KI-Kurzbeschreibung für die Auftragskachel (nur bei vorhandenem Roh-Text).
+  // EINMALIG bei der Anlage erzeugt + gespeichert (NICHT beim Listen-Rendern).
+  // NICHT-BLOCKIEREND wie der Analytics-Insert: ein Haiku-Fehler oder ein
+  // fehlgeschlagenes Update wird geloggt, der Auftrag bleibt angelegt,
+  // short_summary bleibt null. service_role-Update strikt auf die gerade
+  // angelegte Order + business_id gescoped (§14.2 — business_id NIE aus Payload).
+  if (roappOrder.raw_description) {
+    try {
+      const summary = await generateShortSummary(
+        roappOrder.raw_description,
+        business.default_language,
+      );
+      if (summary) {
+        const { error: summaryError } = await service
+          .from("orders")
+          .update({ short_summary: summary })
+          .eq("id", inserted.id)
+          .eq("business_id", business.id);
+        if (summaryError) {
+          console.error("webhook: short_summary update failed", {
+            business_id: business.id,
+            order_id: inserted.id,
+            step: "short_summary_update",
+            message: summaryError.message,
+          });
+        }
+      }
+    } catch (error) {
+      console.error("webhook: short_summary generation failed", {
+        business_id: business.id,
+        order_id: inserted.id,
+        step: "short_summary_generate",
+        message: errMessage(error),
       });
     }
   }
