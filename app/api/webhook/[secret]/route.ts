@@ -331,14 +331,38 @@ async function handleOrderPickedUp(
   }
   if (!order) return ok("order_not_found");
 
-  // Ausliefern lässt sich nur ein generiertes Booklet. draft/finalized ⇒ noch
-  // nicht so weit; sent/viewed/shared ⇒ bereits ausgeliefert.
+  // Ausliefern lässt sich nur ein generiertes Booklet. Bei abweichendem Status
+  // nach STATUS verzweigen (additiv zum Doppelversand-Schutz weiter unten):
+  //
+  //  - draft/finalized ⇒ noch KEIN versendetes Booklet. Der Kunde hat abgeholt,
+  //    aber nichts bekommen ⇒ Warn-Flag `picked_up_at = now()` setzen (treibt den
+  //    roten Badge auf der Auftragskachel). KEINE Mail. Idempotent: erneutes
+  //    Setzen schadet nicht. (Block C / Schritt 2)
+  //  - sent/viewed/shared ⇒ Booklet ist bereits raus. NICHTS tun, KEIN Flag,
+  //    KEINE Mail. Reparatur-Rückläufer (Kunde war schon abgeholt, kommt zurück,
+  //    wird später erneut „Abgeholt") darf weder warnen noch doppelt mailen.
+  if (order.status === "draft" || order.status === "finalized") {
+    // §13.5/§14.2: service_role, strikt auf die Order + aufgelöste business_id
+    // gescoped — NIE aus dem Payload. NICHT-BLOCKIEREND (nur geloggt): scheitert
+    // das Update, bleibt der Badge halt aus, der Webhook soll nicht retryen (§12).
+    const { error: flagError } = await service
+      .from("orders")
+      .update({ picked_up_at: new Date().toISOString() })
+      .eq("id", order.id)
+      .eq("business_id", business.id);
+    if (flagError) {
+      console.error("webhook: pickup flag update failed", {
+        business_id: business.id,
+        order_id: order.id,
+        step: "pickup_flag",
+        message: flagError.message,
+      });
+    }
+    return ok("flagged_pickup_pending");
+  }
   if (order.status !== "generated") {
-    return ok(
-      order.status === "draft" || order.status === "finalized"
-        ? "not_generated"
-        : "already_sent",
-    );
+    // sent/viewed/shared — bereits ausgeliefert.
+    return ok("already_delivered_noop");
   }
 
   // Booklet (access_token) laden — service_role, auf business_id gescoped.
@@ -365,9 +389,11 @@ async function handleOrderPickedUp(
 
   // 1. Status generated→sent, defensiv gefiltert + count: kein Doppelversand,
   //    wenn der Webhook mehrfach feuert oder ein anderer Pfad parallel liefert.
+  // picked_up_at sicherheitshalber mit auf null: liefert ein generierter Auftrag
+  // automatisch aus, darf kein Warn-Flag zurückbleiben (Block C / Schritt 2).
   const { count, error: statusError } = await service
     .from("orders")
-    .update({ status: "sent" }, { count: "exact" })
+    .update({ status: "sent", picked_up_at: null }, { count: "exact" })
     .eq("id", order.id)
     .eq("status", "generated");
   if (statusError) {

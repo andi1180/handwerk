@@ -12,6 +12,7 @@ import {
   ReelStatePill,
   type ReelStatus,
 } from "@/components/reel-state-pill";
+import { PickupPendingBadge } from "@/components/pickup-pending-badge";
 
 /** Eine Zeile der Auftragsliste — nur die für die Übersicht benötigten Felder. */
 type OrderListRow = {
@@ -20,6 +21,7 @@ type OrderListRow = {
   external_ref: string | null;
   short_summary: string | null;
   status: OrderStatus;
+  picked_up_at: string | null;
   created_at: string;
 };
 
@@ -52,7 +54,9 @@ export default async function OrdersPage({
   const supabase = await createClient();
   let query = supabase
     .from("orders")
-    .select("id, customer_name, external_ref, short_summary, status, created_at")
+    .select(
+      "id, customer_name, external_ref, short_summary, status, picked_up_at, created_at",
+    )
     .eq("business_id", business.id);
   if (statusFilter) query = query.eq("status", statusFilter);
   const { data } = await query
@@ -210,6 +214,16 @@ export default async function OrdersPage({
                     <ReelStatePill
                       reelStatus={reelByOrder.get(order.id) ?? null}
                     />
+                  ) : null}
+                  {/* Warn-Badge (Block C / Schritt 2): roapp meldete „Abgeholt",
+                      Booklet aber noch nicht versendet. Doppel-Sicherung —
+                      bereits ausgelieferte Stufen (sent/viewed/shared) nie warnen,
+                      selbst wenn picked_up_at theoretisch noch gesetzt wäre. */}
+                  {order.picked_up_at &&
+                  order.status !== "sent" &&
+                  order.status !== "viewed" &&
+                  order.status !== "shared" ? (
+                    <PickupPendingBadge pickedUpAt={order.picked_up_at} />
                   ) : null}
                 </div>
                 <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>

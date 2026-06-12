@@ -87,6 +87,8 @@ export const de = {
     reelRendering: "Reel rendert …",
     reelReady: "Reel fertig",
     reelFailed: "Reel fehlgeschlagen",
+    pickupPending: "Abgeholt – Booklet nicht versendet",
+    pickupPendingDate: "abgeholt am {date}",
   },
   orderDetail: {
     back: "Zurück zur Liste",

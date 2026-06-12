@@ -108,10 +108,12 @@ export async function POST(
   const now = new Date().toISOString();
 
   // 1. Order-Status → sent (defensiv auf `generated` gefiltert: kein
-  //    Doppel-Versand bei Races; ein zweiter Klick trifft 0 Zeilen).
+  //    Doppel-Versand bei Races; ein zweiter Klick trifft 0 Zeilen). picked_up_at
+  //    mit auf null: ein etwaiges Warn-Flag „abgeholt, noch nicht versendet"
+  //    (Block C / Schritt 2) verschwindet, sobald nachversendet wurde.
   const { error: statusError } = await supabase
     .from("orders")
-    .update({ status: "sent" })
+    .update({ status: "sent", picked_up_at: null })
     .eq("id", order.id)
     .eq("status", "generated");
   if (statusError) {

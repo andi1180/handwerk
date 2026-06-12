@@ -2030,7 +2030,7 @@ Neue Blöcke in [lib/i18n/de.ts](lib/i18n/de.ts): `register.*` (`title`/`intro`/
 
 - Liegt **bewusst nicht** unter `/portal` (kein Session-Kontext). Die Middleware lässt ihn durch (Redirects greifen nur für `/portal`).
 - **AUTH = Pfad-Secret (§14.2):** `[secret]` → `businesses.webhook_secret` → `business_id` (über `service_role`, da kein Session-Kontext). Diese `business_id` ist die **EINZIGE Vertrauensquelle** — **NIE** aus dem Payload. Alle DB-Zugriffe laufen über `service_role`, strikt auf diese `business_id` gescoped.
-- **ROBUSTHEIT (§12):** **Ungültiges/fehlendes Secret ⇒ 404** ist das **einzige harte Gate**. Alles andere antwortet **200 + kurzer Status-String** (`{ status }`), damit roapp **keine Retry-Stürme** macht. No-op-/Fehlerfälle werden geloggt: `lookup_failed`, `bad_body`, `ignored_event`, `no_object_id`, `enrich_failed`, `already_exists`, `insert_failed`, `noop_status`, `order_not_found`, `not_generated`, `already_sent`, `no_booklet`, `status_failed` sowie die Erfolge `created`/`sent`/`sent_no_email`.
+- **ROBUSTHEIT (§12):** **Ungültiges/fehlendes Secret ⇒ 404** ist das **einzige harte Gate**. Alles andere antwortet **200 + kurzer Status-String** (`{ status }`), damit roapp **keine Retry-Stürme** macht. No-op-/Fehlerfälle werden geloggt: `lookup_failed`, `bad_body`, `ignored_event`, `no_object_id`, `enrich_failed`, `already_exists`, `insert_failed`, `noop_status`, `order_not_found`, `flagged_pickup_pending`, `already_delivered_noop`, `already_sent`, `no_booklet`, `status_failed` sowie die Erfolge `created`/`sent`/`sent_no_email`.
 - **Ablauf:** Secret → Betrieb (404) → Body parsen (`bad_body`) → Event klassifizieren (`ignored_event`) → `object_id` vorhanden (`no_object_id`) → **EIN** Anreicherungs-Call (`enrich_failed`) → Branch.
 
 ### Vendor-neutrale Klassifizierung ([lib/roapp/events.ts](lib/roapp/events.ts))
@@ -2059,8 +2059,11 @@ Wie die Portal-Order-Route ([app/api/portal/orders/route.ts](app/api/portal/orde
 
 Die deliver-Logik ([app/api/portal/orders/[id]/deliver/route.ts](app/api/portal/orders/[id]/deliver/route.ts)) ist **repliziert, nicht geteilt** (die Portal-Route ist session-gebunden):
 - Nur wenn **API-`status.name === ROAPP_PICKED_UP_STATUS_NAME`** ⇒ sonst `noop_status`.
-- Order per `external_ref` + `business_id` finden (sonst `order_not_found`); nur Status **`generated`** wird ausgeliefert (draft/finalized ⇒ `not_generated`, sent/viewed/shared ⇒ `already_sent`).
-- **Status `generated→sent`** defensiv gefiltert (`.eq('status','generated')`) **+ `count`-Check gegen Doppelversand** (Webhook kann mehrfach feuern / Race ⇒ `count === 0` ⇒ `already_sent`, keine Nebenwirkungen).
+- Order per `external_ref` + `business_id` finden (sonst `order_not_found`). **Status-Verzweigung** (Block C / Schritt 2 — additiv zum Doppelversand-Schutz):
+  - **`generated`** ⇒ ausliefern (wie unten).
+  - **`draft`/`finalized`** (noch KEIN versendetes Booklet) ⇒ **Warn-Flag** `orders.picked_up_at = now()` setzen (`service_role`, strikt auf Order + aufgelöste `business_id` gescoped, NIE Payload; nicht-blockierend), **KEINE Mail**, idempotent ⇒ `flagged_pickup_pending`. Treibt den roten Warn-Badge auf der Auftragskachel.
+  - **`sent`/`viewed`/`shared`** (Booklet bereits raus) ⇒ **NICHTS** tun (kein Flag, keine Mail) ⇒ `already_delivered_noop`. Reparatur-Rückläufer (schon abgeholt, Booklet raus, kommt zurück, wird erneut „Abgeholt") darf weder warnen noch doppelt mailen.
+- **Status `generated→sent`** defensiv gefiltert (`.eq('status','generated')`) **+ `count`-Check gegen Doppelversand** (Webhook kann mehrfach feuern / Race ⇒ `count === 0` ⇒ `already_sent`, keine Nebenwirkungen); im selben Update `picked_up_at = null` (etwaiges Warn-Flag entfernen).
 - **Nicht-blockierend** (wie im Vorbild): `booklets.sent_at`, **Billing-Event `'booklet_sent'`** (via `service_role` — `billing_events` hat kein `authenticated`-INSERT-Grant), **Booklet-E-Mail** via [sendBookletEmail](lib/email/booklet-email.ts) (Link `${BOOKLET_BASE_URL}/b/${access_token}?${CUSTOMER_VIEW_QUERY}`, `replyTo = settings.contact_email`). Erfolg ⇒ `sent` bzw. `sent_no_email`.
 
 ### Env & Secret-Verwaltung
@@ -2224,6 +2227,40 @@ Der Redirect **reicht den Kunden-Marker `?c=1` durch** (`isCustomerViewParam` au
 
 ---
 
-> Nächste Migration: **0009**.
+## Block C / Schritt 2 — Warn-Badge „Abgeholt, aber Booklet nicht versendet"
 
-> **WICHTIG:** Migration 0008 (`booklets.short_code`) muss vor dem Live-Gang manuell im Supabase-SQL-Editor angewendet werden (+ Verify-Gate ausführen), bevor die Generierung `short_code` schreibt bzw. der `/s/<code>`-Redirect ihn liest. (Migrationen 0006 `analytics_events` + 0007 `orders.short_summary` ebenfalls, falls noch nicht geschehen.)
+Meldet roapp einen Auftrag als **„Abgeholt"**, OBWOHL bei uns noch **kein Booklet versendet** wurde (Auftrag noch `draft`/`finalized`), erscheint auf der Auftragskachel ein **roter Warn-Badge**: der Kunde hat seine Sachen abgeholt, aber kein Booklet bekommen — der Betrieb soll es fertigmachen und manuell senden. **Migration 0009** (`orders.picked_up_at`).
+
+### Migration 0009 ([0009_order_pickup_pending.sql](supabase/migrations/0009_order_pickup_pending.sql) + [Verify](supabase/verify/0009_order_pickup_pending_checks.sql))
+
+Eine Spalte `orders.picked_up_at timestamptz default null` (nullable) + `comment on column`. **Keine** neue Policy/GRANT (`orders`-RLS `for all` aus 0001 + `service_role` decken die Spalte). Nullable + Default null: bestehende Aufträge unverändert; **kein Wert = keine Warnung**. Treiber des Badges.
+
+### Flag-Logik — Status-Verzweigung im Webhook ([handlePickedUp](app/api/webhook/[secret]/route.ts))
+
+Nachdem die Order per `external_ref` gefunden ist und `status.name === "Abgeholt"` feststeht, wird nach **unserem** Auftragsstatus verzweigt (additiv — der defensive Doppelversand-Schutz `generated→sent` bleibt unangetastet):
+
+| `order.status` | Aktion | Response-Status |
+| --- | --- | --- |
+| `generated` | Booklet ausliefern (Mail, `sent`, Billing); **kein** Flag, `picked_up_at` wird auf null gesetzt | `sent` / `sent_no_email` |
+| `draft` / `finalized` | **`picked_up_at = now()`** (`service_role`, Order + `business_id` gescoped, NIE Payload; nicht-blockierend, idempotent); **keine Mail** | `flagged_pickup_pending` |
+| `sent` / `viewed` / `shared` | **nichts** — kein Flag, keine Mail (Reparatur-Rückläufer darf nicht warnen / doppelt mailen) | `already_delivered_noop` |
+| nicht gefunden | wie bisher (keine Karte ⇒ kein Badge möglich) | `order_not_found` |
+
+**Status-Logik:** Das Flag wird **nur** bei `draft`/`finalized` gesetzt, **nie** bei `sent`/`viewed`/`shared`. Das verhindert das Reparatur-Rückläufer-Szenario (ein bereits ausgeliefertes Booklet, das wegen einer Reparatur erneut „Abgeholt" wird).
+
+### Flag-Reset beim Versand
+
+- **Manueller Pfad** ([deliver/route.ts](app/api/portal/orders/[id]/deliver/route.ts)): das Status-Update `generated→sent` setzt im selben Schritt `picked_up_at = null` ⇒ der Badge verschwindet, sobald nachversendet wurde.
+- **Webhook-Deliver-Zweig** (`generated→sent`): setzt `picked_up_at = null` sicherheitshalber mit, falls ein automatisch ausgelieferter Auftrag noch ein Flag trug.
+
+### Badge auf der Auftragskachel ([pickup-pending-badge.tsx](components/pickup-pending-badge.tsx) + [orders/page.tsx](app/portal/orders/page.tsx))
+
+Die Liste lädt zusätzlich `picked_up_at` (AUTHENTICATED, RLS) und rendert `<PickupPendingBadge>` im Badge-Wrap neben dem Status-Badge — aber **nur** wenn `picked_up_at` gesetzt ist **UND** `status NOT IN (sent, viewed, shared)` (**Doppel-Sicherung**: ein bereits ausgelieferter Auftrag mit theoretisch noch gesetztem Flag warnt nie fälschlich). Roter Pill (`--red-*`-Tokens), Text „Abgeholt – Booklet nicht versendet" + dezenter `abgeholt am TT.MM.`-Zusatz aus `picked_up_at`. **Nicht klickbar** — rein visuell (der Betrieb navigiert selbst zum Auftrag). Reine Präsentation, Server-Component-fähig (Muster wie [order-status-badge.tsx](components/order-status-badge.tsx)). i18n `orderStatus.pickupPending`/`pickupPendingDate`.
+
+`pnpm typecheck` + `pnpm build` grün.
+
+---
+
+> Nächste Migration: **0010**.
+
+> **WICHTIG:** Migration 0009 (`orders.picked_up_at`) muss vor dem Live-Gang manuell im Supabase-SQL-Editor angewendet werden (+ Verify-Gate ausführen), sonst scheitert das `picked_up_at`-Update im Webhook — es bleibt zwar non-fatal, aber der Warn-Badge erscheint nie. (Migration 0008 `booklets.short_code` ebenso, falls noch nicht geschehen; 0006 `analytics_events` + 0007 `orders.short_summary` ebenfalls.)
