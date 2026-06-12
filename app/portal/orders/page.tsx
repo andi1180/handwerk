@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentBusiness } from "@/lib/auth/current-business";
 import { DEFAULT_LOCALE, t } from "@/lib/i18n";
@@ -8,11 +9,19 @@ import {
   type OrderStatus,
 } from "@/components/order-status-badge";
 import { OrderStatusFilter } from "@/components/order-status-filter";
+import { OrderQuickFilters } from "@/components/order-quick-filters";
+import { OrdersPagination } from "@/components/orders-pagination";
 import {
   ReelStatePill,
   type ReelStatus,
 } from "@/components/reel-state-pill";
 import { PickupPendingBadge } from "@/components/pickup-pending-badge";
+import {
+  ORDERS_PAGE_SIZE,
+  buildOrdersUrl,
+  isQuickFilter,
+  type QuickFilter,
+} from "@/lib/orders/filters";
 
 /** Eine Zeile der Auftragsliste — nur die für die Übersicht benötigten Felder. */
 type OrderListRow = {
@@ -35,39 +44,91 @@ const DATE_FORMAT = new Intl.DateTimeFormat("de-DE", {
  * Auftragsliste (Server Component, mobile-first). Lädt über den AUTHENTICATED
  * Server-Client — RLS skopiert automatisch auf den Betrieb; zusätzlich wird
  * defensiv nach `business_id` aus `getCurrentBusiness` gefiltert.
+ *
+ * Filterung **server-seitig** über zwei sich gegenseitig ausschließende Achsen:
+ *  - `?status=` — Status-Dropdown (ein einzelner Status, Block B).
+ *  - `?quick=`  — Quick-Filter mit Mehrfach-/Sonderbedingungen (Block C / 3).
+ * Quick hat Vorrang; ist ein Quick aktiv, fällt das Dropdown auf „Alle" zurück.
+ * Paginierung über `?page=` (20 Karten/Seite) respektiert den aktiven Filter.
  */
 export default async function OrdersPage({
   searchParams,
 }: {
-  searchParams: Promise<{ status?: string }>;
+  searchParams: Promise<{ status?: string; quick?: string; page?: string }>;
 }) {
   const business = await getCurrentBusiness();
   if (!business) return null;
 
-  // Status-Filter (Block B, Punkt 5): nur ein gültiger Status filtert, sonst
-  // „Alle". Server-seitig gefiltert — konsistent damit, wie die Liste lädt.
-  const { status: statusParam } = await searchParams;
-  const statusFilter: OrderStatus | null = isOrderStatus(statusParam)
-    ? statusParam
+  const {
+    status: statusParam,
+    quick: quickParam,
+    page: pageParam,
+  } = await searchParams;
+
+  // Zwei Filter-Achsen, mutually exclusive: Quick führt, sonst Status. Ist ein
+  // Quick aktiv, wird der Dropdown-Wert verworfen (Dropdown zeigt „Alle").
+  const activeQuick: QuickFilter | null = isQuickFilter(quickParam)
+    ? quickParam
     : null;
+  const activeStatus: OrderStatus | null =
+    !activeQuick && isOrderStatus(statusParam) ? statusParam : null;
+
+  // Seite (1-indexiert, Default 1). Ungültig/≤0 ⇒ 1.
+  const parsedPage = Number.parseInt(pageParam ?? "1", 10);
+  const page = Number.isFinite(parsedPage) && parsedPage >= 1 ? parsedPage : 1;
 
   const supabase = await createClient();
   let query = supabase
     .from("orders")
     .select(
       "id, customer_name, external_ref, short_summary, status, picked_up_at, created_at",
+      { count: "exact" },
     )
     .eq("business_id", business.id);
-  if (statusFilter) query = query.eq("status", statusFilter);
-  const { data } = await query
+
+  // Quick-Filter ⇒ eigene WHERE-Logik (kein ?status=-Single-Value).
+  if (activeQuick === "flagged") {
+    // Exakt die Warn-Badge-Bedingung (Block C / Schritt 2): abgeholt, aber noch
+    // nicht versendet. NOT IN {sent, viewed, shared} == IN {draft, finalized,
+    // generated} über den vollen Status-Wertebereich.
+    query = query
+      .not("picked_up_at", "is", null)
+      .in("status", ["draft", "finalized", "generated"]);
+  } else if (activeQuick === "drafts") {
+    query = query.eq("status", "draft");
+  } else if (activeQuick === "ungenerated") {
+    query = query.in("status", ["draft", "finalized"]);
+  } else if (activeStatus) {
+    query = query.eq("status", activeStatus);
+  }
+
+  const from = (page - 1) * ORDERS_PAGE_SIZE;
+  const { data, count } = await query
     .order("created_at", { ascending: false })
+    .range(from, from + ORDERS_PAGE_SIZE - 1)
     .returns<OrderListRow[]>();
 
   const orders = data ?? [];
+  const total = count ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / ORDERS_PAGE_SIZE));
 
+  // Overshoot (z. B. manuell editierte URL oder veralteter Link nach Löschungen):
+  // angeforderte Seite > letzte Seite ⇒ auf die letzte Seite klemmen. So bleibt
+  // nach der Weiche `orders.length === 0` ⟺ `total === 0`.
+  if (page > totalPages) {
+    redirect(
+      buildOrdersUrl({
+        status: activeStatus,
+        quick: activeQuick,
+        page: totalPages,
+      }),
+    );
+  }
+
+  const hasActiveFilter = activeQuick !== null || activeStatus !== null;
   // Filter-Leiste zeigen, sobald es Aufträge gibt ODER ein Filter aktiv ist
   // (damit man aus einem leeren Filter-Ergebnis wieder zurück auf „Alle" kann).
-  const showFilter = orders.length > 0 || statusFilter !== null;
+  const showFilter = total > 0 || hasActiveFilter;
 
   // Zweite Achse: Reel-Render-Status. Nur für generierte Aufträge relevant
   // (Booklet existiert, noch nicht versendet). booklets sind member-lesbar
@@ -87,23 +148,24 @@ export default async function OrdersPage({
 
   return (
     <div style={{ maxWidth: 720, margin: "0 auto" }}>
-      <div className="orders-toolbar">
-        <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700 }}>
+      <div className="orders-header">
+        <h1 style={{ fontSize: 22, fontWeight: 700 }}>
           {t(DEFAULT_LOCALE, "orders.title")}
         </h1>
-        <Link href="/portal/orders/new" className="btn-dark orders-new-btn">
-          {t(DEFAULT_LOCALE, "orders.new")}
-        </Link>
+
+        {showFilter ? (
+          <>
+            <OrderStatusFilter value={activeStatus ?? "all"} />
+            <Link href="/portal/orders/new" className="btn-dark orders-new-btn">
+              {t(DEFAULT_LOCALE, "orders.new")}
+            </Link>
+            <OrderQuickFilters active={activeQuick} />
+          </>
+        ) : null}
       </div>
 
-      {showFilter ? (
-        <div style={{ marginBottom: 16 }}>
-          <OrderStatusFilter value={statusFilter ?? "all"} />
-        </div>
-      ) : null}
-
-      {orders.length === 0 ? (
-        statusFilter ? (
+      {total === 0 ? (
+        hasActiveFilter ? (
           // Aktiver Filter ohne Treffer — Hinweis, Filter-Leiste bleibt oben.
           <div
             className="card"
@@ -134,105 +196,114 @@ export default async function OrdersPage({
           </div>
         )
       ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          {orders.map((order) => (
-            <Link
-              key={order.id}
-              href={`/portal/orders/${order.id}`}
-              className="card card-link"
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: 12,
-              }}
-            >
-              <div style={{ minWidth: 0 }}>
-                <div
-                  style={{
-                    fontSize: 15,
-                    fontWeight: 600,
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {order.customer_name}
-                </div>
-                {order.short_summary ? (
+        <>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            {orders.map((order) => (
+              <Link
+                key={order.id}
+                href={`/portal/orders/${order.id}`}
+                className="card card-link"
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 12,
+                }}
+              >
+                <div style={{ minWidth: 0 }}>
                   <div
                     style={{
-                      fontSize: 13,
-                      color: "var(--text-primary)",
+                      fontSize: 15,
+                      fontWeight: 600,
                       overflow: "hidden",
                       textOverflow: "ellipsis",
                       whiteSpace: "nowrap",
                     }}
                   >
-                    {order.short_summary}
+                    {order.customer_name}
                   </div>
-                ) : (
-                  <div
-                    style={{
-                      fontSize: 13,
-                      color: "var(--text-secondary)",
-                      fontStyle: "italic",
-                      opacity: 0.7,
-                    }}
-                  >
-                    {t(DEFAULT_LOCALE, "orders.noDescription")}
-                  </div>
-                )}
-                {order.external_ref ? (
-                  <div
-                    style={{ fontSize: 12, color: "var(--text-secondary)" }}
-                  >
-                    {order.external_ref}
-                  </div>
-                ) : null}
-              </div>
-              <div
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  alignItems: "flex-end",
-                  gap: 6,
-                  flexShrink: 0,
-                }}
-              >
+                  {order.short_summary ? (
+                    <div
+                      style={{
+                        fontSize: 13,
+                        color: "var(--text-primary)",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {order.short_summary}
+                    </div>
+                  ) : (
+                    <div
+                      style={{
+                        fontSize: 13,
+                        color: "var(--text-secondary)",
+                        fontStyle: "italic",
+                        opacity: 0.7,
+                      }}
+                    >
+                      {t(DEFAULT_LOCALE, "orders.noDescription")}
+                    </div>
+                  )}
+                  {order.external_ref ? (
+                    <div
+                      style={{ fontSize: 12, color: "var(--text-secondary)" }}
+                    >
+                      {order.external_ref}
+                    </div>
+                  ) : null}
+                </div>
                 <div
                   style={{
                     display: "flex",
-                    alignItems: "center",
-                    justifyContent: "flex-end",
-                    flexWrap: "wrap",
+                    flexDirection: "column",
+                    alignItems: "flex-end",
                     gap: 6,
+                    flexShrink: 0,
                   }}
                 >
-                  <OrderStatusBadge status={order.status} />
-                  {order.status === "generated" ? (
-                    <ReelStatePill
-                      reelStatus={reelByOrder.get(order.id) ?? null}
-                    />
-                  ) : null}
-                  {/* Warn-Badge (Block C / Schritt 2): roapp meldete „Abgeholt",
-                      Booklet aber noch nicht versendet. Doppel-Sicherung —
-                      bereits ausgelieferte Stufen (sent/viewed/shared) nie warnen,
-                      selbst wenn picked_up_at theoretisch noch gesetzt wäre. */}
-                  {order.picked_up_at &&
-                  order.status !== "sent" &&
-                  order.status !== "viewed" &&
-                  order.status !== "shared" ? (
-                    <PickupPendingBadge pickedUpAt={order.picked_up_at} />
-                  ) : null}
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "flex-end",
+                      flexWrap: "wrap",
+                      gap: 6,
+                    }}
+                  >
+                    <OrderStatusBadge status={order.status} />
+                    {order.status === "generated" ? (
+                      <ReelStatePill
+                        reelStatus={reelByOrder.get(order.id) ?? null}
+                      />
+                    ) : null}
+                    {/* Warn-Badge (Block C / Schritt 2): roapp meldete „Abgeholt",
+                        Booklet aber noch nicht versendet. Doppel-Sicherung —
+                        bereits ausgelieferte Stufen (sent/viewed/shared) nie warnen,
+                        selbst wenn picked_up_at theoretisch noch gesetzt wäre. */}
+                    {order.picked_up_at &&
+                    order.status !== "sent" &&
+                    order.status !== "viewed" &&
+                    order.status !== "shared" ? (
+                      <PickupPendingBadge pickedUpAt={order.picked_up_at} />
+                    ) : null}
+                  </div>
+                  <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+                    {DATE_FORMAT.format(new Date(order.created_at))}
+                  </div>
                 </div>
-                <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>
-                  {DATE_FORMAT.format(new Date(order.created_at))}
-                </div>
-              </div>
-            </Link>
-          ))}
-        </div>
+              </Link>
+            ))}
+          </div>
+
+          <OrdersPagination
+            page={page}
+            totalPages={totalPages}
+            status={activeStatus}
+            quick={activeQuick}
+          />
+        </>
       )}
     </div>
   );

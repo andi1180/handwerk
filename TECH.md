@@ -2259,6 +2259,48 @@ Die Liste lädt zusätzlich `picked_up_at` (AUTHENTICATED, RLS) und rendert `<Pi
 
 `pnpm typecheck` + `pnpm build` grün.
 
+## Block C / Schritt 3 — Pagination + Quick-Filter der Auftragsliste
+
+Die Auftragsliste ([app/portal/orders/page.tsx](app/portal/orders/page.tsx)) bekommt **server-seitige Pagination** (20 Karten/Seite) und eine **Quick-Filter-Leiste** (drei Schnellfilter neben dem bestehenden Status-Dropdown). **Keine Migration**, **kein Webhook berührt** — reine Lese-/Filter-Logik. `business_id` weiter nur aus Session (`getCurrentBusiness` + AUTHENTICATED Client, RLS). Server Components default; Pagination + Quick-Filter sind `<Link>`-basiert (kein Client-State, **kein `<form>`**).
+
+### Zwei Filter-Achsen, mutually exclusive ([lib/orders/filters.ts](lib/orders/filters.ts))
+
+Geteilte Quelle (`QuickFilter`-Typ + `isQuickFilter`-Guard + `ORDERS_PAGE_SIZE = 20` + `buildOrdersUrl`):
+
+- **`?status=`** — Status-Dropdown (ein einzelner Status, Block B, unverändert).
+- **`?quick=`** — Quick-Filter mit **Mehrfach-/Sonderbedingungen**, die kein einzelner Status-Wert ausdrückt → eigener Query-Parameter (nicht über `?status=` gehängt).
+
+Die Achsen **schließen sich aus** — `quick` hat Vorrang: ist ein gültiger `quick` gesetzt, wird der Dropdown-Wert verworfen (`activeStatus = !activeQuick && isOrderStatus(...)`), das Dropdown zeigt sichtbar „Alle". Da jede Navigation eine **frische URL** baut (Quick-Link → nur `?quick=`, Dropdown-`onChange` → nur `?status=`), kann nie gleichzeitig beides aktiv sein. „Zuletzt benutzter gewinnt" ergibt sich automatisch aus der jeweils neuen URL.
+
+### Drei Quick-Filter ([components/order-quick-filters.tsx](components/order-quick-filters.tsx), Server Component)
+
+Jeder Button ist ein `<Link>` (kein Client-State, keine `<form>`): inaktiv → `?quick=<key>`, **aktiv → `/portal/orders`** (Toggle aus). Genau **einer** kann aktiv sein (`active`-Prop), Hervorhebung via `data-active` + `aria-current`. Beim Filterwechsel entfällt `?page=` ⇒ zurück auf Seite 1. Definitionen (server-seitig in `page.tsx` in WHERE-Logik übersetzt):
+
+| Quick | i18n-Label | Bedingung |
+| --- | --- | --- |
+| `flagged` | „Geflaggt" | `picked_up_at` gesetzt **UND** `status IN (draft, finalized, generated)` — exakt die Warn-Badge-Bedingung aus Schritt 2 (`NOT IN {sent, viewed, shared}` == `IN {draft, finalized, generated}` über den vollen Wertebereich, daher ohne `.not(...,"in",...)`-Quoting via `.in(...)`). |
+| `drafts` | „Entwürfe" | `status = 'draft'`. |
+| `ungenerated` | „Nicht generiert" | `status IN ('draft', 'finalized')`. |
+
+Stil ([app/globals.css](app/globals.css), `.quick-filter`): dezente, **gold-umrahmte** Chips (`--gold-border`, transparent, sekundärer Text); Hover → `--gold`; aktiv → `--gold-light`-Hintergrund + `--gold`-Rahmen + dunkleres Gold (`#8A7320`, wie das Status-Badge).
+
+### Server-seitige Pagination (20/Seite)
+
+`page.tsx` liest `?page=` (1-indexiert, ungültig/≤0 ⇒ 1), wendet den aktiven Filter auf **eine** Query an (`.select(..., { count: "exact" })` ⇒ `data` = Seitenfenster via `.range(from, from+19)`, `count` = **gefilterte** Gesamtzahl in **einem** Round-Trip), sortiert `created_at DESC`. `totalPages = max(1, ceil(count / 20))`. Die Pagination **respektiert den aktiven Filter** (Status ODER Quick), weil derselbe Filter vor `count`+`range` greift und die Links ihn über `buildOrdersUrl` mitführen.
+
+- **Overshoot-Redirect:** angeforderte `page > totalPages` (manuell editierte URL / veralteter Link nach Löschungen) ⇒ `redirect(buildOrdersUrl({ …, page: totalPages }))`. Damit gilt nach der Weiche `orders.length === 0` ⟺ `total === 0` (keine „leere Seite N").
+- **[components/orders-pagination.tsx](components/orders-pagination.tsx)** (Server Component): „Zurück"/„Weiter" als `<Link>` (bei nur einer Seite gar nicht gerendert), Rand-Seiten als `data-disabled`-`<span>` (`pointer-events: none`); „Seite {page} von {total}". Hrefs über `buildOrdersUrl` (Filter mitgeführt, `?page=` erst ab Seite 2).
+
+### Layout ([app/portal/orders/page.tsx](app/portal/orders/page.tsx) + `.orders-header`)
+
+Reihenfolge von oben (vertikaler Stack `.orders-header`, ersetzt die frühere horizontale `.orders-toolbar`): **(1)** Seitentitel → **(2)** Status-Dropdown → **(3)** „Neuer Auftrag"-Button → **(4)** drei Quick-Filter. (2)–(4) erscheinen, sobald es Aufträge gibt **oder** ein Filter aktiv ist (`showFilter = total > 0 || hasActiveFilter`); ein leeres Filter-Ergebnis behält die Leiste (Hinweis `orders.emptyFiltered`, jetzt generisch „Keine Aufträge für diese Auswahl."), ein leerer Betrieb ohne Filter zeigt nur den Onboarding-Card. Pagination unter der Liste.
+
+### i18n
+
+Neue Schlüssel in [lib/i18n/de.ts](lib/i18n/de.ts) (`orders.*`): `quickLabel`, `quickFlagged`/`quickDrafts`/`quickUngenerated`, `pagination`, `prevPage`/`nextPage`, `pageOf` (`{page}`/`{total}`-Interpolation); `emptyFiltered` generischer gefasst.
+
+`pnpm typecheck` + `pnpm build` grün.
+
 ---
 
 > Nächste Migration: **0010**.
