@@ -69,7 +69,7 @@ export function parseWebhookBody(body: unknown): ParsedWebhook {
  */
 export function classifyEvent(parsed: ParsedWebhook): WebhookEventKind | null {
   if (parsed.objectType !== "order") return null;
-  const name = parsed.eventName;
+  const name = parsed.eventName?.toLowerCase();
   if (!name) return null;
   if (name.endsWith(".created")) return "created";
   if (name.endsWith(".status.changed")) return "picked_up";
