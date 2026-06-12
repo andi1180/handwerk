@@ -182,6 +182,9 @@ export async function PATCH(request: Request) {
     contact_email: contactEmail,
     contact_phone: contactPhone,
     ai_context: aiContext,
+    // roapp-Connector (Block B, Punkt 3): nur ein expliziter `false`
+    // deaktiviert — Default bleibt AN (siehe normalizeSettings).
+    connector_roapp_enabled: payload.connector_roapp_enabled !== false,
   };
 
   const { data, error } = await supabase

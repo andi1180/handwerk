@@ -1,16 +1,29 @@
 import { DEFAULT_LOCALE, t } from "@/lib/i18n";
 
 /**
- * Alle möglichen Auftrags-Status (Spiegel der DB-Check-Constraint auf
- * `orders.status`). Quelle der Wahrheit für Liste und Badge.
+ * Alle möglichen Auftrags-Status in Lifecycle-Reihenfolge (Spiegel der
+ * DB-Check-Constraint auf `orders.status`). Quelle der Wahrheit für Liste,
+ * Badge und den Status-Filter (Block B, Punkt 5) — als Laufzeit-Array, damit
+ * sich die Filter-Optionen daraus ableiten lassen.
  */
-export type OrderStatus =
-  | "draft"
-  | "finalized"
-  | "generated"
-  | "sent"
-  | "viewed"
-  | "shared";
+export const ORDER_STATUSES = [
+  "draft",
+  "finalized",
+  "generated",
+  "sent",
+  "viewed",
+  "shared",
+] as const;
+
+export type OrderStatus = (typeof ORDER_STATUSES)[number];
+
+/** Typ-Guard: ist der String ein gültiger Auftrags-Status? */
+export function isOrderStatus(value: unknown): value is OrderStatus {
+  return (
+    typeof value === "string" &&
+    (ORDER_STATUSES as readonly string[]).includes(value)
+  );
+}
 
 type BadgeStyle = { background: string; border: string; color: string };
 

@@ -57,6 +57,9 @@ export const de = {
     title: "Aufträge",
     new: "Neuer Auftrag",
     empty: "Noch keine Aufträge angelegt.",
+    emptyFiltered: "Keine Aufträge mit diesem Status.",
+    filterLabel: "Status",
+    filterAll: "Alle",
     noDescription: "Keine Beschreibung",
     customerName: "Kundenname",
     email: "E-Mail",
@@ -98,6 +101,12 @@ export const de = {
     groupLinks: "Online-Präsenz",
     groupDelivery: "Auslieferung",
     name: "Betriebsname",
+    contactEmail: "Kontakt-E-Mail (für Antworten der Kunden)",
+    contactEmailHint:
+      "An diese Adresse antworten Kunden auf die Booklet-E-Mail. Sie darf von Ihrer Login-Adresse abweichen.",
+    connectorRoapp: "roapp-Connector aktivieren",
+    connectorRoappHint:
+      "Aufträge werden automatisch aus roapp angelegt und ausgeliefert, sobald sie dort als „Abgeholt“ markiert sind. Bei aktivem Connector fragt der manuelle Versand zur Sicherheit nach.",
     primaryColor: "Primärfarbe",
     secondaryColor: "Sekundärfarbe",
     font: "Schriftart",
@@ -132,7 +141,6 @@ export const de = {
       introTaglineHint:
         "Fester Claim unter dem KI-Titel auf der Intro-Seite (optional).",
       outroMessage: "Outro-Nachricht",
-      contactEmail: "Kontakt-E-Mail (öffentlich)",
       contactPhone: "Telefon (öffentlich)",
       emailInvalid: "Bitte eine gültige E-Mail-Adresse angeben.",
       tooLong: "Der Text ist zu lang.",
@@ -269,6 +277,8 @@ export const de = {
     delivering: "Liefere aus…",
     confirm: "Booklet jetzt ausliefern?",
     confirmText: "Der Kunde erhält den Link zum Booklet per E-Mail.",
+    connectorActive:
+      "Der roapp-Connector ist aktiv — die Auslieferung erfolgt normalerweise automatisch, sobald der Auftrag in roapp als „Abgeholt“ markiert wird. Trotzdem jetzt manuell senden?",
     reelNotReady: "Das Reel ist noch nicht fertig. Trotzdem ausliefern?",
     noEmail: "Keine E-Mail hinterlegt — Auslieferung per QR (folgt).",
     delivered: "Ausgeliefert am {date}",

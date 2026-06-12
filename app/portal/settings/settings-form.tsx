@@ -116,13 +116,20 @@ export function SettingsForm({
   const [outroMessage, setOutroMessage] = useState(
     business.settings.outro_message ?? "",
   );
+  // Kontakt-E-Mail (für Antworten der Kunden, reply-to im Versand). Beim ersten
+  // Anzeigen mit der Login-E-Mail (business_email) vorbelegt, falls noch nicht
+  // gesetzt — so greift der reply-to ab dem ersten Speichern (Block B, Punkt 6).
   const [contactEmail, setContactEmail] = useState(
-    business.settings.contact_email ?? "",
+    business.settings.contact_email ?? business.business_email,
   );
   const [contactPhone, setContactPhone] = useState(
     business.settings.contact_phone ?? "",
   );
   const [aiContext, setAiContext] = useState(business.settings.ai_context ?? "");
+  // roapp-Connector aktiviert (Block B, Punkt 3) — Default AN (normalisiert).
+  const [connectorRoapp, setConnectorRoapp] = useState(
+    business.settings.connector_roapp_enabled,
+  );
 
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -246,6 +253,7 @@ export function SettingsForm({
           contact_email: contactEmail,
           contact_phone: contactPhone,
           ai_context: aiContext,
+          connector_roapp_enabled: connectorRoapp,
         }),
       });
 
@@ -278,6 +286,19 @@ export function SettingsForm({
           onChange={(v) => {
             markDirty();
             setName(v);
+          }}
+        />
+        {/* Kontakt-E-Mail (reply-to im Versand). Vorbelegt mit der Login-E-Mail,
+            darf aber abweichen — Hinweis macht das klar (Block B, Punkt 6). */}
+        <TextField
+          label={t(DEFAULT_LOCALE, "settings.contactEmail")}
+          type="email"
+          value={contactEmail}
+          placeholder="kontakt@meinbetrieb.de"
+          hint={t(DEFAULT_LOCALE, "settings.contactEmailHint")}
+          onChange={(v) => {
+            markDirty();
+            setContactEmail(v);
           }}
         />
       </div>
@@ -457,16 +478,8 @@ export function SettingsForm({
             setOutroMessage(v);
           }}
         />
-        <TextField
-          label={t(DEFAULT_LOCALE, "settings.content.contactEmail")}
-          type="email"
-          value={contactEmail}
-          placeholder="kontakt@meinbetrieb.de"
-          onChange={(v) => {
-            markDirty();
-            setContactEmail(v);
-          }}
-        />
+        {/* Kontakt-E-Mail ist nach oben in die „Betrieb"-Gruppe gewandert
+            (Block B, Punkt 6) — dieselbe contact_email, eine Quelle. */}
         <TextField
           label={t(DEFAULT_LOCALE, "settings.content.contactPhone")}
           value={contactPhone}
@@ -500,6 +513,17 @@ export function SettingsForm({
       {/* Auslieferung */}
       <div className="card" style={cardStyle}>
         <h2 style={groupTitleStyle}>{t(DEFAULT_LOCALE, "settings.groupDelivery")}</h2>
+        <Toggle
+          label={t(DEFAULT_LOCALE, "settings.connectorRoapp")}
+          checked={connectorRoapp}
+          onChange={(v) => {
+            markDirty();
+            setConnectorRoapp(v);
+          }}
+        />
+        <span style={hintStyle}>
+          {t(DEFAULT_LOCALE, "settings.connectorRoappHint")}
+        </span>
         <SelectField
           label={t(DEFAULT_LOCALE, "settings.deliveryMode")}
           value={deliveryMode}

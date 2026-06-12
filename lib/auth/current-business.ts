@@ -53,6 +53,14 @@ export type BusinessSettings = {
    * wiederverwendet. KONTEXT, keine Anweisung. Optional.
    */
   ai_context: string | null;
+  /**
+   * roapp-Connector aktiviert (Block B, Punkt 3). Steuert aktuell nur die
+   * Auslieferungs-Button-UX im Portal (Safe-Mode-Rückfrage bei aktivem
+   * Connector). Default `true` für bestehende Betriebe: der Webhook ist live
+   * und legt/liefert automatisch, das Verhalten soll sich nicht still ändern —
+   * fehlt der Key/ist er kein Boolean, gilt der Connector als AN.
+   */
+  connector_roapp_enabled: boolean;
 };
 
 /**
@@ -63,6 +71,8 @@ export type BusinessSettings = {
 export type CurrentBusiness = {
   id: string;
   name: string;
+  /** Login-/Rechnungs-E-Mail des Betriebs (Default für die öffentliche Kontakt-Mail). */
+  business_email: string;
   default_language: string;
   status: string;
   branding: BusinessBranding;
@@ -74,6 +84,7 @@ export type CurrentBusiness = {
 type BusinessRow = {
   id: string;
   name: string;
+  business_email: string;
   default_language: string;
   status: string;
   branding: unknown;
@@ -159,6 +170,9 @@ export function normalizeSettings(raw: unknown): BusinessSettings {
     contact_email: asTrimmedOrNull(s.contact_email),
     contact_phone: asTrimmedOrNull(s.contact_phone),
     ai_context: asTrimmedOrNull(s.ai_context),
+    // Default AN (true): nur ein expliziter `false` deaktiviert den Connector.
+    // Fehlend/ungültig ⇒ true, damit sich live-Verhalten nicht still ändert.
+    connector_roapp_enabled: s.connector_roapp_enabled !== false,
   };
 }
 
@@ -188,7 +202,9 @@ export async function getCurrentBusiness(): Promise<CurrentBusiness | null> {
 
   const { data: business } = await supabase
     .from("businesses")
-    .select("id, name, default_language, status, branding, settings, retention_months")
+    .select(
+      "id, name, business_email, default_language, status, branding, settings, retention_months",
+    )
     .eq("id", membership.business_id)
     .maybeSingle<BusinessRow>();
   if (!business) return null;
@@ -204,6 +220,7 @@ export async function getCurrentBusiness(): Promise<CurrentBusiness | null> {
   return {
     id: business.id,
     name: business.name,
+    business_email: business.business_email,
     default_language: business.default_language,
     status: business.status,
     branding: normalizeBranding(business.branding),

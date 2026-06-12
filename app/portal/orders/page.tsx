@@ -4,8 +4,10 @@ import { getCurrentBusiness } from "@/lib/auth/current-business";
 import { DEFAULT_LOCALE, t } from "@/lib/i18n";
 import {
   OrderStatusBadge,
+  isOrderStatus,
   type OrderStatus,
 } from "@/components/order-status-badge";
+import { OrderStatusFilter } from "@/components/order-status-filter";
 import {
   ReelStatePill,
   type ReelStatus,
@@ -32,19 +34,36 @@ const DATE_FORMAT = new Intl.DateTimeFormat("de-DE", {
  * Server-Client — RLS skopiert automatisch auf den Betrieb; zusätzlich wird
  * defensiv nach `business_id` aus `getCurrentBusiness` gefiltert.
  */
-export default async function OrdersPage() {
+export default async function OrdersPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ status?: string }>;
+}) {
   const business = await getCurrentBusiness();
   if (!business) return null;
 
+  // Status-Filter (Block B, Punkt 5): nur ein gültiger Status filtert, sonst
+  // „Alle". Server-seitig gefiltert — konsistent damit, wie die Liste lädt.
+  const { status: statusParam } = await searchParams;
+  const statusFilter: OrderStatus | null = isOrderStatus(statusParam)
+    ? statusParam
+    : null;
+
   const supabase = await createClient();
-  const { data } = await supabase
+  let query = supabase
     .from("orders")
     .select("id, customer_name, external_ref, short_summary, status, created_at")
-    .eq("business_id", business.id)
+    .eq("business_id", business.id);
+  if (statusFilter) query = query.eq("status", statusFilter);
+  const { data } = await query
     .order("created_at", { ascending: false })
     .returns<OrderListRow[]>();
 
   const orders = data ?? [];
+
+  // Filter-Leiste zeigen, sobald es Aufträge gibt ODER ein Filter aktiv ist
+  // (damit man aus einem leeren Filter-Ergebnis wieder zurück auf „Alle" kann).
+  const showFilter = orders.length > 0 || statusFilter !== null;
 
   // Zweite Achse: Reel-Render-Status. Nur für generierte Aufträge relevant
   // (Booklet existiert, noch nicht versendet). booklets sind member-lesbar
@@ -73,25 +92,43 @@ export default async function OrdersPage() {
         </Link>
       </div>
 
-      {orders.length === 0 ? (
-        <div
-          className="card"
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            gap: 16,
-            textAlign: "center",
-            padding: "40px 24px",
-          }}
-        >
-          <p style={{ margin: 0, color: "var(--text-secondary)" }}>
-            {t(DEFAULT_LOCALE, "orders.empty")}
-          </p>
-          <Link href="/portal/orders/new" className="btn-dark">
-            {t(DEFAULT_LOCALE, "orders.new")}
-          </Link>
+      {showFilter ? (
+        <div style={{ marginBottom: 16 }}>
+          <OrderStatusFilter value={statusFilter ?? "all"} />
         </div>
+      ) : null}
+
+      {orders.length === 0 ? (
+        statusFilter ? (
+          // Aktiver Filter ohne Treffer — Hinweis, Filter-Leiste bleibt oben.
+          <div
+            className="card"
+            style={{ textAlign: "center", padding: "32px 24px" }}
+          >
+            <p style={{ margin: 0, color: "var(--text-secondary)" }}>
+              {t(DEFAULT_LOCALE, "orders.emptyFiltered")}
+            </p>
+          </div>
+        ) : (
+          <div
+            className="card"
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: 16,
+              textAlign: "center",
+              padding: "40px 24px",
+            }}
+          >
+            <p style={{ margin: 0, color: "var(--text-secondary)" }}>
+              {t(DEFAULT_LOCALE, "orders.empty")}
+            </p>
+            <Link href="/portal/orders/new" className="btn-dark">
+              {t(DEFAULT_LOCALE, "orders.new")}
+            </Link>
+          </div>
+        )
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           {orders.map((order) => (

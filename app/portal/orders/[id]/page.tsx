@@ -276,6 +276,7 @@ export default async function OrderDetailPage({
           orderId={order.id}
           hasEmail={Boolean(order.customer_email)}
           reelReady={reelStatus === "ready"}
+          connectorEnabled={business?.settings.connector_roapp_enabled ?? true}
         />
       ) : null}
     </div>

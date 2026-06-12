@@ -167,6 +167,7 @@ export async function POST(
         businessName: business.name,
         bookletUrl,
         replyTo: business.settings.contact_email ?? undefined,
+        websiteUrl: business.settings.website_url ?? undefined,
       });
       emailSent = true;
     } catch (error) {

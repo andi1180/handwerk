@@ -34,6 +34,8 @@ export type BookletEmailParams = {
   bookletUrl: string;
   /** Öffentliche Betriebs-Kontakt-Mail als reply-to (optional). */
   replyTo?: string;
+  /** Website des Betriebs (settings.website_url) — als seriöser Abschluss, optional. */
+  websiteUrl?: string;
 };
 
 /** Minimaler HTML-Escape für interpolierte Werte (Name/Betrieb/URL). */
@@ -54,16 +56,33 @@ function fromDisplayName(name: string): string {
   return safe.length > 0 ? safe : "Valooro";
 }
 
+/**
+ * Normalisiert die hinterlegte Website (Freitext, mit/ohne Protokoll) auf eine
+ * klickbare `href` (mit Protokoll) + eine kompakte Anzeige (ohne Protokoll/
+ * Trailing-Slash). Leere Eingabe ⇒ null (kein Website-Block).
+ */
+function normalizeWebsite(
+  raw: string | undefined,
+): { href: string; display: string } | null {
+  const trimmed = raw?.trim();
+  if (!trimmed) return null;
+  const href = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+  const display = trimmed.replace(/^https?:\/\//i, "").replace(/\/+$/, "");
+  return { href, display };
+}
+
 /** Baut HTML- + Plaintext-Body der Auslieferungs-E-Mail. */
 function renderBookletEmail(params: {
   customerName: string;
   businessName: string;
   bookletUrl: string;
+  websiteUrl?: string;
 }): { html: string; text: string } {
   const name = params.customerName.trim();
   const greeting = name.length > 0 ? `Hallo ${name},` : "Hallo,";
   const business = params.businessName.trim() || "Ihr Betrieb";
   const url = params.bookletUrl;
+  const website = normalizeWebsite(params.websiteUrl);
 
   const text = [
     greeting,
@@ -74,12 +93,24 @@ function renderBookletEmail(params: {
     "",
     "Viele Grüße",
     business,
+    // Website als seriöser Abschluss (nur wenn hinterlegt).
+    ...(website ? ["", website.display] : []),
   ].join("\n");
 
   // E-Mail-HTML: Tabellen-Layout + Inline-Styles für maximale Client-Kompatibilität.
   const eName = escapeHtml(greeting);
   const eBusiness = escapeHtml(business);
   const eUrl = escapeHtml(url);
+  // Website-Abschluss (nur wenn hinterlegt): Betriebsname + klickbare Domain,
+  // dezent unter der Signatur.
+  const websiteBlock = website
+    ? `
+                <div style="border-top:1px solid #eeeae0;margin:20px 0 0;padding-top:16px;text-align:center;">
+                  <a href="${escapeHtml(website.href)}" style="font-size:13px;font-weight:600;color:${ACCENT};text-decoration:none;">${eBusiness}</a>
+                  <span style="font-size:13px;color:#aaaaaa;"> · </span>
+                  <a href="${escapeHtml(website.href)}" style="font-size:13px;color:#888888;text-decoration:none;">${escapeHtml(website.display)}</a>
+                </div>`
+    : "";
   const html = `<!DOCTYPE html>
 <html lang="de">
   <head>
@@ -106,7 +137,7 @@ function renderBookletEmail(params: {
                 </table>
                 <p style="margin:0 0 24px;font-size:13px;line-height:1.5;color:#888888;">Falls der Button nicht funktioniert, kopieren Sie diesen Link in Ihren Browser:<br /><a href="${eUrl}" style="color:#888888;">${eUrl}</a></p>
                 <div style="border-top:1px solid #eeeae0;margin:0 0 20px;"></div>
-                <p style="margin:0;font-size:15px;line-height:1.55;">Viele Grüße<br />${eBusiness}</p>
+                <p style="margin:0;font-size:15px;line-height:1.55;">Viele Grüße<br />${eBusiness}</p>${websiteBlock}
               </td>
             </tr>
           </table>
@@ -128,7 +159,8 @@ function renderBookletEmail(params: {
 export async function sendBookletEmail(
   params: BookletEmailParams,
 ): Promise<void> {
-  const { to, customerName, businessName, bookletUrl, replyTo } = params;
+  const { to, customerName, businessName, bookletUrl, replyTo, websiteUrl } =
+    params;
   const resend = getResend();
 
   const subject = `Ihr Booklet von ${businessName.trim() || "Ihrem Betrieb"}`;
@@ -136,6 +168,7 @@ export async function sendBookletEmail(
     customerName,
     businessName,
     bookletUrl,
+    websiteUrl,
   });
 
   const { error } = await resend.emails.send({

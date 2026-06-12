@@ -2166,6 +2166,28 @@ Die Zeile über dem Thumbnail-Raster lief auf schmalen Viewports über den recht
 
 `pnpm typecheck` + `pnpm build` grün.
 
+## Block B — Settings-/E-Mail-/Listen-/Connector-Politur
+
+Vier kleine Funktionen am Portal. **Keine Migration** (alles über bestehende Spalten/`settings`-jsonb), **kein Webhook-Pfad geändert**. `business_id` weiter ausschließlich aus der Session/RLS, nie aus dem Client. Kein `<form>`, kein `any`, Server Components default.
+
+### Punkt 6 — Kontakt-E-Mail oben in den Settings ([settings-form.tsx](app/portal/settings/settings-form.tsx), [current-business.ts](lib/auth/current-business.ts))
+
+`settings.contact_email` (existierte im Schema + war bereits als `replyTo` im Versand verdrahtet, hatte aber nur ein UI-Feld in der „Booklet-Inhalt"-Gruppe) ist jetzt **ganz oben in der „Betrieb"-Gruppe** beim Firmennamen, mit klarem Label **„Kontakt-E-Mail (für Antworten der Kunden)"** + Hinweis, dass die Adresse von der Login-Adresse abweichen darf. Das alte Feld in „Booklet-Inhalt" ist **entfernt** (eine Quelle, kein Duplikat; `settings.content.contactEmail`-i18n-Key gelöscht). **Default beim ersten Anzeigen:** ist `contact_email` noch nicht gesetzt, wird das Feld mit der **Login-E-Mail** (`businesses.business_email`) vorbelegt — so greift der `replyTo` ab dem ersten Speichern. Dafür lädt `getCurrentBusiness` zusätzlich `business_email` (neues Feld in `CurrentBusiness`/`BusinessRow`/Select/Return). Validierung (E-Mail-Format) + PATCH-Pfad unverändert; der Deliver-Handler nutzt `business.settings.contact_email` bereits als `replyTo`.
+
+### Punkt 2 — Website am Ende der Booklet-E-Mail ([booklet-email.ts](lib/email/booklet-email.ts), [deliver/route.ts](app/api/portal/orders/[id]/deliver/route.ts))
+
+`sendBookletEmail` bekommt einen **optionalen** `websiteUrl`-Parameter; der **manuelle** Deliver-Handler reicht `business.settings.website_url ?? undefined` durch. Ist eine Website hinterlegt, erscheint sie als **seriöser Abschluss** unter der Signatur: Betriebsname (verlinkt) · klickbare Domain (HTML, dezent), plus eine Zeile im Plaintext-Body. Helfer `normalizeWebsite` baut aus Freitext (mit/ohne Protokoll) eine `href` (mit `https://`) + kompakte Anzeige (ohne Protokoll/Trailing-Slash); leer ⇒ kein Block. **Optional** = der bestehende **Webhook-Deliver-Pfad bleibt unangetastet** (ruft `sendBookletEmail` ohne `websiteUrl` ⇒ keine Website, kein Pfad geändert).
+
+### Punkt 5 — Status-Filter über der Auftragsliste ([orders/page.tsx](app/portal/orders/page.tsx), [order-status-filter.tsx](components/order-status-filter.tsx))
+
+Einfaches `<select>` (EINE Auswahl) über der Liste: **„Alle"** (Default) + alle Auftrags-Status. Die Statusliste ist jetzt das **Laufzeit-Array `ORDER_STATUSES`** in [order-status-badge.tsx](components/order-status-badge.tsx) (Typ `OrderStatus` daraus abgeleitet, neuer Guard `isOrderStatus`) — eine Quelle für Badge, Liste und Filter. Die Liste lädt **server-seitig** (Server Component), daher filtert auch der Filter **server-seitig**: `page.tsx` liest `searchParams.status` (Next-15-`Promise`), validiert gegen `ORDER_STATUSES` und hängt bei gültigem Wert `.eq("status", …)` an die Query; ungültig/fehlend ⇒ „Alle". Die kleine Client-Komponente `<OrderStatusFilter>` navigiert per `router.push("/portal/orders?status=…")` (kein `<form>`, reine Navigation). Filter-Leiste sichtbar, sobald Aufträge existieren **oder** ein Filter aktiv ist; leeres Filter-Ergebnis zeigt den Hinweis `orders.emptyFiltered` (Leiste bleibt, Rückweg auf „Alle" möglich). i18n `orders.filterLabel`/`filterAll`/`emptyFiltered`.
+
+### Punkt 3 — roapp-Connector-Toggle + Deliver-Button-Verhalten ([settings-form.tsx](app/portal/settings/settings-form.tsx), [deliver-controls.tsx](app/portal/orders/[id]/deliver-controls.tsx))
+
+**(a) Toggle** „roapp-Connector aktivieren" in der „Auslieferung"-Settings-Gruppe → `settings.connector_roapp_enabled` (boolean, `settings`-jsonb, keine Migration). **Default AN für bestehende Betriebe:** `normalizeSettings` + der PATCH-Pfad behandeln nur einen **expliziten `false`** als „aus" (`s.connector_roapp_enabled !== false`) — fehlt der Key/ist er kein Boolean, gilt der Connector als AN, damit sich das live-Webhook-Verhalten (automatisches Anlegen/Ausliefern) **nicht still ändert**. Der Flag steuert **aktuell nur die Button-UX** (siehe b); funktionales Gaten des Webhooks ist ein Folgeschritt (Webhook-Pfad bewusst unangetastet). **(b) Deliver-Button** (`<DeliverButton>`, Status `generated`) bekommt Prop `connectorEnabled`: **Connector AN** ⇒ prominent (`btn-gold`) + **Safe-Mode-Rückfrage** vor dem Senden (`deliver.connectorActive`: „… die Auslieferung erfolgt normalerweise automatisch … Trotzdem jetzt manuell senden?", Abbrechen/Bestätigen via `window.confirm`); **Connector AUS** ⇒ **sekundär** gestylt (`btn-dark`, dezent — manuelles Senden ist hier der Normalweg, keine Connector-Warnung) + normale Bestätigung. Die bewussten Reel-/E-Mail-Hinweise (`reelNotReady`/`noEmail`) bleiben in **beiden** Fällen erhalten (kein harter Block). Kein `<form>` — State + `onClick`. i18n `settings.connectorRoapp`/`connectorRoappHint`, `deliver.connectorActive`.
+
+`pnpm typecheck` + `pnpm build` grün.
+
 ---
 
 > Nächste Migration: **0008**.

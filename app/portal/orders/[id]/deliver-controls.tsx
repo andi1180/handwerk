@@ -58,23 +58,39 @@ function NoticeBox({ text }: { text: string }) {
   );
 }
 
-/** Prominenter „Booklet ausliefern"-Button (Status `generated`). */
+/**
+ * „Booklet ausliefern"-Button (Status `generated`).
+ *
+ * Verhalten abhängig vom roapp-Connector (Block B, Punkt 3):
+ *  - Connector AN (Default): prominent (`btn-gold`) + Safe-Mode-Rückfrage, weil
+ *    die Auslieferung normalerweise automatisch über roapp läuft.
+ *  - Connector AUS: sekundär gestylt (`btn-dark`, dezent) — manuelles Senden ist
+ *    hier der Normalweg; keine Connector-Warnung. Die bewussten Reel-/E-Mail-
+ *    Hinweise bleiben in beiden Fällen erhalten (kein harter Block).
+ */
 export function DeliverButton({
   orderId,
   hasEmail,
   reelReady,
+  connectorEnabled,
 }: {
   orderId: string;
   hasEmail: boolean;
   reelReady: boolean;
+  connectorEnabled: boolean;
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
 
   const handleDeliver = useCallback(() => {
-    // Bestätigungsdialog mit bewussten Warnungen (kein harter Block).
-    const lines: string[] = [t(DEFAULT_LOCALE, "deliver.confirm")];
+    // Bestätigungsdialog. Bei aktivem Connector führt die Safe-Mode-Rückfrage,
+    // sonst die normale Bestätigung; darunter die bewussten Warnungen.
+    const lines: string[] = [
+      connectorEnabled
+        ? t(DEFAULT_LOCALE, "deliver.connectorActive")
+        : t(DEFAULT_LOCALE, "deliver.confirm"),
+    ];
     if (hasEmail) lines.push(t(DEFAULT_LOCALE, "deliver.confirmText"));
     if (!reelReady) lines.push(t(DEFAULT_LOCALE, "deliver.reelNotReady"));
     if (!hasEmail) lines.push(t(DEFAULT_LOCALE, "deliver.noEmail"));
@@ -115,13 +131,13 @@ export function DeliverButton({
         setBusy(false);
       }
     })();
-  }, [hasEmail, reelReady, orderId, router]);
+  }, [hasEmail, reelReady, connectorEnabled, orderId, router]);
 
   return (
     <div style={{ marginTop: 24 }}>
       <button
         type="button"
-        className="btn-gold capture-btn"
+        className={`${connectorEnabled ? "btn-gold" : "btn-dark"} capture-btn`}
         onClick={handleDeliver}
         disabled={busy}
         style={{ opacity: busy ? 0.6 : 1, cursor: busy ? "default" : "pointer" }}
