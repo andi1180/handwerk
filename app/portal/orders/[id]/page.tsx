@@ -5,16 +5,18 @@ import { getCurrentBusiness } from "@/lib/auth/current-business";
 import { PHOTO_COUNT, VIDEO_COUNT, VIDEO_SECONDS } from "@/lib/settings/options";
 import { DEFAULT_LOCALE, t } from "@/lib/i18n";
 import { OrderStatusBadge } from "@/components/order-status-badge";
+import { CUSTOMER_VIEW_QUERY } from "@/lib/booklet/customer-view";
+import { NO_TRACK_QUERY } from "@/lib/booklet/events";
 import { Capture } from "./capture";
 import { MediaList, type MediaWithUrl } from "./media-list";
-import { FinalizeBanner, FinalizeButton } from "./finalize-controls";
+import { FinalizeButton, ReopenButton } from "./finalize-controls";
 import {
   GenerateButton,
-  GeneratedBanner,
+  GeneratedActions,
   ReelButton,
   type ReelStatus,
 } from "./generate-controls";
-import { DeliverButton, DeliveredBanner } from "./deliver-controls";
+import { DeliverButton } from "./deliver-controls";
 import { getOrderById, getOrderMedia } from "@/lib/orders/queries";
 
 const DATE_FORMAT = new Intl.DateTimeFormat("de-DE", {
@@ -73,18 +75,20 @@ export default async function OrderDetailPage({
   const isDraft = order.status === "draft";
   const isFinalized = order.status === "finalized";
   const isGenerated = order.status === "generated";
-  const isSent = order.status === "sent";
+
+  // Versendet-Stufen (sent/viewed/shared): Booklet ist beim Kunden — Ansehen +
+  // QR bleiben verfügbar, Erstellungs-/Auslieferungs-Aktionen entfallen.
+  const isDelivered =
+    order.status === "sent" ||
+    order.status === "viewed" ||
+    order.status === "shared";
 
   // Reel ist ab der Generierung renderbar — auch nach dem Versand
   // (sent/viewed/shared). FIX 7.1 (REVIEW): liefert ein Betrieb VOR dem
   // Reel-Render aus, wäre das Reel sonst dauerhaft un-renderbar (Sackgasse).
   // Der Render lässt den Order-Status unberührt; das Reel erscheint im
   // bestehenden Booklet unter demselben Link (kein Nachversand, keine E-Mail).
-  const canRenderReel =
-    isGenerated ||
-    isSent ||
-    order.status === "viewed" ||
-    order.status === "shared";
+  const canRenderReel = isGenerated || isDelivered;
 
   // Booklet-Token für den Vorschau-Link (8a-2) + Reel-Status (8b-1a) + sent_at
   // (9c-1) laden. RLS lässt Mitglieder die booklets-Row lesen — kein service_role
@@ -161,26 +165,47 @@ export default async function OrderDetailPage({
         </div>
       </div>
 
-      {/* Abgeschlossen-Banner + „Wieder bearbeiten" (nur Status finalized). */}
-      {isFinalized ? <FinalizeBanner orderId={order.id} /> : null}
-
-      {/* Generiert-Banner + „Vorschau öffnen"/„Neu generieren"/„Wieder bearbeiten". */}
-      {isGenerated ? (
-        <GeneratedBanner orderId={order.id} token={bookletToken} />
-      ) : null}
-
-      {/* Ausgeliefert-Banner + Vorschau-Link (nur Status sent, 9c-1, read-only). */}
-      {isSent ? (
-        <DeliveredBanner
-          deliveredAt={sentAt ? DATE_FORMAT.format(new Date(sentAt)) : null}
-          token={bookletToken}
-        />
-      ) : null}
-
-      {/* QR-Druckansicht (9c-2): Handover am Tresen — öffnet die Bon-taugliche
-          QR-Seite in neuem Tab. Nur sobald ein Booklet existiert (generated/sent). */}
-      {(isGenerated || isSent) && bookletToken ? (
-        <div style={{ marginBottom: 20 }}>
+      {/* Sekundäre Booklet-Aktionen (Layout-Umbau, ersetzt die früheren
+          Top-Banner): kleine, dezente Leiste für ALLE Stufen mit Booklet
+          (generated/sent/viewed/shared) — „Booklet ansehen" (`?c=1` Kunden-
+          Sicht §9d + `&p=1` No-Track §10a.1) und „QR drucken" (9c-2); bei
+          `generated` zusätzlich „Neu generieren" + „Bearbeiten". Die große
+          Folge-Aktion (Erstellen/Ausliefern) lebt unten in der Aktionszone. */}
+      {(isGenerated || isDelivered) && bookletToken ? (
+        <div
+          style={{
+            display: "flex",
+            flexWrap: "wrap",
+            alignItems: "center",
+            gap: 8,
+            marginBottom: 20,
+          }}
+        >
+          {isDelivered ? (
+            <span
+              style={{
+                flexBasis: "100%",
+                fontSize: 13,
+                fontWeight: 600,
+                color: "var(--green-text)",
+              }}
+            >
+              ✓{" "}
+              {sentAt
+                ? t(DEFAULT_LOCALE, "deliver.delivered", {
+                    date: DATE_FORMAT.format(new Date(sentAt)),
+                  })
+                : t(DEFAULT_LOCALE, "deliver.deliveredNoDate")}
+            </span>
+          ) : null}
+          <a
+            className="btn-outline"
+            href={`/b/${bookletToken}?${CUSTOMER_VIEW_QUERY}&${NO_TRACK_QUERY}`}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            {t(DEFAULT_LOCALE, "generate.openPreview")}
+          </a>
           <a
             className="btn-outline"
             href={`/portal/orders/${order.id}/qr`}
@@ -189,6 +214,7 @@ export default async function OrderDetailPage({
           >
             {t(DEFAULT_LOCALE, "qr.printButton")}
           </a>
+          {isGenerated ? <GeneratedActions orderId={order.id} /> : null}
         </div>
       ) : null}
 
@@ -262,26 +288,50 @@ export default async function OrderDetailPage({
         </div>
       </section>
 
-      {/* Prominenter Abschluss-Button am Seitenende (nur Status draft, 6c). */}
+      {/* ───── Aktionszone am Seitenende: immer die nächste fällige Aktion. ───── */}
+
+      {/* draft: „Booklet erstellen" (POSTet finalize — Schritt 1, kein Confirm,
+          kein Chaining; nach dem Refresh erscheint an derselben Stelle Schritt 2). */}
       {isDraft ? (
         <FinalizeButton orderId={order.id} mediaCount={media.length} />
       ) : null}
 
-      {/* Vorschau erzeugen am Seitenende (nur Status finalized, 8a-1). */}
+      {/* finalized: „Booklet erstellen" (POSTet generate, 8a-1) — mit
+          Fortschritts-Häkchen („Medien abgeschlossen") + kleinem „Bearbeiten"
+          (Reopen). Dient zugleich als Recovery, falls generate scheiterte. */}
       {isFinalized ? (
-        <GenerateButton orderId={order.id} mediaCount={media.length} />
+        <div style={{ marginTop: 24 }}>
+          <p
+            style={{
+              margin: 0,
+              fontSize: 13,
+              fontWeight: 600,
+              color: "#8A7320",
+            }}
+          >
+            ✓ {t(DEFAULT_LOCALE, "finalize.done")}
+          </p>
+          <GenerateButton orderId={order.id} mediaCount={media.length} />
+          <ReopenButton orderId={order.id} />
+        </div>
       ) : null}
 
-      {/* Echtes Foto-Reel (8b-1a): async Render + Poll. Ab `generated` und AUCH
-          nach dem Versand (FIX 7.1) — so lässt sich ein Reel nachträglich
-          erzeugen, falls vor dem Render ausgeliefert wurde. Der Render ändert den
-          Order-Status nicht; das Reel erscheint im bestehenden Booklet-Link. */}
+      {/* Reel-Block (8b-1a): async Render + Poll, eigener Abschnitt. Ab
+          `generated` und AUCH nach dem Versand (FIX 7.1) — so lässt sich ein
+          Reel nachträglich erzeugen, falls vor dem Render ausgeliefert wurde.
+          Der Render ändert den Order-Status nicht; das Reel erscheint im
+          bestehenden Booklet-Link. */}
       {canRenderReel ? (
-        <ReelButton
-          orderId={order.id}
-          initialStatus={reelStatus}
-          initialUrl={reelUrl}
-        />
+        <section style={{ marginTop: 32 }}>
+          <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>
+            {t(DEFAULT_LOCALE, "reel.title")}
+          </h2>
+          <ReelButton
+            orderId={order.id}
+            initialStatus={reelStatus}
+            initialUrl={reelUrl}
+          />
+        </section>
       ) : null}
 
       {/* Auslieferung (nur Status generated, 9c-1): die finale Aktion. Warnt,

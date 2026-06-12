@@ -234,28 +234,34 @@ export const de = {
     error: "Aktion fehlgeschlagen. Bitte erneut versuchen.",
   },
   finalize: {
-    button: "Booklet abschließen",
-    confirm: "Booklet abschließen?",
-    confirmText:
-      "Danach sind keine Änderungen mehr möglich. Du kannst es jederzeit wieder zur Bearbeitung öffnen.",
+    // Schritt 1 des Erstellens (POST finalize) — bewusst dasselbe Label wie
+    // Schritt 2 (generate): der Nutzer erlebt EINE Aktion „Booklet erstellen",
+    // der Zwischenzustand zeigt sich nur als „Medien abgeschlossen"-Häkchen.
+    // Kein Bestätigungsdialog mehr — der Schritt ist per „Bearbeiten" voll
+    // reversibel.
+    button: "Booklet erstellen",
+    hint: "Schließt zuerst die Medien ab. Danach erstellst du mit einem zweiten Tippen die persönlichen Texte und den Kunden-Link.",
     needMedia: "Bitte zuerst mindestens ein Medium hinzufügen.",
-    done: "Booklet abgeschlossen",
-    reopen: "Wieder bearbeiten",
+    done: "Medien abgeschlossen",
+    reopen: "Bearbeiten",
     error: "Aktion fehlgeschlagen. Bitte erneut versuchen.",
   },
   generate: {
-    generate: "Vorschau erzeugen",
-    generating: "Erzeuge…",
+    // „Booklet erstellen" statt „Vorschau erzeugen" — der Schritt erstellt das
+    // echte Booklet (KI-Texte + Kunden-Link), keine Vorschau.
+    generate: "Booklet erstellen",
+    generating: "Erstelle Booklet…",
+    hint: "Erstellt die persönlichen Texte und den Kunden-Link. Jederzeit wieder änderbar.",
     regenerate: "Neu generieren",
-    done: "Booklet generiert",
     needMedia: "Bitte zuerst mindestens ein Medium hinzufügen.",
     error: "Erzeugung fehlgeschlagen. Bitte erneut versuchen.",
     timeout: "Zeitüberschreitung. Bitte erneut versuchen.",
     aiNotConfigured:
       "Die KI ist nicht konfiguriert. Bitte später erneut versuchen.",
-    openPreview: "Vorschau öffnen",
+    openPreview: "Booklet ansehen",
   },
   reel: {
+    title: "Reel",
     create: "Reel erstellen",
     starting: "Starte…",
     rendering: "Reel wird erstellt…",

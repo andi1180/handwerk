@@ -2327,6 +2327,31 @@ REVIEW 7.1 (UX-Sackgasse): Reel-Render war nur bei `status='generated'` erlaubt 
 
 ---
 
+## Layout-Umbau Auftrags-Detailseite (nur UI — Positionierung + Benennung)
+
+Umbau der über die Detailseite verstreuten Aktions-Buttons in eine kohärente Anordnung (Basis: Ist-Analyse in FLOW_REDESIGN.md, untracked). **AUSDRÜCKLICH NUR UI: Positionen + Labels.** Alle Route Handler, API-Calls, Status-Übergänge (`draft → finalized → generated → sent → viewed → shared`), der finalize→generate-Zwei-Schritt, der Doppelversand-`count`-Guard, `access_token`/`short_code`-Erhalt bei Re-Generate, FIX 7.1 (Reel ab `generated`, Order-Status unberührt), Webhook-Semantik und Quick-Filter-Logik sind **unverändert** — kein Route-Merge, **kein Chaining**, kein neuer Endpoint, keine Migration. Betroffen: [page.tsx](app/portal/orders/[id]/page.tsx), [finalize-controls.tsx](app/portal/orders/[id]/finalize-controls.tsx), [generate-controls.tsx](app/portal/orders/[id]/generate-controls.tsx), [deliver-controls.tsx](app/portal/orders/[id]/deliver-controls.tsx), [de.ts](lib/i18n/de.ts).
+
+### Umbenennungen (i18n, behebt den Hauptverwirrungsgrund)
+
+- **„Vorschau erzeugen" → „Booklet erstellen"** (`generate.generate`): der Schritt erstellt das echte Booklet (KI-Texte + Kunden-Link), keine Vorschau.
+- **„Booklet abschließen" → ebenfalls „Booklet erstellen"** (`finalize.button`): der finalize-Schritt bleibt funktional ein eigener POST, tritt aber begrifflich hinter die eine Nutzer-Aktion zurück — der Nutzer erlebt zweimal denselben Button („Booklet erstellen"), dazwischen zeigt die Aktionszone den Fortschritt „✓ Medien abgeschlossen" (`finalize.done`). Hinweistexte unter beiden Buttons (`finalize.hint`/`generate.hint`) erklären die zwei Tippen ehrlich.
+- **„Vorschau öffnen" → „Booklet ansehen"** (`generate.openPreview`, Key unverändert), **„Wieder bearbeiten" → „Bearbeiten"** (`finalize.reopen`).
+
+### Eine Aktionszone unten = nächste fällige Aktion je Status
+
+- `draft`: großer Gold-Button **„Booklet erstellen"** (= `POST finalize`, **ohne `window.confirm`** — der frühere Dialog widersprach sich selbst, der Schritt ist per Reopen voll reversibel; `finalize.confirm`/`confirmText` entfernt). `need_media`-Guard client- wie serverseitig unverändert.
+- `finalized`: Häkchen-Zeile „✓ Medien abgeschlossen" + großer Gold-Button **„Booklet erstellen"** (= `POST generate`) + kleiner **„Bearbeiten"**-Button (`<ReopenButton>`, ersetzt das `FinalizeBanner`). Dient zugleich als Recovery-Punkt, falls generate (Sonnet 502) scheiterte.
+- `generated`: **Reel-Block** (eigener Abschnitt mit „Reel"-Überschrift, `reel.title`; `<ReelButton>` funktional unverändert inkl. Poll/Ticker) + darunter **„Booklet ausliefern"** (`<DeliverButton>` mit Safe-Mode-/Reel-/E-Mail-Confirm **unverändert** — Versand ist irreversibel und extern wirksam).
+- `sent`/`viewed`/`shared`: kein Erstellungs-/Auslieferungs-Button mehr; der Reel-Block bleibt (FIX 7.1, Nachträglich-Rendern).
+
+### Sekundäre Aktionen oben statt Top-Banner
+
+Die drei Status-Banner (`FinalizeBanner`/`GeneratedBanner`/`DeliveredBanner`) sind **entfernt** (Banner-Inflation, Aktionen sprangen nach oben). Stattdessen eine kleine, dezente Aktionsleiste unter dem Sticky-Head, **für alle Stufen mit Booklet** (`generated|sent|viewed|shared`, sobald `bookletToken` geladen): **„Booklet ansehen"** (`/b/[token]?c=1&p=1` — Kunden-Sicht §9d + No-Track §10a.1, server-gerendert) + **„QR drucken"** (vorher nur `generated|sent` — schließt die FLOW_REDESIGN-Lücke 5: auch `viewed`/`shared` haben jetzt Ansehen + QR); bei `generated` zusätzlich klein **„Neu generieren"** + **„Bearbeiten"** (`<GeneratedActions>`, Client-Fragment mit der bisherigen Banner-Logik). Bei den Versand-Stufen zeigt die Leiste die frühere Banner-Info als schmale Zeile „✓ Ausgeliefert am {Datum}" (`booklets.sent_at` wird für alle `canRenderReel`-Stufen ohnehin geladen).
+
+Komponenten-Bilanz: `FinalizeBanner` → `ReopenButton` (klein, Aktionszone), `GeneratedBanner` → `GeneratedActions` (klein, obere Leiste), `DeliveredBanner` ersatzlos (Info + Link in der oberen Leiste, server-seitig). `postAction`-Sharing, AbortController-Timeouts, Fehler-Mapping (`noticeForError`), kein `<form>`, kein `any` — alles unverändert. `pnpm typecheck` + `pnpm build` grün.
+
+---
+
 ## Launch-Fahrplan & deferierte Härtung
 
 Detail-Referenz für die Risikobewertung: [SECURITY_REVIEW.md](SECURITY_REVIEW.md) (bleibt im Repo). Dieser Abschnitt fasst die **Reihenfolge** des Live-Gangs und die **vor Kunde #2 verpflichtende** Härtung zusammen.

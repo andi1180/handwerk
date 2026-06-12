@@ -3,8 +3,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { DEFAULT_LOCALE, t } from "@/lib/i18n";
-import { CUSTOMER_VIEW_QUERY } from "@/lib/booklet/customer-view";
-import { NO_TRACK_QUERY } from "@/lib/booklet/events";
 import { postAction } from "./finalize-controls";
 
 /**
@@ -12,12 +10,14 @@ import { postAction } from "./finalize-controls";
  * mit geteilter Logik (`postGenerate` + Fehler-Mapping), `div + onClick`, kein
  * `<form>`:
  *
- *  - `<GenerateButton>` (Status `finalized`): prominenter „Vorschau erzeugen"-
- *    Button am Seitenende → `POST generate` → `router.refresh()`.
- *  - `<GeneratedBanner>` (Status `generated`): Banner „Booklet generiert" mit
- *    „Vorschau öffnen" (öffnet /b/[token] in neuem Tab, 8a-2), „Neu generieren"
- *    (erneutes `POST generate`, überschreibt das Intro, behält den Token) und
- *    „Wieder bearbeiten" (Reopen, geteilt über `postAction`).
+ *  - `<GenerateButton>` (Status `finalized`): prominenter „Booklet erstellen"-
+ *    Button am Seitenende (Schritt 2: KI-Texte + Kunden-Link) → `POST generate`
+ *    → `router.refresh()`.
+ *  - `<GeneratedActions>` (Status `generated`): kleine Sekundär-Aktionen für
+ *    die obere Aktionsleiste — „Neu generieren" (erneutes `POST generate`,
+ *    überschreibt das Intro, behält den Token) und „Bearbeiten" (Reopen,
+ *    geteilt über `postAction`). Der „Booklet ansehen"-Link wird server-seitig
+ *    in der Seite gerendert.
  *
  * ISOLATION: kein Body; Betrieb/Order werden im Route Handler gegen die Session
  * geprüft, die `business_id` stammt aus der geladenen Order.
@@ -95,7 +95,7 @@ function NoticeBox({ text }: { text: string }) {
   );
 }
 
-/** Prominenter „Vorschau erzeugen"-Button (Status `finalized`). */
+/** Prominenter „Booklet erstellen"-Button (Status `finalized`). */
 export function GenerateButton({
   orderId,
   mediaCount,
@@ -133,7 +133,8 @@ export function GenerateButton({
   }, [mediaCount, orderId, router]);
 
   return (
-    <div style={{ marginTop: 24 }}>
+    // Sitzt in der Aktionszone direkt unter dem „Medien abgeschlossen"-Häkchen.
+    <div style={{ marginTop: 12 }}>
       <button
         type="button"
         className="btn-gold capture-btn"
@@ -146,19 +147,22 @@ export function GenerateButton({
           : t(DEFAULT_LOCALE, "generate.generate")}
       </button>
 
+      <p style={{ marginTop: 8, fontSize: 12, color: "var(--text-secondary)" }}>
+        {t(DEFAULT_LOCALE, "generate.hint")}
+      </p>
+
       {notice ? <NoticeBox text={notice} /> : null}
     </div>
   );
 }
 
-/** Banner „Booklet generiert" + „Vorschau öffnen" / „Neu generieren" / „Wieder bearbeiten". */
-export function GeneratedBanner({
-  orderId,
-  token,
-}: {
-  orderId: string;
-  token: string | null;
-}) {
+/**
+ * Kleine Sekundär-Aktionen „Neu generieren" + „Bearbeiten" (Status `generated`).
+ * Fragment — wird in der oberen Aktionsleiste der Detailseite neben den
+ * Ansehen-/QR-Links gerendert; der Fehler-Hinweis bricht in eine eigene Zeile
+ * (flexBasis 100%).
+ */
+export function GeneratedActions({ orderId }: { orderId: string }) {
   const router = useRouter();
   const [busy, setBusy] = useState<null | "regenerate" | "reopen">(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -196,79 +200,39 @@ export function GeneratedBanner({
   const disabled = busy !== null;
 
   return (
-    <div style={{ marginBottom: 20 }}>
-      <div
-        className="card"
+    <>
+      <button
+        type="button"
+        className="btn-outline"
+        onClick={() => run("regenerate")}
+        disabled={disabled}
         style={{
-          display: "flex",
-          flexDirection: "column",
-          gap: 10,
-          background: "var(--gold-light)",
-          borderColor: "var(--gold-border)",
-          padding: "14px 16px",
+          opacity: disabled ? 0.6 : 1,
+          cursor: disabled ? "default" : "pointer",
         }}
       >
-        <span
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 8,
-            fontSize: 14,
-            fontWeight: 600,
-            color: "#8A7320",
-          }}
-        >
-          <SparkIcon />
-          {t(DEFAULT_LOCALE, "generate.done")}
-        </span>
-
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 2 }}>
-          {/* Primär-Aktion: die fertige Story prüfen (öffnet /b/[token]).
-              Marker `?c=1` (§9d) → der Betrieb sieht die volle Kunden-Sicht
-              inkl. Teilen-Sektion; `&p=1` (§10a.1) → betriebs-eigener Aufruf
-              wird NICHT getrackt (kein viewed/shared, kein Status-Vorrücken). */}
-          {token ? (
-            <a
-              className="btn-gold"
-              href={`/b/${token}?${CUSTOMER_VIEW_QUERY}&${NO_TRACK_QUERY}`}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              <ExternalLinkIcon />
-              {t(DEFAULT_LOCALE, "generate.openPreview")}
-            </a>
-          ) : null}
-          <button
-            type="button"
-            className="btn-outline"
-            onClick={() => run("regenerate")}
-            disabled={disabled}
-            style={{
-              opacity: disabled ? 0.6 : 1,
-              cursor: disabled ? "default" : "pointer",
-            }}
-          >
-            {busy === "regenerate"
-              ? t(DEFAULT_LOCALE, "generate.generating")
-              : t(DEFAULT_LOCALE, "generate.regenerate")}
-          </button>
-          <button
-            type="button"
-            className="btn-outline"
-            onClick={() => run("reopen")}
-            disabled={disabled}
-            style={{
-              opacity: disabled ? 0.6 : 1,
-              cursor: disabled ? "default" : "pointer",
-            }}
-          >
-            {t(DEFAULT_LOCALE, "finalize.reopen")}
-          </button>
+        {busy === "regenerate"
+          ? t(DEFAULT_LOCALE, "generate.generating")
+          : t(DEFAULT_LOCALE, "generate.regenerate")}
+      </button>
+      <button
+        type="button"
+        className="btn-outline"
+        onClick={() => run("reopen")}
+        disabled={disabled}
+        style={{
+          opacity: disabled ? 0.6 : 1,
+          cursor: disabled ? "default" : "pointer",
+        }}
+      >
+        {t(DEFAULT_LOCALE, "finalize.reopen")}
+      </button>
+      {notice ? (
+        <div style={{ flexBasis: "100%" }}>
+          <NoticeBox text={notice} />
         </div>
-      </div>
-
-      {notice ? <NoticeBox text={notice} /> : null}
-    </div>
+      ) : null}
+    </>
   );
 }
 
@@ -418,7 +382,8 @@ export function ReelButton({
   const busy = starting || rendering;
 
   return (
-    <div style={{ marginTop: 24 }}>
+    // Sitzt im Reel-Block der Aktionszone direkt unter der „Reel"-Überschrift.
+    <div style={{ marginTop: 12 }}>
       <div
         style={{
           display: "flex",
@@ -483,7 +448,7 @@ export function ReelButton({
   );
 }
 
-/** Externer-Link-Symbol für „Vorschau öffnen". Reine Deko. */
+/** Externer-Link-Symbol für „Reel ansehen". Reine Deko. */
 function ExternalLinkIcon() {
   return (
     <svg
@@ -520,27 +485,6 @@ function Spinner() {
       style={{ flexShrink: 0, animation: "spin 0.9s linear infinite" }}
     >
       <path d="M21 12a9 9 0 1 1-6.219-8.56" />
-    </svg>
-  );
-}
-
-/** Funke für das Generiert-Banner. Reine Deko. */
-function SparkIcon() {
-  return (
-    <svg
-      width={18}
-      height={18}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={2}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden
-      style={{ flexShrink: 0 }}
-    >
-      <path d="M12 3l1.9 4.6L18.5 9.5 13.9 11.4 12 16l-1.9-4.6L5.5 9.5l4.6-1.9L12 3z" />
-      <path d="M19 14l.8 2 2 .8-2 .8L19 20l-.8-2-2-.8 2-.8L19 14z" />
     </svg>
   );
 }

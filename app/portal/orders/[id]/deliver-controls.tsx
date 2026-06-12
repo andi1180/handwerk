@@ -3,11 +3,9 @@
 import { useCallback, useState } from "react";
 import { useRouter } from "next/navigation";
 import { DEFAULT_LOCALE, t } from "@/lib/i18n";
-import { CUSTOMER_VIEW_QUERY } from "@/lib/booklet/customer-view";
-import { NO_TRACK_QUERY } from "@/lib/booklet/events";
 
 /**
- * Auslieferung im Portal (Schritt 9c-1). Zwei kleine Client-Komponenten,
+ * Auslieferung im Portal (Schritt 9c-1). Eine kleine Client-Komponente,
  * `div + onClick`, kein `<form>`:
  *
  *  - `<DeliverButton>` (Status `generated`): prominenter „Booklet ausliefern"-
@@ -15,8 +13,9 @@ import { NO_TRACK_QUERY } from "@/lib/booklet/events";
  *    nicht fertig / keine E-Mail — KEIN harter Block), dann `POST deliver` →
  *    `router.refresh()`. `emailFailed` ⇒ Hinweis, der Auftrag gilt trotzdem als
  *    ausgeliefert.
- *  - `<DeliveredBanner>` (Status `sent`): Banner „Ausgeliefert am {Datum}" + die
- *    Vorschau bleibt erreichbar (read-only-Modus, keine Edit-Controls).
+ *
+ * Die Ausgeliefert-Info + der „Booklet ansehen"-Link leben seit dem Layout-Umbau
+ * server-seitig in der oberen Aktionsleiste der Detailseite (kein Banner mehr).
  *
  * ISOLATION: kein Body; Betrieb/Order werden im Route Handler gegen die Session
  * geprüft, die `business_id` stammt aus der geladenen Order.
@@ -149,82 +148,5 @@ export function DeliverButton({
 
       {notice ? <NoticeBox text={notice} /> : null}
     </div>
-  );
-}
-
-/** Banner „Ausgeliefert am {Datum}" + Vorschau-Link (Status `sent`). */
-export function DeliveredBanner({
-  deliveredAt,
-  token,
-}: {
-  deliveredAt: string | null;
-  token: string | null;
-}) {
-  return (
-    <div style={{ marginBottom: 20 }}>
-      <div
-        className="card"
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: 12,
-          background: "var(--green-light)",
-          borderColor: "var(--green-border)",
-          padding: "14px 16px",
-        }}
-      >
-        <span
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 8,
-            minWidth: 0,
-            fontSize: 14,
-            fontWeight: 600,
-            color: "var(--green-text)",
-          }}
-        >
-          <SentIcon />
-          {deliveredAt
-            ? t(DEFAULT_LOCALE, "deliver.delivered", { date: deliveredAt })
-            : t(DEFAULT_LOCALE, "deliver.deliveredNoDate")}
-        </span>
-        {token ? (
-          // `?c=1` → volle Kunden-Sicht (§9d); `&p=1` → betriebs-eigener Aufruf
-          // wird NICHT getrackt (§10a.1, kein viewed/shared/Status-Vorrücken).
-          <a
-            className="btn-outline"
-            href={`/b/${token}?${CUSTOMER_VIEW_QUERY}&${NO_TRACK_QUERY}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            style={{ flexShrink: 0 }}
-          >
-            {t(DEFAULT_LOCALE, "generate.openPreview")}
-          </a>
-        ) : null}
-      </div>
-    </div>
-  );
-}
-
-/** Papierflieger fürs Ausgeliefert-Banner. Reine Deko. */
-function SentIcon() {
-  return (
-    <svg
-      width={18}
-      height={18}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={2}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden
-      style={{ flexShrink: 0 }}
-    >
-      <path d="M22 2L11 13" />
-      <path d="M22 2l-7 20-4-9-9-4 20-7z" />
-    </svg>
   );
 }
