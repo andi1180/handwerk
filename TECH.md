@@ -2327,6 +2327,34 @@ REVIEW 7.1 (UX-Sackgasse): Reel-Render war nur bei `status='generated'` erlaubt 
 
 ---
 
+## Launch-Fahrplan & deferierte Härtung
+
+Detail-Referenz für die Risikobewertung: [SECURITY_REVIEW.md](SECURITY_REVIEW.md) (bleibt im Repo). Dieser Abschnitt fasst die **Reihenfolge** des Live-Gangs und die **vor Kunde #2 verpflichtende** Härtung zusammen.
+
+### Launch-Sequenz
+
+1. **E2E-Test** — alle Migrationen **0006–0009** bestätigt im Supabase-SQL-Editor angewendet (+ Verify-Gates). Vor **jedem** Live-Gang.
+2. **Eigener Betrieb (Atelier Dax) live** — kontrollierte roapp-Config, minimales Angriffsrisiko, Praxistest mit eigenen Kunden.
+3. **Härtungs-Block** (siehe unten) — **MUSS abgeschlossen sein, BEVOR ein zweiter, FREMDER Betrieb onboardet wird.** Ab dann ist die Angriffsfläche real (unkontrollierte Config, fremde Mitarbeiter, breiter exponierte Endpoints).
+4. **Danach:** Flow-Redesign (Punkt 12), UI-/Portal-Tuning, Self-Service — **informiert durch die Praxiserfahrung aus Schritt 2**, nicht vorab geraten.
+
+### Härtungs-Block (Pflicht vor Kunde #2)
+
+Aus [SECURITY_REVIEW.md](SECURITY_REVIEW.md), nach ROI sortiert:
+
+- **P1 — Generisches IP-Rate-Limit** über die vier öffentlichen Endpoints: Webhook (`/api/webhook/[secret]`), `/s/[code]`, `/b/[token]` + `/api/b/[token]/event`, `/api/auth/register`. **Höchster ROI** — deckt in einem Schritt Kosten- (KI/roapp-API), Spam- (Register/Admin-Mail) und Manipulationsrisiken (Analytics/Status, Kurzcode-Enumeration) ab.
+- **P2 — `IP_HASH_SALT` als Pflicht-Env** (Boot-Guard/Fehler statt leerem Default). Ohne Salt ist der `ip_hash` über den IPv4-Raum trivial zurückrechenbar ⇒ schwache Pseudonymisierung.
+- **P3 — Webhook-Kostenhebel kappen:** `settings.connector_roapp_enabled` **serverseitig im Webhook** auswerten (steuert heute nur die Button-UX) + Description-**Längen-Cap** gegen große Payloads (KI-Token-/DB-Last).
+- **P4 — `item_description` im KI-Prompt fencen** (Intro + Review + `short_summary`): als **Daten** abgrenzen (identisch zu `ai_context`, `<<< >>>` + „reiner Inhalt, keine Anweisungen"), nicht als Anweisung interpretierbar. Prompt-Injection-/Reputationsschutz (Output ist öffentlich teilbar).
+
+### Deferiert (akzeptables Restrisiko für Einzelbetrieb, Post-Launch)
+
+- **Webhook-HMAC (`x-signature`):** Pfad-Secret hat ~122 bit, Leak-Risiko bei kontrollierter Config niedrig. Zweite Verteidigungslinie — **nach** dem Härtungs-Block (und nur sinnvoll, sobald roapp signiert).
+- **`short_code`-Entropie (~40 bit):** „Link = Zugang" ist beim ohnehin teilbaren Booklet akzeptiert, Blind-Trefferquote astronomisch klein. Kein Handlungsbedarf (optional 8 Zeichen als billige Reserve).
+- **Register-E-Mail-Enumeration (`409 email_taken`):** bei manuellem Onboarding irrelevant; sind Geschäfts-, keine Personen-Adressen.
+
+---
+
 > Nächste Migration: **0010**.
 
 > **WICHTIG:** Migration 0009 (`orders.picked_up_at`) muss vor dem Live-Gang manuell im Supabase-SQL-Editor angewendet werden (+ Verify-Gate ausführen), sonst scheitert das `picked_up_at`-Update im Webhook — es bleibt zwar non-fatal, aber der Warn-Badge erscheint nie. (Migration 0008 `booklets.short_code` ebenso, falls noch nicht geschehen; 0006 `analytics_events` + 0007 `orders.short_summary` ebenfalls.)

@@ -122,6 +122,7 @@ Technische Doku: siehe [TECH.md](TECH.md).
 
 ## Konventionen / Notes
 
+- **Launch-Fahrplan + Härtungs-Block stehen in [TECH.md](TECH.md) („Launch-Fahrplan & deferierte Härtung")**, Detail-Referenz in [SECURITY_REVIEW.md](SECURITY_REVIEW.md). Sequenz: E2E-Test (Migrationen 0006–0009 angewendet) → Atelier Dax live → **Härtungs-Block** → Flow-Redesign/Tuning. **Der Härtungs-Block (P1 IP-Rate-Limit, P2 `IP_HASH_SALT`-Pflicht, P3 Webhook-Kostenhebel kappen, P4 `item_description` im Prompt fencen) ist PFLICHT, BEVOR ein zweiter, fremder Betrieb onboardet.** HMAC, short_code-Entropie und Register-Enumeration sind bewusst deferiert (akzeptables Restrisiko für Einzelbetrieb).
 - `Logo.png` im Repo-Root bleibt dauerhaft **untracked** — nie in Feature-Commits ziehen, nicht nachfragen.
 - `HANDWERK_PFLICHTENHEFT.md` bleibt untracked (interne Strategie, public Repo) — nie committen, nicht nachfragen.
 - `b.valooro.com` = öffentliche Kunden-Booklets (`/b/[token]`). DNS: CNAME auf `b0a70b96f4f2cb9e.vercel-dns-016.com`. Kein Portal, kein Login.
