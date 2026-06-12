@@ -1,0 +1,10 @@
+<svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <!-- Äußerer Kreis -->
+  <circle cx="16" cy="16" r="14" fill="none" stroke="#C4A95B" stroke-width="1.5"/>
+  <!-- Mittlerer Kreis -->
+  <circle cx="16" cy="16" r="9" fill="none" stroke="#C4A95B" stroke-width="1.5"/>
+  <!-- Innerer Kreis -->
+  <circle cx="16" cy="16" r="4" fill="none" stroke="#C4A95B" stroke-width="1.5"/>
+  <!-- Goldener Punkt Mitte -->
+  <circle cx="16" cy="16" r="2" fill="#C4A95B"/>
+</svg>
