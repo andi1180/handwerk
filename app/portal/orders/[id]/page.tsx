@@ -59,6 +59,16 @@ export default async function OrderDetailPage({
   const photoMax = business?.settings.photo_max_count ?? PHOTO_COUNT.default;
   const videoMax = business?.settings.video_max_count ?? VIDEO_COUNT.default;
 
+  // Vorher-/Nachher-Slot je max 1 (0010): dem Capture mitgeben, damit die jeweilige
+  // Kategorie-Auswahl gesperrt ist, sobald ein Slot belegt ist (Server prüft zusätzlich).
+  const hasBefore = media.some((m) => m.category === "before");
+  const hasAfter = media.some((m) => m.category === "after");
+
+  // Booklet-Erstellung verlangt mindestens EIN process-Medium (0010) — nur
+  // before/after ist nicht erstellbar. Der Client-Guard ist UX; der Server prüft
+  // zusätzlich (finalize/generate ⇒ need_process). Videos sind immer process.
+  const processCount = media.filter((m) => m.category === "process").length;
+
   const supabase = await createClient();
   const mediaWithUrls: MediaWithUrl[] = await Promise.all(
     media.map(async (item) => {
@@ -274,6 +284,8 @@ export default async function OrderDetailPage({
             videoMax={videoMax}
             photoCount={photoCount}
             videoCount={videoCount}
+            hasBefore={hasBefore}
+            hasAfter={hasAfter}
           />
         ) : null}
 
@@ -293,7 +305,7 @@ export default async function OrderDetailPage({
       {/* draft: „Booklet erstellen" (POSTet finalize — Schritt 1, kein Confirm,
           kein Chaining; nach dem Refresh erscheint an derselben Stelle Schritt 2). */}
       {isDraft ? (
-        <FinalizeButton orderId={order.id} mediaCount={media.length} />
+        <FinalizeButton orderId={order.id} processCount={processCount} />
       ) : null}
 
       {/* finalized: „Booklet erstellen" (POSTet generate, 8a-1) — mit
@@ -311,7 +323,7 @@ export default async function OrderDetailPage({
           >
             ✓ {t(DEFAULT_LOCALE, "finalize.done")}
           </p>
-          <GenerateButton orderId={order.id} mediaCount={media.length} />
+          <GenerateButton orderId={order.id} processCount={processCount} />
           <ReopenButton orderId={order.id} />
         </div>
       ) : null}

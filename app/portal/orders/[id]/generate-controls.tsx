@@ -58,11 +58,13 @@ async function noticeForError(res: Response): Promise<string> {
     // kein/ungültiger Body → generischer Fehler unten
   }
   const base =
-    code === "need_media"
-      ? t(DEFAULT_LOCALE, "generate.needMedia")
-      : code === "ai_not_configured"
-        ? t(DEFAULT_LOCALE, "generate.aiNotConfigured")
-        : t(DEFAULT_LOCALE, "generate.error");
+    code === "need_process"
+      ? t(DEFAULT_LOCALE, "generate.needProcess")
+      : code === "need_media"
+        ? t(DEFAULT_LOCALE, "generate.needMedia")
+        : code === "ai_not_configured"
+          ? t(DEFAULT_LOCALE, "generate.aiNotConfigured")
+          : t(DEFAULT_LOCALE, "generate.error");
   const detail = code ? `${res.status} ${code}` : String(res.status);
   return `${base} (${detail})`;
 }
@@ -98,19 +100,20 @@ function NoticeBox({ text }: { text: string }) {
 /** Prominenter „Booklet erstellen"-Button (Status `finalized`). */
 export function GenerateButton({
   orderId,
-  mediaCount,
+  processCount,
 }: {
   orderId: string;
-  mediaCount: number;
+  /** Anzahl process-Medien (0010) — Pflicht fürs Erstellen, before/after zählen nicht. */
+  processCount: number;
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
 
   const handleGenerate = useCallback(() => {
-    // Ohne Medium kein Request — direkt der Hinweis (Server prüft zusätzlich).
-    if (mediaCount < 1) {
-      setNotice(t(DEFAULT_LOCALE, "generate.needMedia"));
+    // Ohne process-Medium kein Request — direkt der Hinweis (Server prüft zusätzlich).
+    if (processCount < 1) {
+      setNotice(t(DEFAULT_LOCALE, "generate.needProcess"));
       return;
     }
     setBusy(true);
@@ -130,7 +133,7 @@ export function GenerateButton({
         setBusy(false);
       }
     })();
-  }, [mediaCount, orderId, router]);
+  }, [processCount, orderId, router]);
 
   return (
     // Sitzt in der Aktionszone direkt unter dem „Medien abgeschlossen"-Häkchen.

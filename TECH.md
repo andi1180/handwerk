@@ -2374,6 +2374,59 @@ Neue Client-Komponente (`"use client"`, einzige Insel auf der Server-Component-S
 
 ---
 
+## Vorher/Nachher/Prozess-Kategorisierung (Schritt 13, Migration 0010)
+
+Jedes **Bild** trägt eine **Kategorie**, die den festen Booklet-Aufbau steuert. **Videos sind immer `process`** (kein Vorher/Nachher).
+
+### Datenmodell (Migration 0010)
+
+[supabase/migrations/0010_media_category.sql](supabase/migrations/0010_media_category.sql) (+ [Verify](supabase/verify/0010_media_category_checks.sql), **manuell** im SQL-Editor anwenden, **vor** dem Live-Gang):
+
+- `order_media.category text NOT NULL DEFAULT 'process' CHECK (category in ('before','after','process'))` + Spaltenkommentar.
+- **Keine** neue Policy/GRANT — `order_media` ist RLS-aktiv (0001, `for all`); member-Policy + `service_role` decken die neue Spalte.
+- **`before`/`after` je max 1 pro Auftrag = APP-enforced**, bewusst **kein** DB-Constraint (partieller Unique-Index wäre möglich): reine Testphase, ein einziger schreibender Server-Pfad pro Order, Default `process` kollidiert nie. Der Riegel sitzt im Upload-Handler **und** im Kategorie-Wechsel-Handler (`category_taken` 400).
+- `NOT NULL` + Default `process`: bestehende Zeilen werden korrekt zu Prozess-Medien.
+- Die **alte** `tag`-Spalte (`vorher`/`nachher`/`prozess`, seit 6b.2 ungenutzt) bleibt **unangetastet** — `category` ist die neue, englisch-wertige Quelle.
+
+`MediaCategory` (`'before' | 'after' | 'process'`) und `category` werden in `OrderMedia`/`getOrderMedia` ([lib/orders/queries.ts](lib/orders/queries.ts)) ergänzt (kein `any`).
+
+### Feste Booklet-Reihenfolge (`orderBookletMedia`)
+
+[lib/booklet/media-order.ts](lib/booklet/media-order.ts): `orderBookletMedia<T extends { category }>(media)` bringt die nach `sort_order` sortierten Medien in die feste Reihenfolge **`before` → `process` (in sort_order) → `after`** (mehrere before/after defensiv korrekt einsortiert). **EINE Quelle** für beide Render-Pfade (analog `displayCaption`):
+
+- **Web-Story** ([lib/booklet/load.ts](lib/booklet/load.ts)): selektiert `category` und wendet `orderBookletMedia` vor dem Signieren/Mapping an ⇒ `/b/[token]` rendert Intro → before → process → after → Outro.
+- **Reel** ([app/api/portal/orders/[id]/render-reel/route.ts](app/api/portal/orders/[id]/render-reel/route.ts)): selektiert `category` und wendet `orderBookletMedia` vor der Segment-Assembly an ⇒ dieselbe Reihenfolge im Reel. `MediaItem` um `category` erweitert; Pipeline/concat-Demuxer unverändert.
+
+### Upload mit Kategorie-Auswahl
+
+- **Client** ([app/portal/orders/[id]/capture.tsx](app/portal/orders/[id]/capture.tsx)): im Aufnahme-/Upload-**Entwurf** (alle vier Buttons münden in denselben Dialog) ein **Kategorie-Selektor** (Vorher/Nachher/Prozess, Default Prozess) — **nur Foto**; bei Video kein Selektor (immer `process`). Belegte Slots sind deaktiviert: `beforeTaken`/`afterTaken` = gespeichert (`hasBefore`/`hasAfter`-Props aus der Server-Page) **oder** ein optimistisches Queue-Item desselben Typs (**in-flight**). Reine UX. Der Metadaten-`POST` schickt `category` (Foto); für Video unnötig (Server erzwingt).
+- **Server** ([app/api/portal/orders/[id]/media/route.ts](app/api/portal/orders/[id]/media/route.ts)): `resolveCategory(value, mediaType)` — Video ⇒ `process`, Foto ⇒ gewählter Wert bzw. Default `process`. **HARTER Riegel** before/after max 1: existiert bereits ein Medium dieser Kategorie ⇒ **400 `category_taken`** (Client-Disable umgehbar). Insert mit `category`.
+
+### Kategorie nachträglich wechseln
+
+[app/api/portal/orders/[id]/media/[mediaId]/category/route.ts](app/api/portal/orders/[id]/media/[mediaId]/category/route.ts) (`PATCH`): AUTHENTICATED, Media über RLS gegen `order_id` (404), Body `{ category }` (sonst 400 `invalid_category`), **Video nur `process`** (`video_process_only`), before/after max 1 über `.neq("id", media.id)`-Count (`category_taken`). UI im **Vollbild-Viewer** als Toggle-Reihe (Foto, Editier-Modus); optimistisch + `router.refresh()`; belegte Slots deaktiviert.
+
+### Gruppierte Anzeige ([app/portal/orders/[id]/media-list.tsx](app/portal/orders/[id]/media-list.tsx))
+
+- **GANZ OBEN: zwei große, fixe Slots** nebeneinander (`.media-ba-row`, 2-Spalten-Grid, je halbe Breite, `aspect-ratio 1/1`) — links Vorher, rechts Nachher. Leer ⇒ **Platzhalter** (gestrichelter Rahmen + Label/Hinweis); gefüllt ⇒ das Bild mit Label-Band unten. before/after sind **fix**, nicht verschiebbar.
+- **DARUNTER: „Prozess"-Überschrift** + das bisherige 3er-Raster, nur `process`-Items; leer (im Editier-Modus) ⇒ dezenter Hinweis.
+- **Reorder NUR `process`:** der dnd-kit `SortableContext` enthält nur process-ids. `handleDragEnd` sortiert die process-Teilmenge, schickt aber das **volle** Set in Booklet-Ordnung `[before, …process, after]` an die reorder-Route — die bleibt damit „exakte Medien-Menge"-validiert, und `sort_order` folgt der Render-Reihenfolge.
+- **Geteilter `TileVisual`** (Kachel-Inhalt: Poster, Play-Overlay, Auswahl-/Caption-Indikator, Löschen) wird von der verschiebbaren `SortableTile` **und** dem fixen `BeforeAfterSlot` genutzt (nicht dupliziert). Auswahl, Caption-Bearbeitung und Löschen gelten damit **auch** für before/after.
+
+### KI-Captions kategorie-bewusst
+
+[lib/ai/captions.ts](lib/ai/captions.ts): `CaptionInput.category` + `categoryHint` qualifiziert im Haiku-Prompt `before` explizit als **Ausgangszustand/Vorher**, `after` als **Ergebnis/Nachher**; `process` unverändert. [lib/ai/media-caption.ts](lib/ai/media-caption.ts) (`CaptionableMedia.category`) reicht durch; Batch- ([…/captions/route.ts](app/api/portal/orders/[id]/captions/route.ts)) und Regenerate-Route ([…/caption/regenerate/route.ts](app/api/portal/orders/[id]/media/[mediaId]/caption/regenerate/route.ts)) selektieren `category` mit. Das Stichwort fließt wie bisher mit ein — before/after teilen sich den **gleichen** Stichwort-/Caption-Flow wie process-Bilder.
+
+### Validierung verschärft: ≥ 1 Prozess-Medium
+
+[finalize/route.ts](app/api/portal/orders/[id]/finalize/route.ts) und [generate/route.ts](app/api/portal/orders/[id]/generate/route.ts) zählen jetzt `.eq("category", "process")` (Videos sind process) ⇒ **400 `need_process`** statt der bisherigen „≥ 1 Medium"-Regel. Ein Auftrag mit **nur** before/after ist **nicht** erstellbar. Client: `<FinalizeButton>`/`<GenerateButton>` bekommen `processCount` (statt `mediaCount`), `noticeForError` mappt `need_process` ([generate-controls.tsx](app/portal/orders/[id]/generate-controls.tsx)).
+
+### i18n
+
+`mediaCategory.{before,after,process}` (deutsche Labels zu den englischen DB-Werten), `capture.category`/`capture.categoryTaken`, `assembler.slotEmpty`/`processEmpty`/`categoryLabel`/`categoryError`, `finalize.needProcess`, `generate.needProcess`.
+
+---
+
 ## Launch-Fahrplan & deferierte Härtung
 
 Detail-Referenz für die Risikobewertung: [SECURITY_REVIEW.md](SECURITY_REVIEW.md) (bleibt im Repo). Dieser Abschnitt fasst die **Reihenfolge** des Live-Gangs und die **vor Kunde #2 verpflichtende** Härtung zusammen.

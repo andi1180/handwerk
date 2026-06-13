@@ -666,6 +666,113 @@ body {
   border-color: var(--gold);
 }
 
+/* ── Vorher/Nachher-Gruppierung (0010) ───────────────────────────────────── */
+
+/* Zwei große, fixe Slots nebeneinander (je halbe Breite, größer als das 3er-
+   Prozess-Raster). */
+.media-ba-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 18px;
+}
+
+/* Gefüllter Slot teilt sich die .media-tile-Optik (relative, aspect 1/1, overflow
+   hidden) — der Modifier sorgt nur fürs Quadrat, falls .media-tile fehlt (leer). */
+.media-ba-slot {
+  aspect-ratio: 1 / 1;
+  border-radius: var(--radius);
+}
+
+/* Leerer Platzhalter: gestrichelter Rahmen + zentriertes Label/Hinweis. */
+.media-ba-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  border: 1px dashed var(--border);
+  background: var(--surface-2);
+  text-align: center;
+  padding: 8px;
+}
+.media-ba-empty-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.media-ba-empty-hint {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+/* Label-Band am unteren Rand des gefüllten Slots (fängt keine Taps ab). */
+.media-ba-label {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 2;
+  padding: 10px 10px 8px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #ffffff;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.6), rgba(0, 0, 0, 0));
+  pointer-events: none;
+}
+
+/* „Prozess"-Sektionsüberschrift + leerer Prozess-Hinweis. */
+.media-section-title {
+  margin: 4px 0 10px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.media-process-empty {
+  margin: 0;
+  font-size: 13px;
+  font-style: italic;
+  color: var(--text-secondary);
+  opacity: 0.8;
+}
+
+/* Kategorie-Selektor (0010): drei gleich breite Toggle-Buttons (Aufnahme-Entwurf
+   + Viewer). Aktiv = gold umrandet; belegter Slot = deaktiviert. */
+.capture-category {
+  display: flex;
+  gap: 8px;
+}
+.capture-category-btn {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 10px 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-family: inherit;
+}
+.capture-category-btn[data-active="true"] {
+  color: #8a7320;
+  background: var(--gold-light);
+  border-color: var(--gold-border);
+}
+.capture-category-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.capture-category-taken {
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
 /* Dreh-Animation für das „Neu generieren"-Icon (Caption-Editor). */
 @keyframes spin {
   to {

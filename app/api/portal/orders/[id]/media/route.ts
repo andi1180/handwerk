@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentBusiness } from "@/lib/auth/current-business";
+import type { MediaCategory } from "@/lib/orders/queries";
 
 /** Die zurückgegebene (und für die Liste relevante) Medien-Zeile. */
 type InsertedMedia = {
@@ -8,8 +9,25 @@ type InsertedMedia = {
   media_type: "photo" | "video";
   storage_path: string;
   keyword: string | null;
+  category: MediaCategory;
   sort_order: number;
 };
+
+/**
+ * Bild-Kategorie (0010) aus dem Body auflösen. VIDEOS sind IMMER `process` (kein
+ * before/after); für Fotos zählt der gewählte Wert, ein fehlender/ungültiger Wert
+ * fällt auf den Spalten-Default `process` zurück.
+ */
+function resolveCategory(
+  value: unknown,
+  mediaType: "photo" | "video",
+): MediaCategory {
+  if (mediaType === "video") return "process";
+  if (value === "before" || value === "after" || value === "process") {
+    return value;
+  }
+  return "process";
+}
 
 /** Trimmt einen String-Wert; leere/Nicht-String-Werte → null. */
 function trimmedOrNull(value: unknown): string | null {
@@ -116,6 +134,28 @@ export async function POST(
     return NextResponse.json({ error: "invalid_path" }, { status: 400 });
   }
 
+  // Bild-Kategorie (0010): before/after je max 1 pro Auftrag (App-enforced),
+  // process der Standard. Videos sind IMMER process. Der Wert wird hier serverseitig
+  // erzwungen — die Client-Auswahl ist nur UX.
+  const category = resolveCategory(payload.category, mediaType);
+
+  // before/after-Slot ist je auf EIN Medium begrenzt — HARTER Riegel (Client-
+  // Disable umgehbar). Existiert für die Order bereits ein Medium dieser Kategorie
+  // ⇒ 400 (kein zweites Vorher-/Nachher-Bild). process bleibt unbegrenzt.
+  if (category === "before" || category === "after") {
+    const { count: categoryCount } = await supabase
+      .from("order_media")
+      .select("id", { count: "exact", head: true })
+      .eq("order_id", order.id)
+      .eq("category", category);
+    if ((categoryCount ?? 0) >= 1) {
+      console.error(
+        `[media POST] category_taken (order ${orderId}, category ${category}, count ${categoryCount})`,
+      );
+      return NextResponse.json({ error: "category_taken" }, { status: 400 });
+    }
+  }
+
   // Medien-Anzahl-Limit (Schritt 8c) — HARTER Riegel (Client-Disable ist nur UX,
   // umgehbar). Vorhandene order_media des jeweiligen media_type dieser Order
   // zählen; >= pro-Betrieb-Limit ⇒ 400. business.settings ist auf [min..Ceiling]
@@ -156,12 +196,13 @@ export async function POST(
       media_type: mediaType,
       storage_path: storagePath,
       keyword: trimmedOrNull(payload.keyword),
+      category,
       width: intOrNull(payload.width),
       height: intOrNull(payload.height),
       duration_seconds: durationSeconds,
       sort_order: nextSortOrder,
     })
-    .select("id, media_type, storage_path, keyword, sort_order")
+    .select("id, media_type, storage_path, keyword, category, sort_order")
     .single<InsertedMedia>();
 
   if (error || !data) {

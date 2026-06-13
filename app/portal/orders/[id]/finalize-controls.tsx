@@ -36,19 +36,20 @@ export async function postAction(
  */
 export function FinalizeButton({
   orderId,
-  mediaCount,
+  processCount,
 }: {
   orderId: string;
-  mediaCount: number;
+  /** Anzahl process-Medien (0010) — Pflicht fürs Erstellen, before/after zählen nicht. */
+  processCount: number;
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
 
   const handleFinalize = useCallback(() => {
-    // Ohne Medium kein Request — direkt der Hinweis (Server prüft zusätzlich).
-    if (mediaCount < 1) {
-      setNotice(t(DEFAULT_LOCALE, "finalize.needMedia"));
+    // Ohne process-Medium kein Request — direkt der Hinweis (Server prüft zusätzlich).
+    if (processCount < 1) {
+      setNotice(t(DEFAULT_LOCALE, "finalize.needProcess"));
       return;
     }
 
@@ -64,7 +65,7 @@ export function FinalizeButton({
         setBusy(false);
       }
     })();
-  }, [mediaCount, orderId, router]);
+  }, [processCount, orderId, router]);
 
   return (
     <div style={{ marginTop: 24 }}>

@@ -29,7 +29,7 @@ const SHORT_CODE_MAX_ATTEMPTS = 5;
  *  - Order über RLS geladen (fremde/fehlende id ⇒ 404).
  *  - Status `finalized` ODER `generated` (Re-Generate erlaubt, solange NICHT
  *    `sent`/…) ⇒ sonst 409.
- *  - Mindestens ein `order_media` ⇒ sonst 400 `need_media`.
+ *  - Mindestens ein `process`-Medium ⇒ sonst 400 `need_process` (0010).
  *  - `isAiConfigured()` ⇒ sonst 500 `ai_not_configured`.
  *
  * ISOLATION (§14.2): Der booklets-Insert/Update läuft über `service_role`
@@ -81,13 +81,15 @@ export async function POST(
     return NextResponse.json({ error: "invalid_status" }, { status: 409 });
   }
 
-  // Defensiv: ohne Medium gibt es nichts zu generieren.
+  // Defensiv: ohne PROZESS-Medium gibt es nichts zu generieren (0010). Ein
+  // Auftrag mit nur before/after ist kein Booklet. Videos sind immer `process`.
   const { count } = await supabase
     .from("order_media")
     .select("id", { count: "exact", head: true })
-    .eq("order_id", order.id);
+    .eq("order_id", order.id)
+    .eq("category", "process");
   if (!count || count < 1) {
-    return NextResponse.json({ error: "need_media" }, { status: 400 });
+    return NextResponse.json({ error: "need_process" }, { status: 400 });
   }
 
   if (!isAiConfigured()) {

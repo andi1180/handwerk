@@ -1,4 +1,5 @@
 import type Anthropic from "@anthropic-ai/sdk";
+import type { MediaCategory } from "@/lib/orders/queries";
 import { getAnthropic, HAIKU_MODEL } from "./anthropic";
 import { CAPTION_MAX_LENGTH } from "./caption-limits";
 
@@ -11,10 +12,28 @@ export type ImageMediaType = "image/jpeg" | "image/png" | "image/webp" | "image/
 export type CaptionInput = {
   mediaType: "photo" | "video";
   keyword: string | null;
+  /**
+   * Bild-Kategorie (0010): before/after werden im Prompt EXPLIZIT als
+   * Ausgangszustand bzw. Ergebnis qualifiziert; process wie bisher (Default).
+   */
+  category?: MediaCategory;
   /** base64-kodiertes Bild (nur Foto). Bei Video ungenutzt — siehe unten. */
   imageBase64?: string;
   imageMediaType?: ImageMediaType;
 };
+
+/** Kategorie-Zusatz für den Caption-Prompt (0010): before/after explizit erden. */
+function categoryHint(category: MediaCategory | undefined): string {
+  if (category === "before") {
+    return " Dies ist das VORHER-Bild (Ausgangszustand vor der Arbeit). " +
+      "Formuliere die Bildunterschrift entsprechend als Ausgangslage/Vorher.";
+  }
+  if (category === "after") {
+    return " Dies ist das NACHHER-Bild (fertiges Ergebnis nach der Arbeit). " +
+      "Formuliere die Bildunterschrift entsprechend als Ergebnis/Nachher.";
+  }
+  return "";
+}
 
 const SYSTEM_PROMPT =
   "Du schreibst kurze Bildunterschriften für ein Handwerks-Booklet. " +
@@ -74,7 +93,7 @@ export async function generateCaption(input: CaptionInput): Promise<string> {
   const subject = input.mediaType === "photo" ? "dieses Foto" : "diesen Video-Clip";
   content.push({
     type: "text",
-    text: `Schreibe eine kurze Bildunterschrift für ${subject}. ${keywordLine}`,
+    text: `Schreibe eine kurze Bildunterschrift für ${subject}. ${keywordLine}${categoryHint(input.category)}`,
   });
 
   const anthropic = getAnthropic();

@@ -26,7 +26,10 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { DEFAULT_LOCALE, t } from "@/lib/i18n";
 import { CAPTION_MAX_LENGTH } from "@/lib/ai/caption-limits";
-import type { OrderMedia } from "@/lib/orders/queries";
+import type { MediaCategory, OrderMedia } from "@/lib/orders/queries";
+
+/** Auswählbare Kategorien im Viewer-Selektor in fester Reihenfolge (0010). */
+const CATEGORY_OPTIONS: MediaCategory[] = ["before", "after", "process"];
 
 /** Medien-Item samt server-seitig erzeugter, befristeter Signed-URL (page.tsx). */
 export type MediaWithUrl = OrderMedia & { signedUrl: string | null };
@@ -128,6 +131,39 @@ export function MediaList({
     );
   }, []);
 
+  /**
+   * Kategorie eines Mediums wechseln (0010): optimistisch umsortieren (Gruppe
+   * wechselt) → PATCH → bei Erfolg `router.refresh()` (server-abgeleitete Props
+   * wie der Capture-Slot-Status aktualisieren), bei Fehler Rollback + Hinweis.
+   */
+  const handleCategoryChange = useCallback(
+    (media: MediaWithUrl, category: MediaCategory) => {
+      if (media.category === category) return;
+      const previous = items;
+      setItems((prev) =>
+        prev.map((m) => (m.id === media.id ? { ...m, category } : m)),
+      );
+      void (async () => {
+        try {
+          const res = await fetch(
+            `/api/portal/orders/${orderId}/media/${media.id}/category`,
+            {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ category }),
+            },
+          );
+          if (!res.ok) throw new Error("category_failed");
+          router.refresh();
+        } catch {
+          setItems(previous); // zurückrollen
+          showNotice(t(DEFAULT_LOCALE, "assembler.categoryError"));
+        }
+      })();
+    },
+    [items, orderId, router, showNotice],
+  );
+
   /** Auswahl einer (unbeschrifteten) Kachel umschalten. */
   const toggleSelect = useCallback((id: string) => {
     setSelectedIds((prev) => {
@@ -155,12 +191,24 @@ export function MediaList({
       const { active, over } = event;
       if (!over || active.id === over.id) return;
 
-      const oldIndex = items.findIndex((m) => m.id === active.id);
-      const newIndex = items.findIndex((m) => m.id === over.id);
+      // Reorder NUR innerhalb der process-Items — before/after sind fix
+      // positioniert (0010) und nicht Teil des Sortable-Kontexts.
+      const before = items.filter((m) => m.category === "before");
+      const after = items.filter((m) => m.category === "after");
+      const process = items.filter((m) => m.category === "process");
+      const oldIndex = process.findIndex((m) => m.id === active.id);
+      const newIndex = process.findIndex((m) => m.id === over.id);
       if (oldIndex < 0 || newIndex < 0) return;
 
       const previous = items;
-      const reordered = arrayMove(items, oldIndex, newIndex);
+      // Volles Set in Booklet-Ordnung (before → process → after) — die reorder-
+      // Route verlangt exakt die Medien-Menge; sort_order folgt damit der
+      // Render-Reihenfolge.
+      const reordered = [
+        ...before,
+        ...arrayMove(process, oldIndex, newIndex),
+        ...after,
+      ];
       setItems(reordered); // optimistisch
 
       void (async () => {
@@ -274,6 +322,13 @@ export function MediaList({
   // Generieren nur mit expliziter Auswahl (kein „leer ⇒ alle" mehr).
   const disableGenerate = generating || selectedCount === 0;
 
+  // Gruppierung (0010): before/after je max 1 (fest positioniert), process der
+  // Rest in sort_order (verschiebbar). Das Booklet rendert before → process →
+  // after (lib/booklet/media-order.ts).
+  const beforeItem = items.find((m) => m.category === "before") ?? null;
+  const afterItem = items.find((m) => m.category === "after") ?? null;
+  const processItems = items.filter((m) => m.category === "process");
+
   return (
     <div>
       {/* Sanfte Trennlinie zwischen dem Capture-Button-Block (darüber) und der
@@ -284,8 +339,9 @@ export function MediaList({
       ) : null}
       {/* Aktions-Kopf — im Abgeschlossen-Modus ausgeblendet. Enthält nur noch zwei
           gleich breite Buttons („Alle auswählen" + „Captions generieren"), die auf
-          schmalen Viewports umbrechen statt überzulaufen. Der Reorder-Hinweis sitzt
-          jetzt als dezenter Text UNTER dem Raster (siehe unten). */}
+          schmalen Viewports umbrechen statt überzulaufen. Gilt für ALLE Medien
+          (Vorher/Nachher + Prozess). Der Reorder-Hinweis sitzt als dezenter Text
+          UNTER dem Prozess-Raster (siehe unten). */}
       {!readOnly ? (
         <div style={{ marginBottom: 10 }}>
           {selectedCount > 0 ? (
@@ -336,43 +392,79 @@ export function MediaList({
         </div>
       ) : null}
 
-      <DndContext
-        sensors={sensors}
-        collisionDetection={closestCenter}
-        onDragStart={() => {
-          draggedRef.current = true;
-        }}
-        onDragEnd={handleDragEnd}
-        onDragCancel={() => {
-          setTimeout(() => {
-            draggedRef.current = false;
-          }, 50);
-        }}
-      >
-        <SortableContext
-          items={items.map((m) => m.id)}
-          strategy={rectSortingStrategy}
-        >
-          <div className="media-grid">
-            {items.map((media) => (
-              <SortableTile
-                key={media.id}
-                media={media}
-                draggedRef={draggedRef}
-                readOnly={readOnly}
-                selected={selectedIds.has(media.id)}
-                onToggleSelect={() => toggleSelect(media.id)}
-                onView={() => setViewingId(media.id)}
-                onDelete={() => handleDelete(media)}
-              />
-            ))}
-          </div>
-        </SortableContext>
-      </DndContext>
+      {/* Vorher / Nachher (0010): zwei große, fixe Slots nebeneinander. Leerer
+          Slot = Platzhalter; gefüllter Slot = das Bild (klick = ansehen, mit
+          Auswahl-/Caption-Indikator + Löschen wie eine Prozess-Kachel). NICHT
+          verschiebbar. */}
+      <div className="media-ba-row">
+        <BeforeAfterSlot
+          category="before"
+          media={beforeItem}
+          readOnly={readOnly}
+          selected={beforeItem ? selectedIds.has(beforeItem.id) : false}
+          onToggleSelect={() => beforeItem && toggleSelect(beforeItem.id)}
+          onView={() => beforeItem && setViewingId(beforeItem.id)}
+          onDelete={() => beforeItem && handleDelete(beforeItem)}
+        />
+        <BeforeAfterSlot
+          category="after"
+          media={afterItem}
+          readOnly={readOnly}
+          selected={afterItem ? selectedIds.has(afterItem.id) : false}
+          onToggleSelect={() => afterItem && toggleSelect(afterItem.id)}
+          onView={() => afterItem && setViewingId(afterItem.id)}
+          onDelete={() => afterItem && handleDelete(afterItem)}
+        />
+      </div>
 
-      {/* Dezenter Bedien-Hinweis unter den Thumbnails (kein Button) — im
-          Abgeschlossen-Modus ohne Reorder ausgeblendet. */}
-      {!readOnly ? (
+      {/* Prozess: Sektions-Überschrift + das bisherige Raster (nur process-Items,
+          per Long-Press verschiebbar). */}
+      <h3 className="media-section-title">
+        {t(DEFAULT_LOCALE, "mediaCategory.process")}
+      </h3>
+      {processItems.length > 0 ? (
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          onDragStart={() => {
+            draggedRef.current = true;
+          }}
+          onDragEnd={handleDragEnd}
+          onDragCancel={() => {
+            setTimeout(() => {
+              draggedRef.current = false;
+            }, 50);
+          }}
+        >
+          <SortableContext
+            items={processItems.map((m) => m.id)}
+            strategy={rectSortingStrategy}
+          >
+            <div className="media-grid">
+              {processItems.map((media) => (
+                <SortableTile
+                  key={media.id}
+                  media={media}
+                  draggedRef={draggedRef}
+                  readOnly={readOnly}
+                  selected={selectedIds.has(media.id)}
+                  onToggleSelect={() => toggleSelect(media.id)}
+                  onView={() => setViewingId(media.id)}
+                  onDelete={() => handleDelete(media)}
+                />
+              ))}
+            </div>
+          </SortableContext>
+        </DndContext>
+      ) : !readOnly ? (
+        <p className="media-process-empty">
+          {t(DEFAULT_LOCALE, "assembler.processEmpty")}
+        </p>
+      ) : null}
+
+      {/* Dezenter Bedien-Hinweis unter dem Raster (kein Button) — nur wenn es
+          überhaupt etwas zu verschieben gibt und nicht im Abgeschlossen-Modus. */}
+      {!readOnly && processItems.length > 1 ? (
         <p className="media-reorder-hint">
           {t(DEFAULT_LOCALE, "assembler.reorderHint")}
         </p>
@@ -401,6 +493,9 @@ export function MediaList({
           readOnly={readOnly}
           onClose={() => setViewingId(null)}
           onCaptionChange={applyCaption}
+          onCategoryChange={handleCategoryChange}
+          disableBefore={Boolean(beforeItem && beforeItem.id !== viewing.id)}
+          disableAfter={Boolean(afterItem && afterItem.id !== viewing.id)}
         />
       ) : null}
     </div>
@@ -408,58 +503,28 @@ export function MediaList({
 }
 
 /**
- * Eine sortierbare, quadratische Kachel: Foto/Video-Poster + Play-Overlay.
- * Oben links **ein** Indikator (Caption-Status bzw. Auswahl-Kreis), oben rechts
- * der Lösch-Button (gegenüberliegende Ecke → klar getrennt).
+ * Gemeinsamer Kachel-Inhalt: Foto/Video-Poster + Play-Overlay, oben links **ein**
+ * Indikator (Caption-Status bzw. Auswahl-Kreis), oben rechts der Lösch-Button.
+ * Genutzt von der verschiebbaren Prozess-Kachel (`SortableTile`) UND den fixen
+ * Vorher/Nachher-Slots (`BeforeAfterSlot`, 0010) — die Drag-/Positions-Logik
+ * liegt im jeweiligen Wrapper, damit der Inhalt nicht dupliziert wird.
  */
-function SortableTile({
+function TileVisual({
   media,
-  draggedRef,
   readOnly,
   selected,
   onToggleSelect,
-  onView,
   onDelete,
 }: {
   media: MediaWithUrl;
-  draggedRef: React.RefObject<boolean>;
   readOnly: boolean;
   selected: boolean;
   onToggleSelect: () => void;
-  onView: () => void;
   onDelete: () => void;
 }) {
-  const { setNodeRef, attributes, listeners, transform, transition, isDragging } =
-    useSortable({ id: media.id, disabled: readOnly });
-
-  const style: CSSProperties = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-    opacity: isDragging ? 0.5 : 1,
-    zIndex: isDragging ? 2 : undefined,
-  };
-
-  // Tap (kein vorangegangener Drag) = ansehen/abspielen.
-  const view = () => {
-    if (draggedRef.current) return;
-    onView();
-  };
-
   const hasCaption = Boolean(media.caption);
-  // Read-only: keine Drag-Listener (nur Ansehen), kein Lösch-Button.
-  const dragProps = readOnly ? {} : { ...attributes, ...listeners };
-
   return (
-    <div
-      ref={setNodeRef}
-      style={style}
-      className="media-tile"
-      {...dragProps}
-      onClick={view}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") view();
-      }}
-    >
+    <>
       {media.media_type === "photo" && media.signedUrl ? (
         // eslint-disable-next-line @next/next/no-img-element -- Signed-URL aus privatem Bucket, kein next/image-Remote-Pattern nötig.
         <img src={media.signedUrl} alt={media.keyword ?? ""} />
@@ -544,6 +609,128 @@ function SortableTile({
           <TrashIcon />
         </div>
       ) : null}
+    </>
+  );
+}
+
+/**
+ * Eine sortierbare, quadratische **Prozess**-Kachel. Tap (kein vorangegangener
+ * Drag) = ansehen/abspielen; Long-Press = verschieben (dnd-kit). Inhalt via
+ * `TileVisual`. before/after laufen NICHT hier durch — sie sind fix (s.
+ * `BeforeAfterSlot`).
+ */
+function SortableTile({
+  media,
+  draggedRef,
+  readOnly,
+  selected,
+  onToggleSelect,
+  onView,
+  onDelete,
+}: {
+  media: MediaWithUrl;
+  draggedRef: React.RefObject<boolean>;
+  readOnly: boolean;
+  selected: boolean;
+  onToggleSelect: () => void;
+  onView: () => void;
+  onDelete: () => void;
+}) {
+  const { setNodeRef, attributes, listeners, transform, transition, isDragging } =
+    useSortable({ id: media.id, disabled: readOnly });
+
+  const style: CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+    zIndex: isDragging ? 2 : undefined,
+  };
+
+  // Tap (kein vorangegangener Drag) = ansehen/abspielen.
+  const view = () => {
+    if (draggedRef.current) return;
+    onView();
+  };
+
+  // Read-only: keine Drag-Listener (nur Ansehen), kein Lösch-Button.
+  const dragProps = readOnly ? {} : { ...attributes, ...listeners };
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className="media-tile"
+      {...dragProps}
+      onClick={view}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") view();
+      }}
+    >
+      <TileVisual
+        media={media}
+        readOnly={readOnly}
+        selected={selected}
+        onToggleSelect={onToggleSelect}
+        onDelete={onDelete}
+      />
+    </div>
+  );
+}
+
+/**
+ * Fixer **Vorher-/Nachher-Slot** (0010): leerer Platzhalter (mit Label + Hinweis)
+ * oder das gefüllte Bild als große Kachel mit Label-Band unten. NICHT
+ * verschiebbar; im gefüllten Zustand verhält es sich wie eine Prozess-Kachel
+ * (ansehen/auswählen/löschen via `TileVisual`).
+ */
+function BeforeAfterSlot({
+  category,
+  media,
+  readOnly,
+  selected,
+  onToggleSelect,
+  onView,
+  onDelete,
+}: {
+  category: "before" | "after";
+  media: MediaWithUrl | null;
+  readOnly: boolean;
+  selected: boolean;
+  onToggleSelect: () => void;
+  onView: () => void;
+  onDelete: () => void;
+}) {
+  const label = t(DEFAULT_LOCALE, `mediaCategory.${category}`);
+
+  if (!media) {
+    return (
+      <div className="media-ba-slot media-ba-empty">
+        <span className="media-ba-empty-label">{label}</span>
+        <span className="media-ba-empty-hint">
+          {t(DEFAULT_LOCALE, "assembler.slotEmpty")}
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className="media-tile media-ba-slot"
+      role="button"
+      tabIndex={0}
+      onClick={onView}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") onView();
+      }}
+    >
+      <TileVisual
+        media={media}
+        readOnly={readOnly}
+        selected={selected}
+        onToggleSelect={onToggleSelect}
+        onDelete={onDelete}
+      />
+      <span className="media-ba-label">{label}</span>
     </div>
   );
 }
@@ -558,12 +745,20 @@ function MediaViewer({
   readOnly,
   onClose,
   onCaptionChange,
+  onCategoryChange,
+  disableBefore,
+  disableAfter,
 }: {
   media: MediaWithUrl;
   orderId: string;
   readOnly: boolean;
   onClose: () => void;
   onCaptionChange: (id: string, caption: string) => void;
+  onCategoryChange: (media: MediaWithUrl, category: MediaCategory) => void;
+  /** Vorher-Slot durch ein ANDERES Medium belegt ⇒ Auswahl gesperrt (0010). */
+  disableBefore: boolean;
+  /** Nachher-Slot durch ein ANDERES Medium belegt ⇒ Auswahl gesperrt (0010). */
+  disableAfter: boolean;
 }) {
   // Escape schließt das Overlay.
   useEffect(() => {
@@ -658,6 +853,18 @@ function MediaViewer({
         ) : null}
       </div>
 
+      {/* Kategorie-Wechsel (0010) — nur Foto im Editier-Modus. Video bleibt
+          immer 'process' (kein Selektor). Belegte before/after-Slots sind
+          deaktiviert (Server prüft zusätzlich). */}
+      {!readOnly && media.media_type === "photo" ? (
+        <CategorySelector
+          media={media}
+          disableBefore={disableBefore}
+          disableAfter={disableAfter}
+          onCategoryChange={onCategoryChange}
+        />
+      ) : null}
+
       {/* Caption: editierbar im Entwurf, sonst read-only (Abgeschlossen-Modus, 6c).
           Eigener key pro Item, damit der Text beim Wechsel neu lädt. */}
       {readOnly ? (
@@ -670,6 +877,65 @@ function MediaViewer({
           onCaptionChange={onCaptionChange}
         />
       )}
+    </div>
+  );
+}
+
+/** Kategorie-Selektor im Viewer (0010): Vorher/Nachher/Prozess als Toggle-Reihe. */
+function CategorySelector({
+  media,
+  disableBefore,
+  disableAfter,
+  onCategoryChange,
+}: {
+  media: MediaWithUrl;
+  disableBefore: boolean;
+  disableAfter: boolean;
+  onCategoryChange: (media: MediaWithUrl, category: MediaCategory) => void;
+}) {
+  const disabledFor: Record<MediaCategory, boolean> = {
+    before: disableBefore,
+    after: disableAfter,
+    process: false,
+  };
+  return (
+    <div
+      onClick={(e) => e.stopPropagation()}
+      style={{
+        background: "var(--surface)",
+        borderTop: "1px solid var(--border)",
+        padding: "12px 16px",
+        display: "flex",
+        flexDirection: "column",
+        gap: 8,
+      }}
+    >
+      <span style={{ fontSize: 13, fontWeight: 600 }}>
+        {t(DEFAULT_LOCALE, "assembler.categoryLabel")}
+      </span>
+      <div className="capture-category">
+        {CATEGORY_OPTIONS.map((option) => {
+          const active = media.category === option;
+          const disabled = !active && disabledFor[option];
+          return (
+            <button
+              key={option}
+              type="button"
+              className="capture-category-btn"
+              data-active={active}
+              disabled={disabled}
+              onClick={() => onCategoryChange(media, option)}
+            >
+              {t(DEFAULT_LOCALE, `mediaCategory.${option}`)}
+              {disabled ? (
+                <span className="capture-category-taken">
+                  {t(DEFAULT_LOCALE, "capture.categoryTaken")}
+                </span>
+              ) : null}
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }

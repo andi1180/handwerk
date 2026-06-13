@@ -7,9 +7,13 @@ import { compressImage } from "@/lib/media/compress";
 import { getVideoDuration } from "@/lib/media/video";
 import { MAX_VIDEO_SECONDS } from "@/lib/media/constants";
 import { DEFAULT_LOCALE, t } from "@/lib/i18n";
+import type { MediaCategory } from "@/lib/orders/queries";
 
 /** Medientyp einer Aufnahme (Foto in 4b, Video in 4c). */
 type MediaType = "photo" | "video";
+
+/** Auswählbare Bild-Kategorien in der Reihenfolge der Selektor-Buttons (0010). */
+const CATEGORY_OPTIONS: MediaCategory[] = ["before", "after", "process"];
 
 /** Browser-Client (anon-Key, RLS) — pro Komponenteninstanz einmal erzeugt. */
 type BrowserClient = ReturnType<typeof createClient>;
@@ -25,6 +29,8 @@ type Draft = {
   mediaType: MediaType;
   durationSeconds: number | null; // nur bei Video gesetzt
   keyword: string;
+  /** Bild-Kategorie (0010) — nur bei Foto wählbar; Video bleibt 'process'. */
+  category: MediaCategory;
 };
 
 /** Ein in der In-Memory-Queue laufendes (optimistisches) Upload-Item. */
@@ -36,6 +42,7 @@ type PendingItem = {
   mediaType: MediaType;
   durationSeconds: number | null; // nur bei Video gesetzt
   keyword: string | null;
+  category: MediaCategory; // Foto: gewählt; Video: immer 'process'
   status: "uploading" | "error";
 };
 
@@ -139,6 +146,8 @@ export function Capture({
   videoMax,
   photoCount,
   videoCount,
+  hasBefore,
+  hasAfter,
 }: {
   businessId: string;
   orderId: string;
@@ -152,6 +161,10 @@ export function Capture({
   photoCount: number;
   /** Bereits gespeicherte Videos dieses Auftrags (Server-Liste). */
   videoCount: number;
+  /** Ist der Vorher-Slot bereits durch ein gespeichertes Bild belegt? (0010) */
+  hasBefore: boolean;
+  /** Ist der Nachher-Slot bereits durch ein gespeichertes Bild belegt? (0010) */
+  hasAfter: boolean;
 }) {
   const router = useRouter();
   const supabase = useMemo(() => createClient(), []);
@@ -220,6 +233,7 @@ export function Capture({
             storage_path: item.storagePath,
             media_type: "photo",
             keyword: item.keyword,
+            category: item.category,
             width: compressed.width,
             height: compressed.height,
           };
@@ -293,6 +307,7 @@ export function Capture({
       mediaType: "photo",
       durationSeconds: null,
       keyword: "",
+      category: "process", // Standard; im Entwurf wählbar (Vorher/Nachher/Prozess)
     });
   };
 
@@ -322,6 +337,7 @@ export function Capture({
       mediaType: "video",
       durationSeconds: duration,
       keyword: "",
+      category: "process", // Video ist IMMER process (kein Vorher/Nachher)
     });
   };
 
@@ -342,6 +358,8 @@ export function Capture({
       mediaType: draft.mediaType,
       durationSeconds: draft.durationSeconds,
       keyword: draft.keyword.trim() || null,
+      // Video bleibt immer 'process' (UI bietet keine Wahl an).
+      category: draft.mediaType === "video" ? "process" : draft.category,
       status: "uploading",
     };
     setItems((prev) => [...prev, item]);
@@ -356,6 +374,18 @@ export function Capture({
   const inFlightVideos = items.filter((it) => it.mediaType === "video").length;
   const photoLimitReached = photoCount + inFlightPhotos >= photoMax;
   const videoLimitReached = videoCount + inFlightVideos >= videoMax;
+
+  // before/after-Slot je max 1 (0010): belegt = gespeichert (Server) ODER ein
+  // optimistisches Queue-Item dieser Kategorie. Sperrt die jeweilige Auswahl im
+  // Entwurf (reine UX — der harte Riegel ist der Server-Guard `category_taken`).
+  const beforeTaken =
+    hasBefore || items.some((it) => it.category === "before");
+  const afterTaken = hasAfter || items.some((it) => it.category === "after");
+  const categoryDisabled: Record<MediaCategory, boolean> = {
+    before: beforeTaken,
+    after: afterTaken,
+    process: false,
+  };
 
   const disabledBtnStyle: React.CSSProperties = {
     opacity: 0.45,
@@ -564,6 +594,43 @@ export function Capture({
               }}
             />
           )}
+
+          {/* Bild-Kategorie (0010) — nur bei Foto. Video bleibt immer 'process'.
+              Vorher/Nachher sind je max 1: belegte Slots sind deaktiviert. */}
+          {draft.mediaType === "photo" ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <span style={{ fontSize: 13, color: "var(--text-secondary)" }}>
+                {t(DEFAULT_LOCALE, "capture.category")}
+              </span>
+              <div className="capture-category">
+                {CATEGORY_OPTIONS.map((option) => {
+                  const active = draft.category === option;
+                  const disabled = !active && categoryDisabled[option];
+                  return (
+                    <button
+                      key={option}
+                      type="button"
+                      className="capture-category-btn"
+                      data-active={active}
+                      disabled={disabled}
+                      onClick={() =>
+                        setDraft((prev) =>
+                          prev ? { ...prev, category: option } : prev,
+                        )
+                      }
+                    >
+                      {t(DEFAULT_LOCALE, `mediaCategory.${option}`)}
+                      {disabled ? (
+                        <span className="capture-category-taken">
+                          {t(DEFAULT_LOCALE, "capture.categoryTaken")}
+                        </span>
+                      ) : null}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
 
           <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             <span style={{ fontSize: 13, color: "var(--text-secondary)" }}>

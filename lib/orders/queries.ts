@@ -4,6 +4,15 @@ import type { OrderStatus } from "@/components/order-status-badge";
 /** Erlaubte Medien-Tags (Spiegel der DB-Check-Constraint auf `order_media.tag`). */
 export type MediaTag = "vorher" | "nachher" | "prozess";
 
+/**
+ * Bild-Kategorie (Spiegel der DB-Check-Constraint auf `order_media.category`,
+ * Migration 0010). Steuert den festen Booklet-Aufbau: `before` direkt nach dem
+ * Intro, `after` zuletzt vor dem Outro, `process` dazwischen (Standard + Pflicht
+ * fürs Generieren). before/after je max 1 pro Auftrag (App-enforced); Videos sind
+ * IMMER `process`.
+ */
+export type MediaCategory = "before" | "after" | "process";
+
 /** Auftrag in der Detailansicht — alle für die Seite benötigten Felder. */
 export type OrderDetail = {
   id: string;
@@ -25,6 +34,7 @@ export type OrderMedia = {
   keyword: string | null;
   tag: MediaTag | null;
   caption: string | null;
+  category: MediaCategory;
   sort_order: number;
 };
 
@@ -53,7 +63,7 @@ export async function getOrderMedia(orderId: string): Promise<OrderMedia[]> {
   const supabase = await createClient();
   const { data } = await supabase
     .from("order_media")
-    .select("id, media_type, storage_path, keyword, tag, caption, sort_order")
+    .select("id, media_type, storage_path, keyword, tag, caption, category, sort_order")
     .eq("order_id", orderId)
     .order("sort_order", { ascending: true })
     .returns<OrderMedia[]>();

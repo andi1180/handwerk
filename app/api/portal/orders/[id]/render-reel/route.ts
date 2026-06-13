@@ -7,6 +7,8 @@ import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { getCurrentBusiness } from "@/lib/auth/current-business";
 import { displayCaption } from "@/lib/booklet/caption";
+import { orderBookletMedia } from "@/lib/booklet/media-order";
+import type { MediaCategory } from "@/lib/orders/queries";
 import { ensureFfmpeg, errMessage } from "@/lib/reel/ffmpeg";
 import {
   assertReelAssets,
@@ -75,12 +77,13 @@ type BookletRow = {
   intro_title: string | null;
   intro_description: string | null;
 };
-/** Ein Medien-Item (Foto ODER Video) in sort_order — die Reel-Einheit (8b-2a). */
+/** Ein Medien-Item (Foto ODER Video) — die Reel-Einheit (8b-2a), in Booklet-Ordnung. */
 type MediaItem = {
   storage_path: string;
   media_type: "photo" | "video";
   caption: string | null;
   keyword: string | null;
+  category: MediaCategory;
 };
 
 /** Externer Link ohne Protokoll/Trailing-Slash (Anzeige-Form fürs Outro). */
@@ -147,16 +150,17 @@ export async function POST(
     return NextResponse.json({ error: "invalid_status" }, { status: 409 });
   }
 
-  // ALLE Medien in Reihenfolge laden (RLS): Fotos UND Video-Clips, gemischt nach
-  // sort_order (8b-2a). caption/keyword für die Overlays — jetzt auf Fotos UND
-  // Clips (8b-1b/8b-2b). Ohne jedes Medium kein Reel.
+  // ALLE Medien laden (RLS): Fotos UND Video-Clips, sort_order ASC; danach in die
+  // feste Booklet-Reihenfolge bringen (0010): before → process (sort_order) →
+  // after. caption/keyword für die Overlays auf Fotos UND Clips (8b-1b/8b-2b).
+  // Ohne jedes Medium kein Reel.
   const { data: mediaRows } = await supabase
     .from("order_media")
-    .select("storage_path, media_type, caption, keyword")
+    .select("storage_path, media_type, caption, keyword, category")
     .eq("order_id", order.id)
     .order("sort_order", { ascending: true })
     .returns<MediaItem[]>();
-  const media = mediaRows ?? [];
+  const media = orderBookletMedia(mediaRows ?? []);
   if (media.length < 1) {
     return NextResponse.json({ error: "need_media" }, { status: 400 });
   }

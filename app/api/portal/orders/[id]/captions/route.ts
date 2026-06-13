@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getCurrentBusiness } from "@/lib/auth/current-business";
 import { isAiConfigured } from "@/lib/ai/anthropic";
 import { captionForMedia } from "@/lib/ai/media-caption";
+import type { MediaCategory } from "@/lib/orders/queries";
 
 /** Wie viele Captions gleichzeitig generiert werden (begrenzte Nebenläufigkeit). */
 const CONCURRENCY = 3;
@@ -13,6 +14,7 @@ type PendingMedia = {
   media_type: "photo" | "video";
   storage_path: string;
   keyword: string | null;
+  category: MediaCategory;
 };
 
 /** Ein erfolgreich gespeichertes Caption-Ergebnis. */
@@ -117,7 +119,7 @@ export async function POST(
   // Bei gesetzter Auswahl zusätzlich auf diese ids beschränken (order-skopiert).
   let query = supabase
     .from("order_media")
-    .select("id, media_type, storage_path, keyword")
+    .select("id, media_type, storage_path, keyword, category")
     .eq("order_id", order.id)
     .is("caption", null);
   if (selectedIds && selectedIds.length > 0) {

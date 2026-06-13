@@ -208,6 +208,15 @@ export const de = {
     limitReached: "Limit erreicht: max. {max} {type} pro Auftrag.",
     photosLabel: "Fotos",
     videosLabel: "Videos",
+    // Bild-Kategorie im Aufnahme-Entwurf (0010) — nur Foto. Belegte Slots gesperrt.
+    category: "Kategorie",
+    categoryTaken: "belegt",
+  },
+  // Bild-Kategorien (0010): DB-Werte before/after/process → deutsche Labels.
+  mediaCategory: {
+    before: "Vorher",
+    after: "Nachher",
+    process: "Prozess",
   },
   assembler: {
     reorderHint: "Halten zum Verschieben",
@@ -217,6 +226,11 @@ export const de = {
     close: "Schließen",
     reorderError: "Reihenfolge konnte nicht gespeichert werden.",
     deleteError: "Löschen fehlgeschlagen. Bitte erneut versuchen.",
+    // Vorher/Nachher-Slots + Kategorie-Wechsel (0010).
+    slotEmpty: "Noch kein Bild",
+    processEmpty: "Noch keine Prozess-Bilder.",
+    categoryLabel: "Kategorie",
+    categoryError: "Kategorie konnte nicht geändert werden.",
   },
   captions: {
     generate: "Captions generieren",
@@ -242,6 +256,8 @@ export const de = {
     button: "Booklet erstellen",
     hint: "Schließt zuerst die Medien ab. Danach erstellst du mit einem zweiten Tippen die persönlichen Texte und den Kunden-Link.",
     needMedia: "Bitte zuerst mindestens ein Medium hinzufügen.",
+    // 0010: nur Vorher/Nachher reicht nicht — mindestens ein Prozess-Medium nötig.
+    needProcess: "Mindestens ein Prozess-Bild oder -Video nötig.",
     done: "Medien abgeschlossen",
     reopen: "Bearbeiten",
     error: "Aktion fehlgeschlagen. Bitte erneut versuchen.",
@@ -254,6 +270,8 @@ export const de = {
     hint: "Erstellt die persönlichen Texte und den Kunden-Link. Jederzeit wieder änderbar.",
     regenerate: "Neu generieren",
     needMedia: "Bitte zuerst mindestens ein Medium hinzufügen.",
+    // 0010: nur Vorher/Nachher reicht nicht — mindestens ein Prozess-Medium nötig.
+    needProcess: "Mindestens ein Prozess-Bild oder -Video nötig.",
     error: "Erzeugung fehlgeschlagen. Bitte erneut versuchen.",
     timeout: "Zeitüberschreitung. Bitte erneut versuchen.",
     aiNotConfigured:

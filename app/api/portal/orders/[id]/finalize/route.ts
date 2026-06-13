@@ -13,7 +13,9 @@ import { getCurrentBusiness } from "@/lib/auth/current-business";
  *  - `getCurrentBusiness` (Session); kein Betrieb ⇒ 403.
  *  - Order über RLS geladen (fremde/fehlende id ⇒ 404).
  *  - Aktueller Status muss `draft` sein — sonst 409 (nichts abzuschließen).
- *  - Mindestens ein `order_media` vorhanden — sonst 400 (kein Medium).
+ *  - Mindestens ein `process`-Medium (Foto/Video) vorhanden — sonst 400
+ *    `need_process` (0010): ein Auftrag mit NUR Vorher/Nachher ist nicht
+ *    abschließbar; Videos sind immer `process`.
  *
  * Das Update läuft über die `orders_all`-RLS-Policy; defensiv zusätzlich auf
  * `status = 'draft'` gefiltert (kein Doppel-Übergang bei Races).
@@ -53,13 +55,15 @@ export async function POST(
     return NextResponse.json({ error: "invalid_status" }, { status: 409 });
   }
 
-  // Mindestens ein Medium ist Pflicht (sonst gäbe es kein Booklet abzuschließen).
+  // Mindestens ein PROZESS-Medium ist Pflicht (0010): ein Auftrag mit nur
+  // before/after hat keinen Inhalt für das Booklet. Videos sind immer `process`.
   const { count } = await supabase
     .from("order_media")
     .select("id", { count: "exact", head: true })
-    .eq("order_id", order.id);
+    .eq("order_id", order.id)
+    .eq("category", "process");
   if (!count || count < 1) {
-    return NextResponse.json({ error: "need_media" }, { status: 400 });
+    return NextResponse.json({ error: "need_process" }, { status: 400 });
   }
 
   const { error } = await supabase

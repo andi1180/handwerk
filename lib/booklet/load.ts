@@ -6,6 +6,8 @@ import {
   type BusinessBranding,
   type BusinessSettings,
 } from "@/lib/auth/current-business";
+import { orderBookletMedia } from "@/lib/booklet/media-order";
+import type { MediaCategory } from "@/lib/orders/queries";
 
 /** Signed-URLs sind kurzlebig — die Seite rendert pro Request frisch. */
 const SIGNED_URL_TTL_SECONDS = 3600;
@@ -83,6 +85,7 @@ type MediaRow = {
   storage_path: string;
   caption: string | null;
   keyword: string | null;
+  category: MediaCategory;
 };
 
 /**
@@ -152,15 +155,16 @@ export async function loadPublicBooklet(
   if (!business) return { status: "not_found" };
 
   // 4) Medien — über order_id, zusätzlich defensiv auf die booklet-business_id
-  //    gescoped; sort_order ASC.
+  //    gescoped; sort_order ASC. Danach in die feste Booklet-Reihenfolge bringen
+  //    (0010): before → process (sort_order) → after.
   const { data: mediaRows } = await service
     .from("order_media")
-    .select("id, media_type, storage_path, caption, keyword")
+    .select("id, media_type, storage_path, caption, keyword, category")
     .eq("order_id", booklet.order_id)
     .eq("business_id", booklet.business_id)
     .order("sort_order", { ascending: true })
     .returns<MediaRow[]>();
-  const rows = mediaRows ?? [];
+  const rows = orderBookletMedia(mediaRows ?? []);
 
   // 5) Signieren: Medien (Bucket order-media) + Branding-Bilder (Bucket branding).
   const branding = normalizeBranding(business.branding);

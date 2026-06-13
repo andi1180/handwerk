@@ -1,4 +1,5 @@
 import type { createClient } from "@/lib/supabase/server";
+import type { MediaCategory } from "@/lib/orders/queries";
 import { generateCaption, type ImageMediaType } from "./captions";
 
 /** Privater Bucket mit den Auftrags-Medien (siehe Migration 0002). */
@@ -12,6 +13,8 @@ export type CaptionableMedia = {
   media_type: "photo" | "video";
   storage_path: string;
   keyword: string | null;
+  /** Bild-Kategorie (0010) — fließt für before/after in den Prompt. */
+  category: MediaCategory;
 };
 
 /** Bild-Medientyp aus der Datei-Endung ableiten (Fotos sind i. d. R. JPEG). */
@@ -34,7 +37,12 @@ export async function captionForMedia(
   media: CaptionableMedia,
 ): Promise<string> {
   if (media.media_type !== "photo") {
-    return generateCaption({ mediaType: "video", keyword: media.keyword });
+    // Videos sind immer 'process' (kein Vorher/Nachher); category trotzdem durchreichen.
+    return generateCaption({
+      mediaType: "video",
+      keyword: media.keyword,
+      category: media.category,
+    });
   }
 
   const { data: blob } = await supabase.storage
@@ -43,13 +51,18 @@ export async function captionForMedia(
 
   // Bild nicht ladbar → mit Stichwort allein versuchen (statt hart zu scheitern).
   if (!blob) {
-    return generateCaption({ mediaType: "photo", keyword: media.keyword });
+    return generateCaption({
+      mediaType: "photo",
+      keyword: media.keyword,
+      category: media.category,
+    });
   }
 
   const imageBase64 = Buffer.from(await blob.arrayBuffer()).toString("base64");
   return generateCaption({
     mediaType: "photo",
     keyword: media.keyword,
+    category: media.category,
     imageBase64,
     imageMediaType: imageMediaTypeFromPath(media.storage_path),
   });

@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getCurrentBusiness } from "@/lib/auth/current-business";
 import { isAiConfigured } from "@/lib/ai/anthropic";
 import { captionForMedia } from "@/lib/ai/media-caption";
+import type { MediaCategory } from "@/lib/orders/queries";
 
 /** Felder, die für die Regenerierung eines Mediums benötigt werden. */
 type MediaRow = {
@@ -10,6 +11,7 @@ type MediaRow = {
   media_type: "photo" | "video";
   storage_path: string;
   keyword: string | null;
+  category: MediaCategory;
 };
 
 /**
@@ -49,7 +51,7 @@ export async function POST(
   // Medien-Zeile über RLS laden; muss zu DIESER Order gehören — sonst 404.
   const { data: media } = await supabase
     .from("order_media")
-    .select("id, media_type, storage_path, keyword")
+    .select("id, media_type, storage_path, keyword, category")
     .eq("id", mediaId)
     .eq("order_id", orderId)
     .maybeSingle<MediaRow>();
