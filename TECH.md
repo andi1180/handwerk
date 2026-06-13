@@ -2548,6 +2548,17 @@ Generate/Reopen/Deliver/Render-Routen unverändert (außer der dokumentierten Re
 
 ---
 
+## Content-Seiten-Kosmetik — Logo zentriert/kleiner + Website am Seitenfuß (nur Frontend)
+
+Finale Kosmetik an den **Content-/Bild-Seiten** der öffentlichen Web-Story (zwischen Intro und Outro, also `MediaSection` in [app/b/[token]/page.tsx](app/b/[token]/page.tsx) + [booklet.css](app/b/[token]/booklet.css)). **Intro und Outro unverändert.** Keine Migration, keine Logik, kein `<form>`, kein `any`.
+
+- **Logo zentriert + 20 % kleiner:** das Per-Seite-Logo (`.booklet-page-logo`, nur bei `branding.logo_per_page`) saß oben **links** (`left: 18px`, `max-height: 68px`). Jetzt **horizontal zentriert** (`left: 50%; transform: translateX(-50%)`) und **54px** hoch (68 × 0,8). Eigene Klasse, sauber gescoped — Intro/Outro nutzen `.booklet-logo` (bzw. `.booklet-section--outro .booklet-logo`) und bleiben unberührt.
+- **Website am unteren Rand:** am Fuß **jeder** Content-Seite die `settings.website_url` als **reiner, NICHT klickbarer Text** (kein Link, kein Tracking — das ist die Outro-Sache). **Horizontal zentriert**, **leichter** als die Caption/Content-Text (`font-weight: 400` vs. Caption 600 — `300` wäre nicht geladen, s. [fonts.ts](lib/booklet/fonts.ts), würde synthetisiert) und **eine Spur kleiner** (`clamp(0.85rem, 3.6vw, 1rem)`). Anzeige-Form ohne Protokoll/Trailing-Slash über den bestehenden `displayHost`-Helfer (konsistent mit dem Outro + `normalizeWebsite` aus [booklet-email.ts](lib/email/booklet-email.ts)). **Nur wenn gesetzt** (`{websiteUrl ? … : null}`) — sonst keine Zeile, kein Leerraum. Eigene Klasse `.booklet-page-website` (`position: absolute`, unten in der Safe-Zone, eigener Text-Schatten für Lesbarkeit auch ohne Scrim; sitzt unter der bei ~16 % schwebenden Caption, kein Überlapp).
+
+`pnpm typecheck` + `pnpm build` grün.
+
+---
+
 ## Launch-Fahrplan & deferierte Härtung
 
 Detail-Referenz für die Risikobewertung: [SECURITY_REVIEW.md](SECURITY_REVIEW.md) (bleibt im Repo). Dieser Abschnitt fasst die **Reihenfolge** des Live-Gangs und die **vor Kunde #2 verpflichtende** Härtung zusammen.

@@ -218,16 +218,40 @@
   text-shadow: 0 2px 18px rgba(0, 0, 0, 0.6);
 }
 
-/* Logo pro Medien-Seite (nur wenn branding.logo_per_page). */
+/* Logo pro Medien-Seite (nur wenn branding.logo_per_page). Eigene Klasse — nur
+   die Content-Seiten betroffen, Intro/Outro nutzen `.booklet-logo` (unverändert).
+   Horizontal zentriert + 20 % kleiner als zuvor (68px → 54px). */
 .booklet-page-logo {
   position: absolute;
   top: calc(env(safe-area-inset-top, 0px) + 18px);
-  left: 18px;
+  left: 50%;
+  transform: translateX(-50%);
   z-index: 3;
-  max-height: 68px;
+  max-height: 54px;
   max-width: 84%;
   object-fit: contain;
   filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.55));
+  pointer-events: none;
+}
+
+/* Website am unteren Rand der Content-Seite (settings.website_url) — zentriert,
+   feiner/leichter als die Caption (Content-Text), eine Spur kleiner; reiner Text
+   (nicht klickbar). Sitzt unterhalb der Caption (die bei ~16 % schwebt), eigener
+   Text-Schatten für Lesbarkeit auch ohne Scrim. */
+.booklet-page-website {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 14px);
+  z-index: 3;
+  margin: 0;
+  padding: 0 26px;
+  text-align: center;
+  font-size: clamp(0.85rem, 3.6vw, 1rem);
+  font-weight: 400;
+  letter-spacing: 0.04em;
+  opacity: 0.88;
+  text-shadow: 0 1px 10px rgba(0, 0, 0, 0.65);
   pointer-events: none;
 }
 

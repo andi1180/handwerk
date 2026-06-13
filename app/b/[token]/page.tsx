@@ -180,6 +180,10 @@ function MediaSection({
   // Overlay-Text: caption ?? keyword; beide leer ⇒ kein Overlay, kein Scrim.
   const caption = displayCaption(item);
   const showLogo = data.branding.logo_per_page && data.logoUrl;
+  // Website am unteren Rand der Content-Seite — reiner, NICHT klickbarer Text
+  // (kein Link, kein Tracking; das ist die Outro-Sache). Anzeige ohne Protokoll/
+  // Trailing-Slash (wie das Outro). Nur wenn website_url gesetzt ist.
+  const websiteUrl = data.settings.website_url;
 
   return (
     <section className="booklet-section">
@@ -217,6 +221,10 @@ function MediaSection({
             <p>{caption}</p>
           </div>
         </>
+      ) : null}
+
+      {websiteUrl ? (
+        <p className="booklet-page-website">{displayHost(websiteUrl)}</p>
       ) : null}
     </section>
   );
