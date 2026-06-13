@@ -92,14 +92,10 @@ export function ShareBar({
     copyTimer.current = setTimeout(() => setCopiedKey(null), 2000);
   }
 
-  /** Text in die Zwischenablage + Flash; Verweigerung (z. B. ohne HTTPS) still ignorieren. */
+  /** Text in die Zwischenablage + Flash; nur bei tatsächlichem Erfolg flashen. */
   async function copyText(text: string, key: CopiedKey): Promise<void> {
-    try {
-      await navigator.clipboard.writeText(text);
-      flashCopied(key);
-    } catch {
-      // Clipboard nicht verfügbar — kein Fehler-Toast.
-    }
+    if (await writeToClipboard(text)) flashCopied(key);
+    // Schlägt selbst der Legacy-Fallback fehl (sehr selten), kein Fehler-Toast.
   }
 
   /** Pures Kopieren der Story-URL (auch Fallback von „Story teilen"). */
@@ -261,7 +257,8 @@ export function ShareBar({
                 : t(locale, "review.button")}
             </span>
           </Pressable>
-          {/* §8.6: „Vorschlag, in deinen Worten" — NICHT „Text einfügen". Kein Belohnungs-Hinweis. */}
+          {/* §8.6: Vorschlag-Charakter (Textvorschlag/KI), im Google-Feld
+              editierbar; kein Belohnungsbezug, keine Sterne-Vorgabe. */}
           <p className="booklet-review-hint">{t(locale, "review.hint")}</p>
         </div>
       ) : null}
@@ -272,6 +269,48 @@ export function ShareBar({
 /** Externer Link bekommt ein Protokoll, falls der Betrieb keins gesetzt hat. */
 function reviewHref(url: string): string {
   return /^https?:\/\//i.test(url) ? url : `https://${url}`;
+}
+
+/**
+ * Robustes Kopieren — erst die moderne Clipboard-API, sonst der Legacy-Pfad.
+ * Die Web-Story wird oft aus In-App-Webviews (WhatsApp/Instagram) geöffnet, wo
+ * `navigator.clipboard` fehlt oder blockiert ist; dort greift `execCommand`,
+ * damit der „ist kopiert"-Hinweis (Review-/IG-Caption) auch wirklich stimmt.
+ * Gibt zurück, ob das Kopieren tatsächlich geklappt hat.
+ */
+async function writeToClipboard(text: string): Promise<boolean> {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    // Moderne API verweigert (kein HTTPS / kein Fokus) → Legacy-Fallback.
+  }
+  return legacyCopy(text);
+}
+
+/** Legacy-Kopierpfad (verstecktes <textarea> + execCommand) — best effort. */
+function legacyCopy(text: string): boolean {
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.position = "fixed";
+    ta.style.top = "0";
+    ta.style.left = "0";
+    ta.style.opacity = "0";
+    ta.style.pointerEvents = "none";
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    ta.setSelectionRange(0, text.length);
+    const ok = document.execCommand("copy");
+    ta.remove();
+    return ok;
+  } catch {
+    return false;
+  }
 }
 
 /* div-basierter Button (kein <form>): Klick + Tastatur (Enter/Space). */

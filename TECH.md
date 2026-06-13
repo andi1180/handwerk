@@ -2559,6 +2559,18 @@ Finale Kosmetik an den **Content-/Bild-Seiten** der öffentlichen Web-Story (zwi
 
 ---
 
+## Praxistest-Fixes — fixe Bottom-Nav (iOS Safe-Area) + Review-Hinweis/Clipboard (nur Frontend)
+
+Zwei kleine Korrekturen aus dem Praxistest. Keine Migration, keine Logik-/Routen-Änderung, kein `<form>`, kein `any`.
+
+**FIX 1 — Bottom-Tab-Nav klebt fix unten (iOS).** Die mobile `.portal-tabnav` ([globals.css](app/globals.css)) war bereits `position: fixed; bottom: 0` — die Ursache des „schwebt mitten im Content"-Verhaltens war **nicht** ein Containing-Block-Trap (kein `transform`/`filter`/`contain` auf `html`/`body`/`.portal-shell`, kein zweites globales Stylesheet, die Nav ist Geschwister von `.portal-main`, nicht Nachfahre des Seiteninhalts), sondern das **fehlende `viewport-fit=cover`**: ohne es liefert `env(safe-area-inset-bottom)` auf iOS **`0`** (die vorhandene Safe-Area-Polsterung war toter Code) und eine fixe Bottom-Bar destabilisiert auf iOS Safari gegen die dynamische Toolbar. Drei Änderungen: (1) **`viewportFit: "cover"`** im `viewport`-Export ([app/layout.tsx](app/layout.tsx)) → `env(safe-area-inset-*)` liefert echte Werte; (2) **`.portal-tabnav` Höhe** = `calc(var(--portal-tabnav-h) + env(safe-area-inset-bottom, 0px))` (zusätzlich zum bestehenden `padding-bottom: env(...)`) — wegen des globalen `box-sizing: border-box` muss der Inset in die Höhe **mitgerechnet** werden, sonst stauchte der erst jetzt > 0 werdende Inset die Tab-Reihe auf Notch-Geräten; (3) **`.portal-main` `padding-bottom`** um `+ env(safe-area-inset-bottom, 0px)` erweitert, damit das letzte Element die Nav **inkl.** Home-Indicator frei räumt. `position: fixed` bleibt (war korrekt). Nur Mobile (≤ 768px); Desktop-Sidebar unberührt; auf Nicht-Notch-Geräten ist der Inset `0` ⇒ keine Regression.
+
+**FIX 2 — Google-Bewertungs-Hinweis + Clipboard-Garantie** ([share-bar.tsx](app/b/[token]/share-bar.tsx) + [de.ts](lib/i18n/de.ts)). `review.hint` neu: **„Textvorschlag (KI) ist kopiert. Bei Google ins Feld einfügen (paste)."** — kurz/handlungsorientiert; §8.6 gewahrt (Vorschlag-Charakter „Textvorschlag (KI)", im Google-Feld editierbar, **kein** Belohnungsbezug, **keine** Sterne-Vorgabe; In-Code-Kommentare angepasst). Damit der Hinweis stimmt („ist kopiert"), wurde `copyText` gehärtet: neuer Helfer `writeToClipboard` versucht zuerst `navigator.clipboard.writeText`, fällt sonst auf den **Legacy-Pfad** `legacyCopy` (verstecktes `<textarea>` + `document.execCommand("copy")`) zurück — entscheidend, weil die Web-Story oft aus **In-App-Webviews** (WhatsApp/Instagram) geöffnet wird, in denen `navigator.clipboard` fehlt/blockiert ist. Der „✓ kopiert"-Flash feuert nur noch bei **tatsächlichem** Erfolg (Rückgabewert). Reihenfolge in `writeReview` (erst kopieren, dann `window.open` aufs Google-Profil) unverändert — der Doc-Fokus beim Kopieren bleibt so erhalten. Gilt für alle Kopier-Aktionen (Link/IG-Caption/Review).
+
+`pnpm typecheck` + `pnpm build` grün.
+
+---
+
 ## Launch-Fahrplan & deferierte Härtung
 
 Detail-Referenz für die Risikobewertung: [SECURITY_REVIEW.md](SECURITY_REVIEW.md) (bleibt im Repo). Dieser Abschnitt fasst die **Reihenfolge** des Live-Gangs und die **vor Kunde #2 verpflichtende** Härtung zusammen.

@@ -25,6 +25,12 @@ export const metadata: Metadata = {
 
 export const viewport: Viewport = {
   themeColor: "#3A3A3A",
+  // iOS: Layout-Viewport bis an die physischen Bildschirmränder ziehen, damit
+  // `env(safe-area-inset-*)` reale Werte (> 0) liefert. Voraussetzung dafür, dass
+  // die fixe Bottom-Tab-Nav (Mobile) stabil am unteren Rand klebt (sonst wandert
+  // sie auf iOS Safari mit der dynamischen Toolbar) und sauber über dem
+  // Home-Indicator sitzt.
+  viewportFit: "cover",
 };
 
 export default function RootLayout({

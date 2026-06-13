@@ -346,11 +346,12 @@ export const de = {
     message: "Ein kleines Booklet zu meiner Maßarbeit – schau mal rein",
   },
   review: {
-    // §8.6-PFLICHT: „Vorschlag, gern in deinen Worten anpassen" — NIE „Text
-    // einfügen", und NIEMALS an eine Belohnung gekoppelt (harter Google-ToS-Verstoß).
+    // §8.6-PFLICHT: Vorschlag-Charakter („Textvorschlag (KI)") — der Kunde fügt
+    // ihn ins Google-Feld ein und kann ihn dort frei anpassen; NIEMALS an eine
+    // Belohnung gekoppelt, keine Sterne-Vorgabe (harter Google-ToS-Verstoß).
     // „Google" trägt im Button der farbige Wortmarken-Schriftzug, daher hier ohne.
     button: "Bewertung schreiben",
-    hint: "Wir haben dir einen Bewertungstext vorbereitet und kopiert – einfach einfügen und gern in deinen Worten anpassen.",
+    hint: "Textvorschlag (KI) ist kopiert. Bei Google ins Feld einfügen (paste).",
     copied: "✓ Entwurf kopiert",
   },
   igCaption: {

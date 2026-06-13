@@ -243,8 +243,11 @@ body {
 
   .portal-main {
     padding: 16px;
-    /* Platz für die fixierte Bottom-Tab-Nav. */
-    padding-bottom: calc(var(--portal-tabnav-h) + 16px);
+    /* Platz für die fixierte Bottom-Tab-Nav inkl. iOS-Home-Indicator, damit das
+       letzte Element nicht hinter der Nav verschwindet. */
+    padding-bottom: calc(
+      var(--portal-tabnav-h) + 16px + env(safe-area-inset-bottom, 0px)
+    );
   }
 
   /* Schlanke, sticky Top-Bar: Betriebsname links, Logout rechts. */
@@ -283,7 +286,8 @@ body {
     object-fit: contain;
   }
 
-  /* App-artige Bottom-Tab-Nav, daumenreichbar fixiert. */
+  /* App-artige Bottom-Tab-Nav, fix am unteren Bildschirmrand verankert
+     (klebt unten, während der Inhalt darüber scrollt). */
   .portal-tabnav {
     display: flex;
     position: fixed;
@@ -291,10 +295,13 @@ body {
     left: 0;
     right: 0;
     z-index: 20;
-    height: var(--portal-tabnav-h);
+    /* Tab-Reihe behält --portal-tabnav-h; die iOS-Safe-Area (Home-Indicator)
+       liegt als zusätzliche Höhe + padding-bottom DARUNTER. Wegen
+       box-sizing: border-box (global) muss der Inset in die Höhe mitgerechnet
+       werden, sonst würden die Tabs auf Notch-Geräten gestaucht. */
+    height: calc(var(--portal-tabnav-h) + env(safe-area-inset-bottom, 0px));
     background: var(--bg);
     border-top: 1px solid var(--border);
-    /* Safe-Area iOS (Home-Indicator). */
     padding-bottom: env(safe-area-inset-bottom, 0px);
   }
 }
