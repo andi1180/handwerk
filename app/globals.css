@@ -142,6 +142,33 @@ body {
   border-color: var(--gold-border);
 }
 
+/* Geflaggte Auftragskarte (Block C / Schritt 2): abgeholt, aber Booklet noch
+   nicht versendet. Dezente, gedämpft-rote Umrandung markiert die Karte als
+   „Achtung" (kein grelles Vollrot). Steht hinter `.card-link`/`.card-link:hover`
+   ⇒ überschreibt deren Border-Farbe auch im Hover-Zustand. */
+.card-flagged {
+  border-color: rgba(192, 57, 43, 0.5);
+}
+.card-flagged:hover {
+  border-color: var(--red-text);
+}
+
+/* Warn-Hinweiszeile am unteren Rand geflaggter Karten — volle Breite, kompakt,
+   bricht auf schmalen Viewports sauber um (kein nowrap, kein Überlauf).
+   Ersetzt den früheren überbreiten Inline-Pill. */
+.order-pickup-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 2px;
+  padding-top: 10px;
+  border-top: 1px solid var(--red-border);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--red-text);
+}
+
 /* --- Forms --- */
 
 .form-input {

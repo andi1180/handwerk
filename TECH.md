@@ -2263,9 +2263,16 @@ Nachdem die Order per `external_ref` gefunden ist und `status.name === "Abgeholt
 - **Manueller Pfad** ([deliver/route.ts](app/api/portal/orders/[id]/deliver/route.ts)): das Status-Update `generated→sent` setzt im selben Schritt `picked_up_at = null` ⇒ der Badge verschwindet, sobald nachversendet wurde.
 - **Webhook-Deliver-Zweig** (`generated→sent`): setzt `picked_up_at = null` sicherheitshalber mit, falls ein automatisch ausgelieferter Auftrag noch ein Flag trug.
 
-### Badge auf der Auftragskachel ([pickup-pending-badge.tsx](components/pickup-pending-badge.tsx) + [orders/page.tsx](app/portal/orders/page.tsx))
+### Warn-Hinweis auf der Auftragskachel ([pickup-pending-badge.tsx](components/pickup-pending-badge.tsx) + [orders/page.tsx](app/portal/orders/page.tsx))
 
-Die Liste lädt zusätzlich `picked_up_at` (AUTHENTICATED, RLS) und rendert `<PickupPendingBadge>` im Badge-Wrap neben dem Status-Badge — aber **nur** wenn `picked_up_at` gesetzt ist **UND** `status NOT IN (sent, viewed, shared)` (**Doppel-Sicherung**: ein bereits ausgelieferter Auftrag mit theoretisch noch gesetztem Flag warnt nie fälschlich). Roter Pill (`--red-*`-Tokens), Text „Abgeholt – Booklet nicht versendet" + dezenter `abgeholt am TT.MM.`-Zusatz aus `picked_up_at`. **Nicht klickbar** — rein visuell (der Betrieb navigiert selbst zum Auftrag). Reine Präsentation, Server-Component-fähig (Muster wie [order-status-badge.tsx](components/order-status-badge.tsx)). i18n `orderStatus.pickupPending`/`pickupPendingDate`.
+Die Liste lädt zusätzlich `picked_up_at` (AUTHENTICATED, RLS). Die **Warn-Bedingung** ist unverändert: `picked_up_at` gesetzt **UND** `status NOT IN (sent, viewed, shared)` (**Doppel-Sicherung**: ein bereits ausgelieferter Auftrag mit theoretisch noch gesetztem Flag warnt nie fälschlich). Geändert wurde nur die **Darstellung**.
+
+**Neugestaltung (Überlauf-Fix):** Der frühere überbreite **Inline-Pill** im Badge-Wrap (`whiteSpace: nowrap`) lief auf schmalen Viewports über den rechten Kartenrand hinaus, verdrängte den Kartentext und sah kaputt aus — **entfällt**. Stattdessen markieren zwei Elemente die geflaggte Karte:
+
+1. **Dezente rote Kartenumrandung** (`.card-flagged` in [globals.css](app/globals.css)): gedämpftes Warnrot (`rgba(192,57,43,0.5)`, im Hover `var(--red-text)`); steht hinter `.card-link`/`.card-link:hover` ⇒ überschreibt deren Gold-Border auch im Hover. Der normale Status-Badge („Entwurf" etc.) bleibt unverändert an seiner Stelle.
+2. **Volle-Breite-Hinweiszeile am unteren Kartenrand** (`<PickupPendingBadge>` → `.order-pickup-warning`): Warn-Icon + Text „Abgeholt am TT.MM. – Booklet nicht versendet", in Rot (`--red-text`/`--red-border`-Hairline oben), kompakt; **kein `nowrap`** ⇒ bricht auf ~380px sauber um, kein Abschneiden, kein Überlauf. Dafür ist die Karte jetzt ein **Flex-Spalten-Container** (Zeile [Name + Badges] oben, Hinweiszeile unten); ungeflaggte Karten rendern nur die Zeile (optisch unverändert).
+
+**Nicht klickbar** — rein visuell (die Karte selbst verlinkt zum Auftrag). Reine Präsentation, Server-Component-fähig (Muster wie [order-status-badge.tsx](components/order-status-badge.tsx)). i18n `orderStatus.pickupPendingNotice` (ersetzt die getrennten `pickupPending`/`pickupPendingDate`).
 
 `pnpm typecheck` + `pnpm build` grün.
 

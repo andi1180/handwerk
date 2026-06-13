@@ -204,18 +204,38 @@ export default async function OrdersPage({
       ) : (
         <>
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            {orders.map((order) => (
+            {orders.map((order) => {
+              // Warn-Bedingung (Block C / Schritt 2): abgeholt, aber Booklet noch
+              // nicht versendet. Doppel-Sicherung — bereits ausgelieferte Stufen
+              // (sent/viewed/shared) nie warnen, selbst wenn picked_up_at
+              // theoretisch noch gesetzt wäre. Truthy ⇒ String narrowt für die
+              // Hinweiszeile.
+              const flaggedDate =
+                order.picked_up_at &&
+                order.status !== "sent" &&
+                order.status !== "viewed" &&
+                order.status !== "shared"
+                  ? order.picked_up_at
+                  : null;
+              return (
               <Link
                 key={order.id}
                 href={`/portal/orders/${order.id}`}
-                className="card card-link"
+                className={`card card-link${flaggedDate ? " card-flagged" : ""}`}
                 style={{
                   display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  gap: 12,
+                  flexDirection: "column",
+                  gap: 10,
                 }}
               >
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: 12,
+                  }}
+                >
                 <div style={{ minWidth: 0 }}>
                   <div
                     style={{
@@ -284,23 +304,22 @@ export default async function OrdersPage({
                         reelStatus={reelByOrder.get(order.id) ?? null}
                       />
                     ) : null}
-                    {/* Warn-Badge (Block C / Schritt 2): roapp meldete „Abgeholt",
-                        Booklet aber noch nicht versendet. Doppel-Sicherung —
-                        bereits ausgelieferte Stufen (sent/viewed/shared) nie warnen,
-                        selbst wenn picked_up_at theoretisch noch gesetzt wäre. */}
-                    {order.picked_up_at &&
-                    order.status !== "sent" &&
-                    order.status !== "viewed" &&
-                    order.status !== "shared" ? (
-                      <PickupPendingBadge pickedUpAt={order.picked_up_at} />
-                    ) : null}
                   </div>
                   <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>
                     {DATE_FORMAT.format(new Date(order.created_at))}
                   </div>
                 </div>
+                </div>
+                {/* Warn-Hinweis (Block C / Schritt 2): roapp meldete „Abgeholt",
+                    Booklet aber noch nicht versendet. Volle-Breite-Zeile am
+                    unteren Kartenrand statt überbreitem Inline-Pill; die Karte
+                    trägt zusätzlich eine rote Umrandung (.card-flagged). */}
+                {flaggedDate ? (
+                  <PickupPendingBadge pickedUpAt={flaggedDate} />
+                ) : null}
               </Link>
-            ))}
+              );
+            })}
           </div>
 
           <OrdersPagination
