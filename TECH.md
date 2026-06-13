@@ -2071,6 +2071,17 @@ Die deliver-Logik ([app/api/portal/orders/[id]/deliver/route.ts](app/api/portal/
 - **Env:** `ROAPP_API_KEY` (server-only, neu) + optional `ROAPP_PICKED_UP_STATUS_NAME` — dokumentiert in [.env.example](.env.example). `BOOKLET_BASE_URL` existiert bereits.
 - **Secret setzen** (keine Migration, ops): [supabase/scripts/set_webhook_secret.sql](supabase/scripts/set_webhook_secret.sql) setzt per `gen_random_uuid()` ein Secret für **einen** Betrieb (`where business_email = …`, nur wenn `webhook_secret is null` ⇒ **überschreibt bestehende nie**) und liest es aus. Webhook-URL: `https://handwerk.valooro.com/api/webhook/<webhook_secret>`.
 
+### Backfill bestehender roapp-Aufträge ([scripts/import-roapp-orders.ts](scripts/import-roapp-orders.ts), einmalig)
+
+CLI-Script für den **einmaligen Backfill** schon existierender roapp-Aufträge (die NICHT mehr per `order.created`-Webhook reinkommen). Legt für eine **fest vorgegebene** Liste interner roapp-Order-IDs je einen `status='draft'`-Auftrag an. **Keine Migration** (nutzt die 0001-Tabellen). Run: `pnpm dlx tsx scripts/import-roapp-orders.ts`.
+
+- **Importmenge = GENAU `OBJECT_IDS`** (hartkodiertes Array, vom Nutzer aus den roapp-Web-UI-URLs abgelesen). **KEIN** Listen-/Such-Endpoint, **KEIN** Auto-Discovery.
+- **Betrieb** über `BUSINESS_EMAIL = "office@alinadax.com"` aufgelöst (`select id,name,default_language from businesses where business_email=…`); fehlt er ⇒ **harter Abbruch**. `business.id` ist die **EINZIGE Vertrauensquelle** (§14.2), jede Query darauf gescoped.
+- **Pro Auftrag** (Felder repliziert aus dem Webhook-`handleOrderCreated`): `customer_name` (REPLIZIERTE `buildCustomerName`-Logik first+last → name → external_ref → "Kunde"; Webhook-Route bewusst **unangefasst**, kein Export), `customer_email`(||null), `customer_phone=null`, `external_ref=id_label`, `item_description=raw_description`, `short_summary` (Haiku, wie Live-Anlage; Fehler ⇒ null, Order trotzdem angelegt), `language=default_language`, `status='draft'`, `consent_given=false`/`consent_at=null` (§13.5).
+- **Idempotenz:** SELECT auf `(business_id, external_ref)` vor jedem Insert ⇒ existiert ⇒ skip (KEIN upsert — keine UNIQUE-Constraint, nur Index). **Re-runnbar.**
+- **Nicht-blockierend pro ID:** eigener try/catch ⇒ loggen + weiter; `external_ref` fehlt ⇒ skip; `getRoappOrder`-Fehler ⇒ skip+log. Abschluss-Log `created N / skipped M / failed K`.
+- **HARTE GRENZE:** legt AUSSCHLIESSLICH die `draft`-Order an — **KEINE** Booklet-Generierung, **KEIN** Reel, **KEINE** E-Mail, **KEIN** Versand, **KEIN** Status über `draft`; `roappOrder.status` wird gelesen, aber ignoriert. **KEIN** `analytics_events`-Insert (Backfill ≠ Anlage-Event, kein Consumer) — nur `item_description` + `short_summary`. `service_role` ist CLI-only (`.env.local`, dependency-freier Loader wie [upload-ffmpeg.ts](scripts/upload-ffmpeg.ts)); relative Imports (`../lib/...`).
+
 ### Offene Folgeschritte
 
 1. **`x-signature` (HMAC) wird NICHT geprüft** — das Pfad-Secret ist die **einzige** Auth fürs MVP. Eine zusätzliche HMAC-Signaturprüfung des Payloads (gegen ein pro-Betrieb-Shared-Secret) ist ein sinnvoller Härtungs-Folgeschritt.
