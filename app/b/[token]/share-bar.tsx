@@ -8,6 +8,17 @@ import { trackBookletEvent } from "@/lib/booklet/track";
 type CopiedKey = "link" | "ig" | "review";
 
 /**
+ * FIX 2a: Der IG-Caption-Vorschlag ist in der sichtbaren Teilen-Sektion
+ * vorerst AUSGEBLENDET (Testphase) — die Section soll kompakter werden und ohne
+ * Scrollen auf einen Mobile-Screen passen. Das Feature bleibt vollständig
+ * erhalten: Generierung (`buildIgCaption` bei der Booklet-Erstellung),
+ * `copyIgCaption` und das Event-Tracking (`link_click/ig`) sind unverändert im
+ * Code — nur das UI-Panel rendert nicht. Zum Reaktivieren (evtl. später pro
+ * Betrieb konfigurierbar) auf `true` setzen.
+ */
+const SHOW_IG_CAPTION = false;
+
+/**
  * Teilen-Sektion der öffentlichen Web-Story — der WOM-Kern.
  *
  * SSR-sicher: `window`/`navigator` werden ausschließlich in Handlern/Effects
@@ -207,7 +218,7 @@ export function ShareBar({
         </Pressable>
       ) : null}
 
-      {igCaption ? (
+      {SHOW_IG_CAPTION && igCaption ? (
         <div className="booklet-ig">
           <div className="booklet-ig-head">
             <InstagramIcon />

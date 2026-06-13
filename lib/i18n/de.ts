@@ -294,6 +294,7 @@ export const de = {
     stage13: "Letzter Feinschliff…",
     stage14: "Fast fertig…",
     watch: "Reel ansehen",
+    close: "Schließen",
     recreate: "Neu erstellen",
     retry: "Erneut",
     hint: "Aus den Medien dieses Auftrags wird ein 9:16-Reel erstellt (Fotos je 3 s, Clips bis 6 s, harte Schnitte, ohne Ton).",

@@ -373,6 +373,10 @@ export function ReelButton({
   const [starting, setStarting] = useState(false);
   // Index der kosmetischen Render-Stufe (nur während `rendering` sichtbar).
   const [stageIdx, setStageIdx] = useState(0);
+  // FIX 1: das fertige Reel wird IN der App in einem Overlay abgespielt (mit
+  // Schließen-X), statt als roher mp4-Link in einem neuen Tab zu landen
+  // (Sackgasse ohne Zurück). `viewerUrl` gesetzt ⇒ Overlay offen.
+  const [viewerUrl, setViewerUrl] = useState<string | null>(null);
 
   // Stufentexte durchlaufen, solange gerendert wird; die letzte bleibt stehen.
   useEffect(() => {
@@ -443,8 +447,9 @@ export function ReelButton({
   const busy = starting || rendering;
 
   return (
-    // Grid-Zelle der Aktionszone (rechts oben bei `generated`, eigener Block bei
-    // sent/viewed/shared) — kein eigener Top-Abstand, die Seite richtet aus.
+    <>
+    {/* Grid-Zelle der Aktionszone (rechts oben bei `generated`, eigener Block bei
+        sent/viewed/shared) — kein eigener Top-Abstand, die Seite richtet aus. */}
     <div>
       <div
         style={{
@@ -455,15 +460,16 @@ export function ReelButton({
         }}
       >
         {status === "ready" && url ? (
-          <a
+          // FIX 1: kein `target="_blank"`-Link mehr (Sackgasse) — öffnet das
+          // In-App-Overlay mit Schließen-X, das zurück zur Detailseite führt.
+          <button
+            type="button"
             className="btn-gold"
-            href={url}
-            target="_blank"
-            rel="noopener noreferrer"
+            onClick={() => setViewerUrl(url)}
           >
-            <ExternalLinkIcon />
+            <PlayIcon />
             {t(DEFAULT_LOCALE, "reel.watch")}
-          </a>
+          </button>
         ) : null}
 
         <button
@@ -507,6 +513,88 @@ export function ReelButton({
       )}
       {notice ? <NoticeBox text={notice} /> : null}
     </div>
+
+      {/* FIX 1: In-App-Reel-Viewer mit Schließen-X (kein Browser-Tab-Sackgasse). */}
+      {viewerUrl ? (
+        <ReelViewer url={viewerUrl} onClose={() => setViewerUrl(null)} />
+      ) : null}
+    </>
+  );
+}
+
+/**
+ * Vollbild-Overlay zum Abspielen des fertigen Reels (FIX 1). Klarer Ausweg:
+ * ein gut sichtbares Schließen-X oben rechts (Notch-/Safe-Area-sicher) sowie
+ * Escape und Backdrop-Klick führen zurück zur Auftrags-Detailseite. Kein
+ * `<form>`; das X ist ein `<button>` mit `aria-label`.
+ */
+function ReelViewer({ url, onClose }: { url: string; onClose: () => void }) {
+  // Escape schließt das Overlay.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      role="dialog"
+      aria-modal
+      onClick={onClose}
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 70,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 16,
+        background: "rgba(0, 0, 0, 0.9)",
+      }}
+    >
+      <button
+        type="button"
+        aria-label={t(DEFAULT_LOCALE, "reel.close")}
+        onClick={onClose}
+        style={{
+          position: "absolute",
+          // Unter dem Notch/der Statusleiste, gut erreichbar.
+          top: "calc(env(safe-area-inset-top, 0px) + 14px)",
+          right: "calc(env(safe-area-inset-right, 0px) + 14px)",
+          zIndex: 1,
+          width: 44,
+          height: 44,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          borderRadius: 999,
+          border: "none",
+          background: "rgba(0, 0, 0, 0.55)",
+          color: "#fff",
+          cursor: "pointer",
+        }}
+      >
+        <CloseIcon />
+      </button>
+
+      {/* Hochformat-Reel: füllt die Höhe, behält 9:16. Klick aufs Video
+          schließt nicht (stopPropagation) — nur Backdrop/X/Escape. */}
+      <video
+        src={url}
+        controls
+        autoPlay
+        playsInline
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          maxWidth: "100%",
+          maxHeight: "100%",
+          borderRadius: "var(--radius)",
+          background: "#000",
+        }}
+      />
+    </div>
   );
 }
 
@@ -531,12 +619,28 @@ function LockIcon() {
   );
 }
 
-/** Externer-Link-Symbol für „Reel ansehen". Reine Deko. */
-function ExternalLinkIcon() {
+/** Play-Symbol für „Reel ansehen" (öffnet den In-App-Viewer). Reine Deko. */
+function PlayIcon() {
   return (
     <svg
       width={16}
       height={16}
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      aria-hidden
+      style={{ flexShrink: 0 }}
+    >
+      <path d="M8 5v14l11-7z" />
+    </svg>
+  );
+}
+
+/** Schließen-X für den Reel-Viewer (FIX 1). Reine Deko. */
+function CloseIcon() {
+  return (
+    <svg
+      width={22}
+      height={22}
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
@@ -546,9 +650,8 @@ function ExternalLinkIcon() {
       aria-hidden
       style={{ flexShrink: 0 }}
     >
-      <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-      <path d="M15 3h6v6" />
-      <path d="M10 14L21 3" />
+      <path d="M18 6L6 18" />
+      <path d="M6 6l12 12" />
     </svg>
   );
 }

@@ -2484,6 +2484,16 @@ Doppelversand-`count`-Guard im deliver (unverändert), `access_token`/`short_cod
 
 ---
 
+## UX-Fixes aus dem Praxistest — Reel-Viewer-Ausweg + kompaktere Teilen-Sektion (nur Frontend)
+
+Zwei Korrekturen aus dem Praxistest; **keine Migration**, keine Render-/Poll-/Tracking-/Generierungs-Logik berührt, kein `<form>`, kein `any`.
+
+**FIX 1 — Reel-Ansicht ohne Zurück-Weg.** „Reel ansehen" ([generate-controls.tsx](app/portal/orders/[id]/generate-controls.tsx)) öffnete das fertige Reel als rohe `reel.mp4` (Signed-URL) in einem **neuen Browser-Tab** (`<a target="_blank">`) → auf Mobile eine Sackgasse ohne Schließen/Zurück in die App. Ersetzt durch ein **In-App-Overlay** `<ReelViewer>`: Vollbild (`position: fixed; inset: 0; z-index: 70`), `<video controls autoPlay playsInline>`, mit **klar sichtbarem Schließen-X oben rechts** (`<button aria-label={reel.close}>`, **Notch-/Safe-Area-sicher** via `calc(env(safe-area-inset-top/right) + 14px)`), das zurück zur Auftrags-Detailseite führt. Escape + Backdrop-Klick schließen ebenfalls; Klick aufs Video schließt nicht (`stopPropagation`). Der „Reel ansehen"-Button ist von `<a>` auf `<button onClick={() => setViewerUrl(url)}>` umgestellt; `PlayIcon`/`CloseIcon` neu, das ungenutzte `ExternalLinkIcon` entfernt. i18n `reel.close`.
+
+**FIX 2 — Outro/Teilen-Sektion zu hoch** (untere Buttons erst nach Scrollen sichtbar). **(a) IG-Caption ausgeblendet, nicht gelöscht** ([share-bar.tsx](app/b/[token]/share-bar.tsx)): Flag `SHOW_IG_CAPTION = false` gated das IG-Panel (`{SHOW_IG_CAPTION && igCaption ? … }`). Die **gesamte IG-Logik bleibt erhalten** — `buildIgCaption`-Generierung bei der Booklet-Erstellung, `copyIgCaption`, Event-Tracking `link_click/ig`; das `&&`-Gate hält `copyIgCaption`/`InstagramIcon`/`CopyIcon` referenziert ⇒ keine Unused-Warnung. Reaktivieren (evtl. später pro Betrieb) = Flag `true`. **(b) Kompakteres Layout** ([booklet.css](app/b/[token]/booklet.css)): `.booklet-share` (margin-top 18→12, padding 15/14→11/12, gap 10→7), Hauptaktion/Sekundär-/Review-Buttons `min-height` 46/48 → 42 + engere Paddings, `.booklet-review` gap/margin runter; zusätzlich Outro-Umfeld gestrafft (`.booklet-outro-message` margin 16→10, `.booklet-contact` margin-top 30→14 + gap 12→9 + Pill-Padding 13→10, **Outro-Logo** 128→88 px via `.booklet-section--outro .booklet-logo` — **Intro-Logo unverändert**). Frosted-Karte (`.booklet-frost`) bleibt; Ziel ~380×800 ohne Scrollen. `pnpm typecheck` + `pnpm build` grün.
+
+---
+
 ## Launch-Fahrplan & deferierte Härtung
 
 Detail-Referenz für die Risikobewertung: [SECURITY_REVIEW.md](SECURITY_REVIEW.md) (bleibt im Repo). Dieser Abschnitt fasst die **Reihenfolge** des Live-Gangs und die **vor Kunde #2 verpflichtende** Härtung zusammen.
