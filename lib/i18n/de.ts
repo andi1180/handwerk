@@ -270,10 +270,11 @@ export const de = {
     openPreview: "Booklet ansehen",
   },
   reel: {
-    title: "Reel",
     create: "Reel erstellen",
-    // Gesperrter Platzhalter im Entwurf: das Reel braucht das Booklet als Basis.
-    lockedHint: "Bitte zuerst das Booklet erstellen.",
+    // Erledigter, grauer Zustand, sobald das Reel fertig gerendert ist
+    // (reel_status='ready'). Neu-Rendern nur noch über „Bearbeiten" → erneut
+    // „Booklet erstellen" (setzt das Reel zurück) — kein „Neu erstellen" mehr.
+    created: "Reel erstellt",
     starting: "Starte…",
     rendering: "Reel wird erstellt…",
     // Rotierende, rein kosmetische Fortschritts-Stufen während des Renders
@@ -295,7 +296,6 @@ export const de = {
     stage14: "Fast fertig…",
     watch: "Reel ansehen",
     close: "Schließen",
-    recreate: "Neu erstellen",
     retry: "Erneut",
     hint: "Aus den Medien dieses Auftrags wird ein 9:16-Reel erstellt (Fotos je 3 s, Clips bis 6 s, harte Schnitte, ohne Ton).",
     needMedia: "Bitte zuerst mindestens ein Medium (Foto oder Video) hinzufügen.",
@@ -320,6 +320,9 @@ export const de = {
   },
   booklet: {
     scrollHint: "Nach unten wischen",
+    // Zurück zur Auftrags-Detailseite — NUR in der betriebs-eigenen Vorschau
+    // (`?p=1`) gerendert, nie für den echten Kunden (Sackgassen-Fix).
+    backToOrder: "Zurück zum Auftrag",
     contactEmail: "E-Mail",
     contactPhone: "Telefon",
     contactWebsite: "Website",
@@ -360,6 +363,8 @@ export const de = {
     printButton: "QR drucken",
     forCustomer: "Für {name}",
     hint: "Scannen Sie den Code für Ihr persönliches Booklet",
+    // Zurück zur Auftrags-Detailseite (Sackgassen-Fix; nur Bildschirm, nicht Druck).
+    back: "Zurück zum Auftrag",
   },
   dashboard: {
     // Analytics-Dashboard auf der Startseite (Schritt 10b).

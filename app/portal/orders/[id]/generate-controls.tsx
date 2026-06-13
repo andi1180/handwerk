@@ -5,20 +5,26 @@ import { useRouter } from "next/navigation";
 import { DEFAULT_LOCALE, t } from "@/lib/i18n";
 
 /**
- * Booklet-Aktionen der Detailseite (Flow-Vereinfachung). Kleine Client-
- * Komponenten, `div/button + onClick`, kein `<form>`:
+ * Booklet-Aktionen der Detailseite — gebündeltes „Control Center" am Seitenende
+ * (Layout-Umbau). Kleine Client-Komponenten, `div/button + onClick`, kein
+ * `<form>`. Die Logik der Routen (generate/reopen/render-reel/reel-status) ist
+ * UNVERÄNDERT; nur Anordnung + Benennung wurden aufgeräumt.
  *
  *  - `<CreateBookletButton>`: der EINE „Booklet erstellen"-Schritt. Im `draft`
  *    aktiv ⇒ `POST generate` (führt direkt `draft → generated` aus: KI-Texte +
- *    Kunden-Link). Im `generated` als erledigter, grauer Zustand dargestellt
- *    (`disabled`) — das Booklet existiert bereits.
- *  - `<LockedReelButton>` (Status `draft`): gesperrter „Reel erstellen"-Platz-
- *    halter neben dem Erstellen-Button; Klick zeigt den Hinweis, dass zuerst das
- *    Booklet erstellt werden muss (das Reel braucht die Booklet-Daten).
+ *    Kunden-Link). Im `generated` als erledigter, grauer Zustand (`disabled`,
+ *    via `<DoneButton>`) — das Booklet existiert bereits.
  *  - `<ReopenButton>` (Status `generated`): „Bearbeiten" ⇒ `POST reopen`
  *    (`generated → draft`), zurück in den Editier-Modus. Token/Kurzlink bleiben.
- *  - `<ReelButton>`: das echte Reel (Render + Poll), ab `generated` und auch
- *    nach Versand (FIX 7.1).
+ *  - `<ReelCreateButton>`: erstellt das echte Reel (Render + Poll), ab
+ *    `generated` und auch nach Versand (FIX 7.1). Fertig gerendert ⇒ grauer
+ *    „✓ Reel erstellt"-Zustand (KEIN „Neu erstellen" mehr — Neu-Rendern nur über
+ *    „Bearbeiten" → erneut „Booklet erstellen", das das Reel serverseitig
+ *    zurücksetzt). Bei Erfolg `router.refresh()`, damit der Watch-Button (#4) +
+ *    die Auslieferungs-Warnung den fertigen Stand vom Server bekommen.
+ *  - `<ReelWatchButton>`: „Reel ansehen" — öffnet das fertige Reel im In-App-
+ *    Overlay (`<ReelViewer>`, Schließen-X, kein Browser-Tab-Sackgasse). Liegt in
+ *    der Ansehen-Zeile (#4) zusammen mit „Booklet ansehen"/„QR drucken".
  *
  * ISOLATION: kein Body; Betrieb/Order werden im Route Handler gegen die Session
  * geprüft, die `business_id` stammt aus der geladenen Order.
@@ -99,7 +105,39 @@ function NoticeBox({ text }: { text: string }) {
 }
 
 /**
- * Der eine „Booklet erstellen"-Schritt (links oben in der Aktionszone).
+ * Erledigter, grauer „✓ {label}"-Zustand über die volle Breite (nicht klickbar).
+ * Geteilt von „Booklet erstellt" (Status `generated`) und „Reel erstellt"
+ * (reel_status='ready') — eine Optik, kein Duplikat.
+ */
+function DoneButton({ label }: { label: string }) {
+  return (
+    <button
+      type="button"
+      className="capture-btn"
+      disabled
+      aria-disabled
+      style={{
+        width: "100%",
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 8,
+        background: "var(--surface-2)",
+        color: "var(--text-secondary)",
+        border: "1px solid var(--border)",
+        borderRadius: "var(--radius)",
+        fontFamily: "inherit",
+        fontWeight: 600,
+        cursor: "default",
+      }}
+    >
+      ✓ {label}
+    </button>
+  );
+}
+
+/**
+ * Der eine „Booklet erstellen"-Schritt (Slot 1 der Aktionszone).
  *
  *  - `disabled` (Status `generated`): Booklet existiert ⇒ grauer, nicht
  *    klickbarer „✓ Booklet erstellt"-Zustand. Geändert/neu erzeugt wird über
@@ -152,30 +190,7 @@ export function CreateBookletButton({
 
   // Generiert: das Booklet existiert ⇒ grauer, erledigter Zustand (kein Klick).
   if (disabled) {
-    return (
-      <button
-        type="button"
-        className="capture-btn"
-        disabled
-        aria-disabled
-        style={{
-          width: "100%",
-          display: "inline-flex",
-          alignItems: "center",
-          justifyContent: "center",
-          gap: 8,
-          background: "var(--surface-2)",
-          color: "var(--text-secondary)",
-          border: "1px solid var(--border)",
-          borderRadius: "var(--radius)",
-          fontFamily: "inherit",
-          fontWeight: 600,
-          cursor: "default",
-        }}
-      >
-        ✓ {t(DEFAULT_LOCALE, "generate.created")}
-      </button>
-    );
+    return <DoneButton label={t(DEFAULT_LOCALE, "generate.created")} />;
   }
 
   // Entwurf: ein Klick erzeugt das ganze Booklet (draft → generated).
@@ -203,48 +218,6 @@ export function CreateBookletButton({
       </p>
 
       {notice ? <NoticeBox text={notice} /> : null}
-    </div>
-  );
-}
-
-/**
- * Gesperrter „Reel erstellen"-Platzhalter (Status `draft`, rechts oben neben
- * „Booklet erstellen"). Das Reel braucht die Booklet-Daten als Basis — vor dem
- * Erstellen ist es daher gesperrt. Bewusst NICHT `disabled` (sonst feuert kein
- * Klick): ein Tap zeigt den Hinweis, zuerst das Booklet zu erstellen.
- */
-export function LockedReelButton() {
-  const [notice, setNotice] = useState<string | null>(null);
-  return (
-    <div>
-      <button
-        type="button"
-        className="capture-btn"
-        aria-disabled
-        onClick={() => setNotice(t(DEFAULT_LOCALE, "reel.lockedHint"))}
-        style={{
-          width: "100%",
-          display: "inline-flex",
-          alignItems: "center",
-          justifyContent: "center",
-          gap: 10,
-          background: "var(--surface-2)",
-          color: "var(--text-secondary)",
-          border: "1px solid var(--border)",
-          borderRadius: "var(--radius)",
-          fontFamily: "inherit",
-          fontWeight: 600,
-          cursor: "not-allowed",
-        }}
-      >
-        <LockIcon />
-        {t(DEFAULT_LOCALE, "reel.create")}
-      </button>
-      {notice ? (
-        <p style={{ marginTop: 8, fontSize: 12, color: "var(--text-secondary)" }}>
-          {notice}
-        </p>
-      ) : null}
     </div>
   );
 }
@@ -346,37 +319,39 @@ async function noticeForReelStart(res: Response): Promise<string> {
 }
 
 /**
- * Echtes Foto-Reel (Schritt 8b-1a): asynchroner Render mit Status-Poll.
+ * „Reel erstellen" (Slot 2 der Aktionszone) — asynchroner Render mit Status-Poll
+ * (Schritt 8b-1a, Logik UNVERÄNDERT).
  *
- * Opt-in (= Kostenkontrolle): Klick auf „Reel erstellen" startet `POST render-reel`
- * (Server antwortet 202 + setzt reel_status='rendering'), danach wird
- * `reel-status` alle ~3 s gepollt: „Reel wird erstellt…" → bei `ready` ein Link
- * auf das signierte reel.mp4, bei `failed` ein Fehlerhinweis + „Erneut".
+ * Opt-in (= Kostenkontrolle): Klick startet `POST render-reel` (Server antwortet
+ * 202 + setzt reel_status='rendering'), danach wird `reel-status` alle ~3 s
+ * gepollt. Bei `ready` ⇒ grauer „✓ Reel erstellt"-Zustand (`<DoneButton>`) +
+ * `router.refresh()` — der Server liefert dann die signierte Reel-URL nach, der
+ * Watch-Button (#4) erscheint und die Auslieferungs-Warnung verschwindet. Bei
+ * `failed` ⇒ Fehlerhinweis + „Erneut".
  *
- * Der Anfangsstatus kommt vom Server (Seiten-Reload zeigt den persistenten Stand);
- * steht er auf `rendering`, nimmt der Poll automatisch wieder auf.
+ * KEIN „Neu erstellen" mehr: ein fertiges Reel neu zu rendern geht nur über
+ * „Bearbeiten" → erneut „Booklet erstellen" — das setzt reel_status server-
+ * seitig auf `pending` zurück (Stale-Reel: der alte, auf veraltetem Booklet-
+ * Stand basierende Render wird verworfen), wodurch dieser Button wieder aktiv ist.
+ *
+ * Der Anfangsstatus kommt vom Server (Reload zeigt den persistenten Stand); steht
+ * er auf `rendering`, nimmt der Poll automatisch wieder auf.
  */
-export function ReelButton({
+export function ReelCreateButton({
   orderId,
   initialStatus,
-  initialUrl,
 }: {
   orderId: string;
   initialStatus: ReelStatus;
-  initialUrl: string | null;
 }) {
+  const router = useRouter();
   const [status, setStatus] = useState<ReelStatus>(initialStatus);
-  const [url, setUrl] = useState<string | null>(initialUrl);
   const [notice, setNotice] = useState<string | null>(
     initialStatus === "failed" ? t(DEFAULT_LOCALE, "reel.failed") : null,
   );
   const [starting, setStarting] = useState(false);
   // Index der kosmetischen Render-Stufe (nur während `rendering` sichtbar).
   const [stageIdx, setStageIdx] = useState(0);
-  // FIX 1: das fertige Reel wird IN der App in einem Overlay abgespielt (mit
-  // Schließen-X), statt als roher mp4-Link in einem neuen Tab zu landen
-  // (Sackgasse ohne Zurück). `viewerUrl` gesetzt ⇒ Overlay offen.
-  const [viewerUrl, setViewerUrl] = useState<string | null>(null);
 
   // Stufentexte durchlaufen, solange gerendert wird; die letzte bleibt stehen.
   useEffect(() => {
@@ -388,7 +363,9 @@ export function ReelButton({
     return () => clearInterval(id);
   }, [status]);
 
-  // Solange gerendert wird, den Status pollen (sofort + alle REEL_POLL_MS).
+  // Solange gerendert wird, den Status pollen (sofort + alle REEL_POLL_MS). Bei
+  // `ready` zusätzlich `router.refresh()` — die signierte Reel-URL (#4 Watch +
+  // Deliver-Warnung) kommt vom Server, nicht aus dieser Komponente.
   useEffect(() => {
     if (status !== "rendering") return;
     let cancelled = false;
@@ -397,11 +374,11 @@ export function ReelButton({
       try {
         const res = await fetch(`/api/portal/orders/${orderId}/reel-status`);
         if (!res.ok) return; // transient → nächster Tick
-        const body = (await res.json()) as { status?: unknown; url?: unknown };
+        const body = (await res.json()) as { status?: unknown };
         if (cancelled) return;
         if (body.status === "ready") {
-          setUrl(typeof body.url === "string" ? body.url : null);
           setStatus("ready");
+          router.refresh();
         } else if (body.status === "failed") {
           setNotice(t(DEFAULT_LOCALE, "reel.failed"));
           setStatus("failed");
@@ -417,7 +394,7 @@ export function ReelButton({
       cancelled = true;
       clearInterval(id);
     };
-  }, [status, orderId]);
+  }, [status, orderId, router]);
 
   const start = useCallback(() => {
     setStarting(true);
@@ -432,7 +409,6 @@ export function ReelButton({
           return;
         }
         // 202: Render läuft → in den Poll-Zustand wechseln.
-        setUrl(null);
         setStatus("rendering");
       } catch (error) {
         console.error("reel: start failed", error);
@@ -443,53 +419,31 @@ export function ReelButton({
     })();
   }, [orderId]);
 
+  // Fertig gerendert ⇒ grauer „✓ Reel erstellt"-Zustand (Ansehen liegt in #4).
+  if (status === "ready") {
+    return <DoneButton label={t(DEFAULT_LOCALE, "reel.created")} />;
+  }
+
   const rendering = status === "rendering";
   const busy = starting || rendering;
 
   return (
-    <>
-    {/* Grid-Zelle der Aktionszone (rechts oben bei `generated`, eigener Block bei
-        sent/viewed/shared) — kein eigener Top-Abstand, die Seite richtet aus. */}
     <div>
-      <div
-        style={{
-          display: "flex",
-          flexWrap: "wrap",
-          alignItems: "center",
-          gap: 10,
-        }}
+      <button
+        type="button"
+        className="btn-gold capture-btn"
+        onClick={start}
+        disabled={busy}
+        style={{ opacity: busy ? 0.6 : 1, cursor: busy ? "default" : "pointer" }}
       >
-        {status === "ready" && url ? (
-          // FIX 1: kein `target="_blank"`-Link mehr (Sackgasse) — öffnet das
-          // In-App-Overlay mit Schließen-X, das zurück zur Detailseite führt.
-          <button
-            type="button"
-            className="btn-gold"
-            onClick={() => setViewerUrl(url)}
-          >
-            <PlayIcon />
-            {t(DEFAULT_LOCALE, "reel.watch")}
-          </button>
-        ) : null}
-
-        <button
-          type="button"
-          className={status === "ready" ? "btn-outline" : "btn-gold capture-btn"}
-          onClick={start}
-          disabled={busy}
-          style={{ opacity: busy ? 0.6 : 1, cursor: busy ? "default" : "pointer" }}
-        >
-          {starting
-            ? t(DEFAULT_LOCALE, "reel.starting")
-            : rendering
-              ? t(DEFAULT_LOCALE, "reel.rendering")
-              : status === "ready"
-                ? t(DEFAULT_LOCALE, "reel.recreate")
-                : status === "failed"
-                  ? t(DEFAULT_LOCALE, "reel.retry")
-                  : t(DEFAULT_LOCALE, "reel.create")}
-        </button>
-      </div>
+        {starting
+          ? t(DEFAULT_LOCALE, "reel.starting")
+          : rendering
+            ? t(DEFAULT_LOCALE, "reel.rendering")
+            : status === "failed"
+              ? t(DEFAULT_LOCALE, "reel.retry")
+              : t(DEFAULT_LOCALE, "reel.create")}
+      </button>
       {rendering ? (
         <p
           aria-live="polite"
@@ -513,8 +467,27 @@ export function ReelButton({
       )}
       {notice ? <NoticeBox text={notice} /> : null}
     </div>
+  );
+}
 
-      {/* FIX 1: In-App-Reel-Viewer mit Schließen-X (kein Browser-Tab-Sackgasse). */}
+/**
+ * „Reel ansehen" (Slot 4 der Aktionszone, neben „Booklet ansehen"/„QR drucken").
+ * Öffnet das fertige Reel im In-App-Overlay (`<ReelViewer>` mit Schließen-X) —
+ * kein roher mp4-Link in einem neuen Tab (Sackgasse). Wird nur gerendert, wenn
+ * eine signierte Reel-URL vorliegt (Server, reel_status='ready').
+ */
+export function ReelWatchButton({ url }: { url: string }) {
+  const [viewerUrl, setViewerUrl] = useState<string | null>(null);
+  return (
+    <>
+      <button
+        type="button"
+        className="btn-outline"
+        onClick={() => setViewerUrl(url)}
+      >
+        <PlayIcon />
+        {t(DEFAULT_LOCALE, "reel.watch")}
+      </button>
       {viewerUrl ? (
         <ReelViewer url={viewerUrl} onClose={() => setViewerUrl(null)} />
       ) : null}
@@ -595,27 +568,6 @@ function ReelViewer({ url, onClose }: { url: string; onClose: () => void }) {
         }}
       />
     </div>
-  );
-}
-
-/** Schloss-Symbol für den gesperrten „Reel erstellen"-Platzhalter. Reine Deko. */
-function LockIcon() {
-  return (
-    <svg
-      width={16}
-      height={16}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={2}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden
-      style={{ flexShrink: 0 }}
-    >
-      <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-      <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-    </svg>
   );
 }
 

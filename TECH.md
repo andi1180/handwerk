@@ -2494,6 +2494,43 @@ Zwei Korrekturen aus dem Praxistest; **keine Migration**, keine Render-/Poll-/Tr
 
 ---
 
+## Control-Center-Umbau der Auftrags-Detailseite + Zurück-Buttons (nur Frontend, eine kleine Backend-Zeile)
+
+Bündelt die über die Detailseite verstreuten Aktions-Buttons (oben eine Leiste, unten weitere) in **eine** zusammenhängende Aktionszone („Control Center") am Seitenende und behebt drei Sackgassen (fehlende Zurück-Wege). **AUSDRÜCKLICH Layout/UX** — Routen, Status-Maschine (`draft → generated → sent → viewed → shared`), generate/reopen/render-reel/reel-status/deliver-Logik, Doppelversand-`count`-Guard, `access_token`/`short_code`-Erhalt, FIX 7.1, Webhook-Semantik **unverändert**. **Eine** bewusste Backend-Zeile (Stale-Reel, s. u.). Keine Migration, kein `<form>`, kein `any`, `business_id` aus Session/RLS, `service_role` nur serverseitig. Betroffen: [page.tsx](app/portal/orders/[id]/page.tsx), [generate-controls.tsx](app/portal/orders/[id]/generate-controls.tsx), [qr/page.tsx](app/portal/orders/[id]/qr/page.tsx), [b/[token]/page.tsx](app/b/[token]/page.tsx), [load.ts](lib/booklet/load.ts), [events.ts](lib/booklet/events.ts), [generate/route.ts](app/api/portal/orders/[id]/generate/route.ts), CSS + i18n.
+
+### Eine Aktionszone unten (ersetzt die obere Aktionsleiste)
+
+Die **obere** Booklet-Aktionsleiste („Booklet ansehen"/„QR drucken" unter dem Sticky-Head) ist **entfernt** — oben bleibt nur der Auftrags-Kopf (Name, Status-Badge, „Zurück zur Liste"). Alle Folge-Aktionen leben jetzt im `.booklet-cc`-Block am Seitenende, je Status:
+
+- **`draft`:** **ein** großer „Booklet erstellen" über die **volle Breite** (`<CreateBookletButton>`, gold, `POST generate` → draft→generated). **Ohne Prozess-Medium gar kein Button** (`{isDraft && processCount >= 1}`); `need_process` bleibt client- UND serverseitig. Kein Reel-/Locked-Button mehr im Entwurf.
+- **`generated`** (Reihenfolge vertikal): **(1)** grau „✓ Booklet erstellt" (`<CreateBookletButton disabled>` → `<DoneButton>`); **(2)** „Reel erstellen" (`<ReelCreateButton>`) bzw. nach Render grau „✓ Reel erstellt"; **(3)** zwei schmälere Spalten „Bearbeiten" | „Ausliefern" (`.booklet-actions-row`); **(4)** Ansehen-Zeile (Haarlinie abgesetzt): „Booklet ansehen" · optional „Reel ansehen" · „QR drucken".
+- **`sent`/`viewed`/`shared`:** analog, aber Slot 1 = „✓ Ausgeliefert am {Datum}" (`.booklet-cc-delivered`, statt grauem Booklet-Button), **kein** Slot 3 (nicht zurückdrehbar/erneut auslieferbar). Slot 2 (Reel) bleibt — FIX 7.1: auch nach Versand renderbar, Order-Status unberührt. Slot 4 (Ansehen) bleibt — schließt FLOW_REDESIGN-Lücke 5 (vorher fehlten Ansehen/QR bei `viewed`/`shared`).
+
+### Reel-Buttons getrennt (Erstellen ≠ Ansehen)
+
+Das alte kombinierte `<ReelButton>` (Create + Watch + Viewer) ist in zwei Komponenten zerlegt:
+
+- **`<ReelCreateButton>`** (Slot 2): Render + Poll (`render-reel`/`reel-status` **unverändert**). Fertig (`reel_status='ready'`) ⇒ grauer „✓ Reel erstellt"-Zustand (`<DoneButton>`, geteilt mit „Booklet erstellt") — **kein „Neu erstellen" mehr**. Bei Poll-`ready` zusätzlich `router.refresh()`, damit der **Watch-Button (Slot 4)** + die **Deliver-Warnung** (`reelReady`) den fertigen Stand server-seitig bekommen (die signierte Reel-URL kommt aus [page.tsx](app/portal/orders/[id]/page.tsx), nicht aus dem Client-State).
+- **`<ReelWatchButton url>`** (Slot 4): „Reel ansehen" → öffnet das fertige Reel im In-App-`<ReelViewer>`-Overlay (Schließen-X, FIX aus dem Praxistest), kein Browser-Tab. Nur gerendert, wenn eine signierte Reel-URL vorliegt (`{reelUrl ? … : null}`).
+
+`<LockedReelButton>` (Entwurfs-Platzhalter) + `LockIcon` + die i18n-Keys `reel.lockedHint`/`reel.recreate`/`reel.title` **entfernt**; `reel.created` neu.
+
+### Stale-Reel — „einfacher Ansatz" (eine Backend-Zeile, **keine Migration**)
+
+Problem: Ändert der Nutzer nach einem Reel-Render via „Bearbeiten" (Reopen) → erneut „Booklet erstellen", hat das fertige Reel den **alten** Intro-Titel eingebrannt. Da kein Render-Zeitstempel existiert (und bewusst **keine** Migration gebaut wird), setzt der **Re-Generate-Zweig** (`existing`-Update in [generate/route.ts](app/api/portal/orders/[id]/generate/route.ts)) zusätzlich `reel_status='pending'` + `reel_url=null`. Folge: der „Reel erstellen"-Button wird wieder aktiv („als neu zu erstellen behandeln"), das veraltete Reel verschwindet von der öffentlichen Seite (die nur `reel_status='ready'` zeigt). Der nächste Render überschreibt dieselbe Storage-Datei (`upsert`) ⇒ kein Orphan. **Das ist die einzige Backend-Änderung** — bewusst gewählt statt eines „Reel veraltet"-Hinweis-Banners, weil ohne Zeitstempel ein echter „vorher/nachher"-Detektor nicht zuverlässig wäre; ein eingebranntes, veraltetes Reel auszuliefern ist schlechter als ein sauberer Neu-Render. Der INSERT-Zweig ist unberührt (neue Booklets starten ohnehin auf `pending`).
+
+### Zurück-Buttons (drei Sackgassen behoben — NUR Portal-Sicht)
+
+- **Reel-Ansicht:** In-App-`<ReelViewer>`-Overlay mit Schließen-X (bereits aus dem Praxistest-Fix; bleibt, wandert mit in `<ReelWatchButton>`).
+- **QR-Druckseite** ([qr/page.tsx](app/portal/orders/[id]/qr/page.tsx)): „← Zurück zum Auftrag" (`<Link href={/portal/orders/${id}}>`, `btn-outline`) links neben dem Druck-Button in der `.qr-actions`-Leiste — **bildschirm-only** (steckt in `.qr-no-print`, druckt also nicht). i18n `qr.back`.
+- **Booklet-Vorschau (Portal-Sicht)** ([b/[token]/page.tsx](app/b/[token]/page.tsx)): schwebender „← Zurück zum Auftrag"-Link (`.booklet-portal-back`, fixed top-left, Notch-/Safe-Area-sicher, dunkle Pille wie das Reel-X). **NUR bei `?p=1`** (betriebs-eigene Vorschau, neuer Guard `isNoTrackParam` in [events.ts](lib/booklet/events.ts)) — der **echte Kunden-Link (`?c=1`, ohne `p`) bekommt KEINEN** Zurück-Button (öffentliche Sicht bleibt randlos). Server-`<a>` (kein Client-JS) → `/portal/orders/${orderId}`; dafür liefert [load.ts](lib/booklet/load.ts) jetzt `PublicBookletData.orderId` mit. Der Marker ist **kein Auth-Gate** (Token bleibt der Schutz §14.2); das Linkziel ist ohnehin auth-gegated. Die Detail-Links „Booklet ansehen"/„QR drucken" öffnen **same-tab** (kein `target="_blank"` mehr) — mit den neuen Zurück-Wegen ein sauberer Rundlauf statt Orphan-Tabs.
+
+### Darf nicht brechen — geprüft
+
+Generate/Reopen/Deliver/Render-Routen unverändert (außer der dokumentierten Reel-Reset-Zeile); Doppelversand-`count`-Guard, `access_token`/`short_code`-Erhalt bei Re-Generate, FIX 7.1 (`RENDERABLE_STATUSES`, Render lässt Order-Status unberührt), Webhook-`picked_up`-Semantik, Quick-Filter-Exklusivität, `need_process` client+server. `pnpm typecheck` + `pnpm build` grün.
+
+---
+
 ## Launch-Fahrplan & deferierte Härtung
 
 Detail-Referenz für die Risikobewertung: [SECURITY_REVIEW.md](SECURITY_REVIEW.md) (bleibt im Repo). Dieser Abschnitt fasst die **Reihenfolge** des Live-Gangs und die **vor Kunde #2 verpflichtende** Härtung zusammen.

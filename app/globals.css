@@ -352,10 +352,44 @@ body {
   }
 }
 
+/* Control Center am Seitenende: alle Booklet-Folge-Aktionen gebündelt in EINER
+   Zone (Layout-Umbau) — vertikal gestapelt: (1) Zustand, (2) Reel,
+   (3) Bearbeiten|Ausliefern, (4) Ansehen-Aktionen. */
+.booklet-cc {
+  margin-top: 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* Versendet-Hinweis (statt grauem „Booklet erstellt") in Slot 1 bei sent/…/shared. */
+.booklet-cc-delivered {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--green-text);
+}
+
+/* Slot 4: Ansehen-Aktionen (Booklet ansehen · Reel ansehen · QR drucken) —
+   dezente Outline-Buttons, durch eine Haarlinie vom Rest abgesetzt; wrappen
+   auf schmalen Screens. */
+.booklet-cc-views {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 4px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.booklet-cc-views > a,
+.booklet-cc-views > button {
+  flex: 1 1 140px;
+}
+
 /* Aktionszone der Auftrags-Detailseite: zwei gleich breite Spalten
-   (oben „Booklet erstellen" / „Reel erstellen"; bei generated darunter
-   „Bearbeiten" / „Ausliefern"). Buttons oben ausgerichtet (align-items: start);
-   Hinweise/Fehler fließen je Spalte darunter. */
+   (bei generated „Bearbeiten" / „Ausliefern"). Buttons oben ausgerichtet
+   (align-items: start); Hinweise/Fehler fließen je Spalte darunter. */
 .booklet-actions-row {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -799,9 +833,17 @@ body {
   margin: 0 auto;
 }
 
-/* Bildschirm-only Aktionsleiste (Druck-Button). */
+/* Bildschirm-only Aktionsleiste. */
 .qr-no-print {
   margin-bottom: 20px;
+}
+
+/* Zurück-Link (links) + Druck-Button (rechts) nebeneinander. */
+.qr-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 /* Die einzige Sache, die druckt: schmale, zentrierte S/W-Karte. */

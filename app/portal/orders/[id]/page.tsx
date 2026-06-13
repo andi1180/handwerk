@@ -11,9 +11,9 @@ import { Capture } from "./capture";
 import { MediaList, type MediaWithUrl } from "./media-list";
 import {
   CreateBookletButton,
-  LockedReelButton,
   ReopenButton,
-  ReelButton,
+  ReelCreateButton,
+  ReelWatchButton,
   type ReelStatus,
 } from "./generate-controls";
 import { DeliverButton } from "./deliver-controls";
@@ -175,57 +175,6 @@ export default async function OrderDetailPage({
         </div>
       </div>
 
-      {/* Sekundäre Booklet-Aktionen: kleine, dezente Leiste für ALLE Stufen mit
-          Booklet (generated/sent/viewed/shared) — „Booklet ansehen" (`?c=1`
-          Kunden-Sicht §9d + `&p=1` No-Track §10a.1) und „QR drucken" (9c-2). Die
-          großen Folge-Aktionen (Erstellen/Reel/Bearbeiten/Ausliefern) leben
-          unten in der Aktionszone. */}
-      {(isGenerated || isDelivered) && bookletToken ? (
-        <div
-          style={{
-            display: "flex",
-            flexWrap: "wrap",
-            alignItems: "center",
-            gap: 8,
-            marginBottom: 20,
-          }}
-        >
-          {isDelivered ? (
-            <span
-              style={{
-                flexBasis: "100%",
-                fontSize: 13,
-                fontWeight: 600,
-                color: "var(--green-text)",
-              }}
-            >
-              ✓{" "}
-              {sentAt
-                ? t(DEFAULT_LOCALE, "deliver.delivered", {
-                    date: DATE_FORMAT.format(new Date(sentAt)),
-                  })
-                : t(DEFAULT_LOCALE, "deliver.deliveredNoDate")}
-            </span>
-          ) : null}
-          <a
-            className="btn-outline"
-            href={`/b/${bookletToken}?${CUSTOMER_VIEW_QUERY}&${NO_TRACK_QUERY}`}
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            {t(DEFAULT_LOCALE, "generate.openPreview")}
-          </a>
-          <a
-            className="btn-outline"
-            href={`/portal/orders/${order.id}/qr`}
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            {t(DEFAULT_LOCALE, "qr.printButton")}
-          </a>
-        </div>
-      ) : null}
-
       {/* Stammdaten. */}
       <div
         className="card"
@@ -298,42 +247,53 @@ export default async function OrderDetailPage({
         </div>
       </section>
 
-      {/* ───── Aktionszone am Seitenende. ───── */}
+      {/* ───── Aktionszone (Control Center) am Seitenende ─────
+          Alle Folge-Aktionen gebündelt an EINER Stelle (statt oben verstreut).
+          Die Routen-/Status-Logik ist unverändert; nur Anordnung + Benennung. */}
 
-      {/* draft + generated: oben zwei Buttons nebeneinander — links „Booklet
-          erstellen", rechts „Reel erstellen".
-            • draft:     Erstellen aktiv (POSTet generate → draft→generated in
-                         EINEM Schritt); Reel gesperrt (Hinweis bei Klick).
-            • generated: Erstellen grau/erledigt; Reel aktiv (echter Render). */}
-      {isDraft || isGenerated ? (
-        <div
-          style={{
-            marginTop: 32,
-            display: "flex",
-            flexDirection: "column",
-            gap: 12,
-          }}
-        >
-          <div className="booklet-actions-row">
+      {/* draft: EIN großer „Booklet erstellen" über die volle Breite. Ohne
+          Prozess-Medium gar kein Button (Validierung need_process bleibt
+          client- UND serverseitig) — es gibt dann nichts zu erstellen. */}
+      {isDraft && processCount >= 1 ? (
+        <section style={{ marginTop: 32 }}>
+          <CreateBookletButton orderId={order.id} processCount={processCount} />
+        </section>
+      ) : null}
+
+      {/* generated / sent / viewed / shared: gebündeltes Control Center.
+            1) Zustands-Bestätigung (grau „✓ Booklet erstellt" bzw. „✓ Ausgeliefert").
+            2) „Reel erstellen" (aktiv) bzw. „✓ Reel erstellt" (grau).
+            3) nur generated: „Bearbeiten" | „Ausliefern".
+            4) Ansehen-Aktionen: Booklet ansehen · [Reel ansehen] · QR drucken. */}
+      {isGenerated || isDelivered ? (
+        <section className="booklet-cc">
+          {/* 1) Wo der Auftrag steht. generated ⇒ Booklet ist erstellt (grau,
+              regenerieren via „Bearbeiten"); versendet ⇒ Ausgeliefert-Hinweis. */}
+          {isGenerated ? (
             <CreateBookletButton
               orderId={order.id}
               processCount={processCount}
-              disabled={isGenerated}
+              disabled
             />
-            {isDraft ? (
-              <LockedReelButton />
-            ) : (
-              <ReelButton
-                orderId={order.id}
-                initialStatus={reelStatus}
-                initialUrl={reelUrl}
-              />
-            )}
-          </div>
+          ) : (
+            <p className="booklet-cc-delivered">
+              ✓{" "}
+              {sentAt
+                ? t(DEFAULT_LOCALE, "deliver.delivered", {
+                    date: DATE_FORMAT.format(new Date(sentAt)),
+                  })
+                : t(DEFAULT_LOCALE, "deliver.deliveredNoDate")}
+            </p>
+          )}
 
-          {/* generated: darunter zwei schmälere Buttons — „Bearbeiten" (Reopen,
-              generated→draft) und „Ausliefern" (deliver, unveränderte Logik
-              inkl. Safe-Mode/Connector/Doppelversand-Guard). */}
+          {/* 2) Reel: erstellen / rendert / „✓ Reel erstellt". Ab `generated`
+              renderbar — auch nach Versand (FIX 7.1: der Render lässt den
+              Order-Status unberührt, das Reel erscheint im bestehenden Link). */}
+          <ReelCreateButton orderId={order.id} initialStatus={reelStatus} />
+
+          {/* 3) nur generated: „Bearbeiten" (Reopen) | „Ausliefern" (deliver,
+              unveränderte Logik inkl. Safe-Mode/Connector/Doppelversand-Guard).
+              Versendet lässt sich weder zurückdrehen noch erneut ausliefern. */}
           {isGenerated ? (
             <div className="booklet-actions-row">
               <ReopenButton orderId={order.id} />
@@ -347,23 +307,28 @@ export default async function OrderDetailPage({
               />
             </div>
           ) : null}
-        </div>
-      ) : null}
 
-      {/* sent/viewed/shared: kein „Booklet erstellen"/„Ausliefern" mehr — nur der
-          Reel-Block (FIX 7.1: Reel auch nach dem Versand renderbar; der Render
-          lässt den Order-Status unberührt und erscheint im bestehenden Link).
-          „Booklet ansehen"/„QR drucken" liegen oben in der Aktionsleiste. */}
-      {isDelivered ? (
-        <section style={{ marginTop: 32 }}>
-          <h2 style={{ margin: "0 0 12px", fontSize: 16, fontWeight: 700 }}>
-            {t(DEFAULT_LOCALE, "reel.title")}
-          </h2>
-          <ReelButton
-            orderId={order.id}
-            initialStatus={reelStatus}
-            initialUrl={reelUrl}
-          />
+          {/* 4) Ansehen-Aktionen, gebündelt (vorher oben verstreut): „Booklet
+              ansehen" (`?c=1` Kunden-Sicht §9d + `&p=1` No-Track §10a.1; gleiche
+              Domain, same-tab — die Vorschau hat einen Zurück-Button),
+              optional „Reel ansehen" (In-App-Overlay) und „QR drucken". */}
+          {bookletToken ? (
+            <div className="booklet-cc-views">
+              <a
+                className="btn-outline"
+                href={`/b/${bookletToken}?${CUSTOMER_VIEW_QUERY}&${NO_TRACK_QUERY}`}
+              >
+                {t(DEFAULT_LOCALE, "generate.openPreview")}
+              </a>
+              {reelUrl ? <ReelWatchButton url={reelUrl} /> : null}
+              <a
+                className="btn-outline"
+                href={`/portal/orders/${order.id}/qr`}
+              >
+                {t(DEFAULT_LOCALE, "qr.printButton")}
+              </a>
+            </div>
+          ) : null}
         </section>
       ) : null}
     </div>

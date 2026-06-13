@@ -24,6 +24,13 @@ export type PublicBookletMedia = {
 
 /** Vollständig zusammengesetzte Daten der öffentlichen Web-Story. */
 export type PublicBookletData = {
+  /**
+   * Auftrags-ID — NUR für den Zurück-Button der betriebs-eigenen Vorschau
+   * (`?p=1`) verwendet (Link zurück auf `/portal/orders/[orderId]`). Wird auf
+   * der echten Kunden-Seite nie gerendert; das auth-gate des Portals schützt das
+   * Ziel ohnehin. Der `access_token` bleibt der alleinige Zugriffsschutz (§14.2).
+   */
+  orderId: string;
   businessName: string;
   branding: BusinessBranding;
   settings: BusinessSettings;
@@ -194,6 +201,7 @@ export async function loadPublicBooklet(
   return {
     status: "ok",
     data: {
+      orderId: booklet.order_id,
       businessName: business.name,
       branding,
       settings,

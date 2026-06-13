@@ -4,6 +4,7 @@ import { DEFAULT_LOCALE, t, type Locale } from "@/lib/i18n";
 import { bookletFontClass } from "@/lib/booklet/fonts";
 import { displayCaption } from "@/lib/booklet/caption";
 import { isCustomerViewParam } from "@/lib/booklet/customer-view";
+import { isNoTrackParam } from "@/lib/booklet/events";
 import { bookletShareLink } from "@/lib/booklet/share-link";
 import {
   loadPublicBooklet,
@@ -45,7 +46,13 @@ export default async function PublicBookletPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const { token } = await params;
-  const isCustomerView = isCustomerViewParam(await searchParams);
+  const sp = await searchParams;
+  const isCustomerView = isCustomerViewParam(sp);
+  // Betriebs-eigene Vorschau (`?p=1`, §10a.1): NUR dann der Zurück-Button ins
+  // Portal (Sackgassen-Fix). Der echte Kunden-Link (nur `?c=1`, ohne `p`) bekommt
+  // KEINEN — die öffentliche Seite bleibt ein randloses Vollbild für den Kunden.
+  // Der Marker ist KEIN Auth-Gate; der Token bleibt der alleinige Schutz (§14.2).
+  const isPortalPreview = isNoTrackParam(sp);
   const result = await loadPublicBooklet(token);
 
   if (result.status === "not_found") notFound();
@@ -82,6 +89,15 @@ export default async function PublicBookletPage({
       className={`booklet ${bookletFontClass(data.branding.font)}`}
       style={rootStyle}
     >
+      {/* Sackgassen-Fix: NUR in der betriebs-eigenen Vorschau (`?p=1`) ein
+          schwebender Zurück-Weg ins Portal (Notch-/Safe-Area-sicher). Der echte
+          Kunde (nur `?c=1`) sieht ihn nie. Server-`<a>`, kein Client-JS. */}
+      {isPortalPreview ? (
+        <a className="booklet-portal-back" href={`/portal/orders/${data.orderId}`}>
+          <BackArrowIcon />
+          {t(locale, "booklet.backToOrder")}
+        </a>
+      ) : null}
       {/* Analytics (10a): feuert beim Mount EINMALIG `viewed` — für ALLE Öffner
           (Kunde UND Empfänger), unabhängig von `?c=1`. Reichweite zählt. */}
       <ViewTracker token={token} />
@@ -328,6 +344,26 @@ function displayHost(url: string): string {
 }
 
 /* --- Icons (rein dekorativ, currentColor) --- */
+
+/** Pfeil-links für den Portal-Vorschau-Zurück-Button. */
+function BackArrowIcon() {
+  return (
+    <svg
+      width={18}
+      height={18}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M19 12H5" />
+      <path d="M12 19l-7-7 7-7" />
+    </svg>
+  );
+}
 
 function ChevronDownIcon() {
   return (

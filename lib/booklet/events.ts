@@ -107,3 +107,22 @@ export function hasNoTrackMarker(search: string): boolean {
     return false;
   }
 }
+
+/**
+ * True, wenn der No-Track-Marker (`p=1`) in den (Server-)searchParams steht.
+ * Pendant zu `hasNoTrackMarker` für Server Components, die das searchParams-
+ * Objekt bekommen (statt eines Query-Strings) — analog `isCustomerViewParam`.
+ *
+ * Genutzt, um auf der öffentlichen Web-Story die BETRIEBS-EIGENE Vorschau zu
+ * erkennen (Portal-Links tragen `?c=1&p=1`): nur dort wird der Zurück-Button
+ * gezeigt, der echte Kunden-Link (`?c=1`, ohne `p`) bekommt KEINEN. Wie der
+ * `c`-Marker ist auch dieser KEIN Auth-Gate — der Token bleibt der Schutz.
+ */
+export function isNoTrackParam(
+  searchParams: Record<string, string | string[] | undefined>,
+): boolean {
+  const value = searchParams[NO_TRACK_PARAM];
+  return Array.isArray(value)
+    ? value.includes(NO_TRACK_VALUE)
+    : value === NO_TRACK_VALUE;
+}

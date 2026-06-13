@@ -204,6 +204,18 @@ export async function POST(
   if (existing) {
     // web_story_ready = true: der öffentliche Render /b/[token] existiert (8a-2),
     // jedes generierte Booklet ist damit renderbar (Voraussetzung fürs Senden, Step 9).
+    //
+    // STALE-REEL (Layout-Umbau, „einfacher Ansatz" ohne Zeitstempel/Migration):
+    // Beim RE-Generate (dieser Update-Zweig, nur über „Bearbeiten" → erneut
+    // „Booklet erstellen" erreichbar) ändern sich die Intro-Texte. Ein bereits
+    // gerendertes Reel hat den ALTEN Titel/Anrede eingebrannt und ist damit
+    // veraltet ⇒ reel_status auf `pending` zurücksetzen + reel_url leeren. Folge
+    // im UI: der „Reel erstellen"-Button (grau, „✓ Reel erstellt") wird wieder
+    // aktiv, das veraltete Reel wird auf der öffentlichen Seite nicht mehr
+    // gezeigt (sie zeigt nur reel_status='ready'). Beim nächsten Render
+    // überschreibt der Job dieselbe Storage-Datei (upsert) — kein Orphan. Eine
+    // echte „vor/nach"-Erkennung bräuchte einen Render-Zeitstempel (Migration);
+    // das ist bewusst NICHT Teil dieses reinen Layout-/UX-Umbaus.
     const { error: updateError } = await service
       .from("booklets")
       .update({
@@ -213,6 +225,8 @@ export async function POST(
         ig_caption: igCaption,
         language: order.language,
         web_story_ready: true,
+        reel_status: "pending",
+        reel_url: null,
       })
       .eq("id", existing.id)
       .eq("business_id", order.business_id);

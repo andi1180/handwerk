@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import QRCode from "qrcode";
@@ -95,8 +96,12 @@ export default async function QrPrintPage({
 
   return (
     <div className="qr-page">
-      {/* Bildschirm-only: Druck-Auslöser. `@media print` blendet ihn aus. */}
-      <div className="qr-no-print">
+      {/* Bildschirm-only: Zurück-Weg zum Auftrag (Sackgassen-Fix) + Druck-
+          Auslöser. `@media print` blendet die ganze Leiste aus. */}
+      <div className="qr-no-print qr-actions">
+        <Link className="btn-outline" href={`/portal/orders/${id}`}>
+          ← {t(DEFAULT_LOCALE, "qr.back")}
+        </Link>
         <QrPrintButton />
       </div>
 
