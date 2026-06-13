@@ -301,6 +301,20 @@ export function SettingsForm({
             setContactEmail(v);
           }}
         />
+        {/* Öffentliche Telefonnummer fürs Outro — direkt bei der Kontakt-E-Mail,
+            wo die öffentlichen Kontaktdaten gebündelt sind. */}
+        <TextField
+          label={t(DEFAULT_LOCALE, "settings.contactPhone")}
+          type="tel"
+          value={contactPhone}
+          maxLength={CONTENT_LIMITS.contactPhone}
+          placeholder="+49 …"
+          hint={t(DEFAULT_LOCALE, "settings.contactPhoneHint")}
+          onChange={(v) => {
+            markDirty();
+            setContactPhone(v);
+          }}
+        />
       </div>
 
       {/* Branding */}
@@ -478,18 +492,8 @@ export function SettingsForm({
             setOutroMessage(v);
           }}
         />
-        {/* Kontakt-E-Mail ist nach oben in die „Betrieb"-Gruppe gewandert
-            (Block B, Punkt 6) — dieselbe contact_email, eine Quelle. */}
-        <TextField
-          label={t(DEFAULT_LOCALE, "settings.content.contactPhone")}
-          value={contactPhone}
-          maxLength={CONTENT_LIMITS.contactPhone}
-          placeholder="+49 …"
-          onChange={(v) => {
-            markDirty();
-            setContactPhone(v);
-          }}
-        />
+        {/* Kontakt-E-Mail und Telefonnummer sind in die „Betrieb"-Gruppe
+            gewandert — die öffentlichen Kontaktdaten sind dort gebündelt. */}
       </div>
 
       {/* KI-Stil — Fach-/Stilkontext, der die KI-Textgenerierung erdet (8a-1b) */}
@@ -605,7 +609,7 @@ function TextField({
   onChange: (value: string) => void;
   placeholder?: string;
   hint?: string;
-  type?: "text" | "url" | "email";
+  type?: "text" | "url" | "email" | "tel";
   maxLength?: number;
 }) {
   return (

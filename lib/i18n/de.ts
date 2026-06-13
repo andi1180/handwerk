@@ -115,6 +115,9 @@ export const de = {
     contactEmail: "Kontakt-E-Mail (für Antworten der Kunden)",
     contactEmailHint:
       "An diese Adresse antworten Kunden auf die Booklet-E-Mail. Sie darf von Ihrer Login-Adresse abweichen.",
+    contactPhone: "Telefonnummer (öffentlich)",
+    contactPhoneHint:
+      "Wird im Booklet-Outro angezeigt, damit Kunden Sie direkt anrufen können (optional).",
     connectorRoapp: "roapp-Connector aktivieren",
     connectorRoappHint:
       "Aufträge werden automatisch aus roapp angelegt und ausgeliefert, sobald sie dort als „Abgeholt“ markiert sind. Bei aktivem Connector fragt der manuelle Versand zur Sicherheit nach.",
@@ -152,7 +155,6 @@ export const de = {
       introTaglineHint:
         "Fester Claim unter dem KI-Titel auf der Intro-Seite (optional).",
       outroMessage: "Outro-Nachricht",
-      contactPhone: "Telefon (öffentlich)",
       emailInvalid: "Bitte eine gültige E-Mail-Adresse angeben.",
       tooLong: "Der Text ist zu lang.",
     },

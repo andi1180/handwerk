@@ -2193,6 +2193,16 @@ Einfaches `<select>` (EINE Auswahl) über der Liste: **„Alle"** (Default) + al
 
 ---
 
+## Telefonnummer in der „Betrieb"-Settings-Gruppe ([settings-form.tsx](app/portal/settings/settings-form.tsx), [lib/i18n/de.ts](lib/i18n/de.ts))
+
+**Keine Migration** — `settings.contact_phone` existiert bereits vollständig: Typ `BusinessSettings.contact_phone` + `normalizeSettings` (`asTrimmedOrNull`, leer ⇒ `null`) in [current-business.ts](lib/auth/current-business.ts), Validierung + READ-MERGE-WRITE im Settings-`PATCH` ([route.ts](app/api/portal/settings/route.ts), Cap `CONTENT_LIMITS.contactPhone = 40`), und das **Booklet-Outro rendert die Nummer schon** ([app/b/[token]/page.tsx](app/b/[token]/page.tsx)): `contact_phone` als `tel:`-Pill (whitespace im `href` gestrippt) neben E-Mail/Website, konditional (`{contact_phone ? … : null}` + `hasContact`-Boolean) ⇒ leer ⇒ keine leere Zeile.
+
+Geändert wurde nur die **Position des UI-Felds**: das Telefon-Feld saß in der „Booklet-Inhalt"-Gruppe (Label `settings.content.contactPhone`) und ist jetzt — analog zu Punkt 6 (Kontakt-E-Mail) — **in die „Betrieb"-Gruppe direkt unter die Kontakt-E-Mail** gewandert (die öffentlichen Kontaktdaten sind dort gebündelt, eine Quelle). Neues `TextField` mit `type="tel"` (Union um `"tel"` erweitert), `maxLength = CONTENT_LIMITS.contactPhone`, Label `settings.contactPhone` + Hinweis `settings.contactPhoneHint`. Der alte `settings.content.contactPhone`-i18n-Key ist **entfernt**; State/Save/Validierung (`contactPhone`-State, `contact_phone` im PATCH-Body, Längen-Check gegen `CONTENT_LIMITS.contactPhone`) **unverändert**. Kein `<form>`, kein `any`.
+
+`pnpm typecheck` + `pnpm build` grün.
+
+---
+
 ## Block C / Schritt 1 — Kurzlink /s/<code> für Booklets
 
 Statt des langen, kryptischen Booklet-Links (`/b/<24-Byte-Token>?c=1`) wird **überall, wo der Link geteilt/kopiert/versendet wird** (E-Mail, WhatsApp-Share, Kopieren-Button, QR) ein kurzer Link `https://handwerk.valooro.com/s/<code>` verwendet, der **serverseitig** auf das echte Booklet weiterleitet. Die interne Route `/b/[token]` bleibt unverändert erreichbar — nur der **geteilte** Link wird ersetzt.
