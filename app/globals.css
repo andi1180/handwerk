@@ -256,13 +256,6 @@ body {
     object-fit: contain;
   }
 
-  /* Auf Mobile trägt die Top-Bar das Logo — der Dashboard-Kopf würde es ein
-     zweites Mal darunter zeigen, daher hier ausgeblendet (nur der Titel bleibt). */
-  .dashboard-head-logo,
-  .dashboard-head-brand {
-    display: none;
-  }
-
   /* App-artige Bottom-Tab-Nav, daumenreichbar fixiert. */
   .portal-tabnav {
     display: flex;
@@ -854,29 +847,14 @@ body {
   gap: 20px;
 }
 
-/* Seitenkopf: Logo (bzw. Betriebsname-Fallback) + „Dashboard"-Titel, oben
-   links — konsistent zur „Aufträge"-Überschrift (Punkt 3b). */
+/* Seitenkopf: nur der „Dashboard"-Titel — konsistent zur „Aufträge"-
+   Überschrift (Punkt 3b). Das Betriebs-Logo trägt allein die Top-Bar. */
 .dashboard-head {
   display: flex;
   flex-direction: column;
   align-items: center;
   text-align: center;
   gap: 8px;
-}
-
-.dashboard-head-logo {
-  display: block;
-  max-height: 40px;
-  max-width: 180px;
-  width: auto;
-  height: auto;
-  object-fit: contain;
-}
-
-.dashboard-head-brand {
-  font-size: 15px;
-  font-weight: 700;
-  color: var(--text-secondary);
 }
 
 .dashboard-title {
