@@ -10,7 +10,7 @@ const DATE_FORMAT = new Intl.DateTimeFormat("de-DE", {
  * Roter Warn-Badge „Abgeholt – Booklet nicht versendet" (Block C / Schritt 2).
  *
  * Erscheint auf der Auftragskachel, wenn roapp den Auftrag als „Abgeholt" meldet,
- * OBWOHL bei uns noch kein Booklet versendet wurde (Auftrag noch draft/finalized).
+ * OBWOHL bei uns noch kein Booklet versendet wurde (Auftrag noch im Entwurf).
  * Treiber ist `orders.picked_up_at`; die Liste rendert den Badge NUR, wenn das
  * Flag gesetzt ist UND der Status NICHT in {sent, viewed, shared} liegt
  * (Doppel-Sicherung gegen ein theoretisch nicht zurückgesetztes Flag).

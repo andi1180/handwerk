@@ -19,18 +19,28 @@ const SHORT_CODE_MAX_ATTEMPTS = 5;
 
 /**
  * POST /api/portal/orders/[id]/generate — erzeugt die Booklet-Daten eines
- * abgeschlossenen Auftrags: KI-Intro (Sonnet 4.6), Google-Review-Entwurf
+ * Auftrags in EINEM Schritt: KI-Intro (Sonnet 4.6), Google-Review-Entwurf
  * (Sonnet 4.6, Schritt 9b), IG-Caption (reines Template, 9b), unerratbarer
- * `access_token`, Status → `generated`. Alle KI-Texte werden HIER bei der
- * Generierung erzeugt und gespeichert — die öffentliche Seite bleibt KI-frei.
+ * `access_token`, `short_code`, Status → `generated`. Alle KI-Texte werden HIER
+ * bei der Generierung erzeugt und gespeichert — die öffentliche Seite bleibt
+ * KI-frei.
+ *
+ * Flow-Vereinfachung: Es gibt KEINEN separaten `finalized`-Zwischenschritt mehr.
+ * Der eine Klick „Booklet erstellen" führt direkt `draft → generated` aus.
  *
  * Guards (alle vor dem Schreiben):
  *  - AUTHENTICATED Server-Client; kein User ⇒ 401, kein Betrieb ⇒ 403.
  *  - Order über RLS geladen (fremde/fehlende id ⇒ 404).
- *  - Status `finalized` ODER `generated` (Re-Generate erlaubt, solange NICHT
+ *  - Status `draft` ODER `generated` (Re-Generate erlaubt, solange NICHT
  *    `sent`/…) ⇒ sonst 409.
  *  - Mindestens ein `process`-Medium ⇒ sonst 400 `need_process` (0010).
  *  - `isAiConfigured()` ⇒ sonst 500 `ai_not_configured`.
+ *
+ * FEHLERSICHERHEIT: Der Order-Status wird ERST GANZ AM ENDE auf `generated`
+ * gesetzt (nach allen KI-Calls + dem booklets-Upsert). Scheitert ein Schritt
+ * davor (Sonnet-502/Timeout, Insert-Fehler), wird früh zurückgegeben — der
+ * Auftrag bleibt sauber in `draft` (kein halber Zwischenzustand), und der Nutzer
+ * kann „Booklet erstellen" erneut auslösen.
  *
  * ISOLATION (§14.2): Der booklets-Insert/Update läuft über `service_role`
  * (0001-RLS lässt nur serverseitiges Insert/Delete zu). Die `business_id`
@@ -76,8 +86,10 @@ export async function POST(
     return NextResponse.json({ error: "not_found" }, { status: 404 });
   }
 
-  // Re-Generate erlaubt, solange das Booklet noch nicht versendet wurde.
-  if (order.status !== "finalized" && order.status !== "generated") {
+  // Erstellen aus `draft` (Normalfall) ODER Re-Generate aus `generated`
+  // (solange das Booklet noch nicht versendet wurde). `finalized` existiert
+  // nicht mehr.
+  if (order.status !== "draft" && order.status !== "generated") {
     return NextResponse.json({ error: "invalid_status" }, { status: 409 });
   }
 
@@ -257,8 +269,11 @@ export async function POST(
     }
   }
 
-  // Order-Status → generated (defensiv auf den Ausgangsstatus gefiltert, kein
-  // Doppelübergang). Bei Re-Generate (bereits `generated`) ein No-op-Treffer.
+  // Order-Status → generated, defensiv auf den GELADENEN Ausgangsstatus
+  // gefiltert (kein Doppelübergang bei Races). Beim Erstellen ist das `draft`
+  // (draft → generated), beim Re-Generate `generated` (No-op-Treffer). Dieser
+  // Schritt läuft bewusst ZULETZT — schlägt oben etwas fehl, bleibt der Auftrag
+  // in `draft` (Fehlersicherheit, s. Header).
   const { error: statusError } = await supabase
     .from("orders")
     .update({ status: "generated" })

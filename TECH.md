@@ -14,7 +14,7 @@ Das DB-Fundament besteht aus 7 Tabellen (alle im Schema `public`). Datei: [supab
 | --- | --- | --- |
 | `businesses` | Betrieb/Mandant (Tenant-Wurzel). | `id`, `name`, `business_email` (unique), `slug` (unique), `status` (`active`/`suspended`), `default_language`, `branding`/`settings` (jsonb), `consent_text`, `retention_months` (1–120), `stripe_customer_id`, `webhook_secret` |
 | `business_users` | Mitgliedschaft: verknüpft `auth.users` mit einem Betrieb (Basis aller RLS-Checks). | `business_id`, `user_id` (→ `auth.users`), `role` (`owner`/`staff`), unique(`business_id`,`user_id`) |
-| `orders` | Auftrag/Job eines Betriebs (Kundendaten + Einwilligung). | `business_id`, `customer_name/_email/_phone`, `external_ref`, `item_description`, `language`, `status` (`draft`→`finalized`→`generated`→`sent`→`viewed`→`shared`), `consent_given`, `consent_at` |
+| `orders` | Auftrag/Job eines Betriebs (Kundendaten + Einwilligung). | `business_id`, `customer_name/_email/_phone`, `external_ref`, `item_description`, `language`, `status` (`draft`→`generated`→`sent`→`viewed`→`shared`; `finalized` entfällt ab Migration 0011), `consent_given`, `consent_at` |
 | `order_media` | Foto-/Video-Assets zu einem Auftrag. | `order_id`, `business_id`, `media_type` (`photo`/`video`), `storage_path`, `keyword`, `tag` (`vorher`/`nachher`/`prozess`), `caption`, `sort_order`, `duration_seconds`, `width`/`height` |
 | `booklets` | Generiertes, teilbares Ergebnis-Booklet (1:1 zu `orders`). | `order_id` (unique), `business_id`, `access_token` (unique, app-generiert, unerratbar ≥ 24 Byte base64url), `intro_title/_description`, `review_draft`, `ig_caption`, `web_story_ready`, `reel_url`, `image_urls` (jsonb), `language`, `sent_at`/`viewed_at`/`first_shared_at`/`expires_at` |
 | `billing_events` | Abrechnungsrelevante Ereignisse (MVP: `booklet_sent`). | `business_id`, `booklet_id` (set null), `order_id` (set null), `event_type` (`booklet_sent`) |
@@ -2272,15 +2272,16 @@ Geteilte Quelle (`QuickFilter`-Typ + `isQuickFilter`-Guard + `ORDERS_PAGE_SIZE =
 
 Die Achsen **schließen sich aus** — `quick` hat Vorrang: ist ein gültiger `quick` gesetzt, wird der Dropdown-Wert verworfen (`activeStatus = !activeQuick && isOrderStatus(...)`), das Dropdown zeigt sichtbar „Alle". Da jede Navigation eine **frische URL** baut (Quick-Link → nur `?quick=`, Dropdown-`onChange` → nur `?status=`), kann nie gleichzeitig beides aktiv sein. „Zuletzt benutzter gewinnt" ergibt sich automatisch aus der jeweils neuen URL.
 
-### Drei Quick-Filter ([components/order-quick-filters.tsx](components/order-quick-filters.tsx), Server Component)
+### Quick-Filter ([components/order-quick-filters.tsx](components/order-quick-filters.tsx), Server Component)
 
 Jeder Button ist ein `<Link>` (kein Client-State, keine `<form>`): inaktiv → `?quick=<key>`, **aktiv → `/portal/orders`** (Toggle aus). Genau **einer** kann aktiv sein (`active`-Prop), Hervorhebung via `data-active` + `aria-current`. Beim Filterwechsel entfällt `?page=` ⇒ zurück auf Seite 1. Definitionen (server-seitig in `page.tsx` in WHERE-Logik übersetzt):
 
 | Quick | i18n-Label | Bedingung |
 | --- | --- | --- |
-| `flagged` | „Geflaggt" | `picked_up_at` gesetzt **UND** `status IN (draft, finalized, generated)` — exakt die Warn-Badge-Bedingung aus Schritt 2 (`NOT IN {sent, viewed, shared}` == `IN {draft, finalized, generated}` über den vollen Wertebereich, daher ohne `.not(...,"in",...)`-Quoting via `.in(...)`). |
+| `flagged` | „Geflaggt" | `picked_up_at` gesetzt **UND** `status IN (draft, generated)` — exakt die Warn-Badge-Bedingung aus Schritt 2 (`NOT IN {sent, viewed, shared}` == `IN {draft, generated}`, da `finalized` entfällt; via `.in(...)`). |
 | `drafts` | „Entwürfe" | `status = 'draft'`. |
-| `ungenerated` | „Nicht generiert" | `status IN ('draft', 'finalized')`. |
+
+*Der frühere dritte Quick-Filter `ungenerated` (war `status IN (draft, finalized)`) ist mit dem Wegfall von `finalized` deckungsgleich mit `drafts` geworden und daher entfernt.*
 
 Stil ([app/globals.css](app/globals.css), `.quick-filter`): dezente, **gold-umrahmte** Chips (`--gold-border`, transparent, sekundärer Text); Hover → `--gold`; aktiv → `--gold-light`-Hintergrund + `--gold`-Rahmen + dunkleres Gold (`#8A7320`, wie das Status-Badge).
 
@@ -2439,6 +2440,50 @@ Drei kleine Anzeige-Korrekturen. **Keine Migration, keine Logik-/Route-/Isolatio
 
 ---
 
+## Booklet-Flow vereinfacht — finalize + generate zusammengelegt (Migration 0011)
+
+Der zweistufige Bau-Flow („Booklet abschließen" → `finalized` → „Vorschau erzeugen" → `generated`) wird auf **einen** Schritt verdichtet: ein Klick **„Booklet erstellen"** führt direkt `draft → generated` aus. Der Zwischenstatus **`finalized` entfällt komplett** aus der Status-Maschine. Grundlage: [FLOW_REDESIGN.md](FLOW_REDESIGN.md) (1.2/1.3 — „Vorschau erzeugen" war nie eine Vorschau, sondern der eigentliche Bau-Schritt; `finalized` schrieb **nur** den Status, kein Artefakt, und niemand profitierte vom Verweilen darin — der Webhook behandelte ihn wie `draft`, das Reel war dort nicht renderbar, der Quick-Filter fasste `draft`+`finalized` ohnehin zusammen).
+
+**An der Auslieferungs-Logik wurde NICHTS geändert** — Webhook-Auto-Versand bei „Abgeholt", Safe-Mode-Nachfrage, Doppelversand-`count`-Guard und der gesamte deliver-Pfad bleiben exakt wie zuvor. Geändert wurde nur der Weg zum Status `generated`.
+
+### Neue Status-Maschine
+
+```
+draft → generated → sent → viewed → shared
+```
+
+### Backend
+
+- **[generate/route.ts](app/api/portal/orders/[id]/generate/route.ts) übernimmt die ganze Erzeugung.** Status-Guard jetzt **`draft` ODER `generated`** (statt `finalized`/`generated`) — Erstellen aus `draft`, Re-Generate aus `generated`. Die `need_process`-Validierung (≥ 1 process-Medium, 0010) sitzt hier (saß ohnehin schon zusätzlich hier). **Fehlersicherheit:** Der Order-Status wird **erst ganz am Ende** auf `generated` gesetzt (nach allen KI-Calls + dem booklets-Upsert, defensiv `.eq("status", order.status)`). Scheitert ein Schritt davor (Sonnet-502/Timeout, Insert-Fehler), wird früh zurückgegeben — der Auftrag **bleibt sauber `draft`** (kein halber Zwischenzustand, kein `finalized`-Limbo möglich), der Nutzer kann erneut „Booklet erstellen" drücken. Token/Kurzlink bleiben bei Re-Generate erhalten (unverändert).
+- **[finalize/route.ts](app/api/portal/orders/[id]/finalize/route.ts) entfernt** (samt UI). Die Editier-Sperre liefert ab jetzt der Übergang nach `generated` (MediaList read-only ab „nicht draft", wie zuvor ab „nicht draft").
+- **[reopen/route.ts](app/api/portal/orders/[id]/reopen/route.ts):** Guard verengt auf **nur `generated` → `draft`** (`finalized` existiert nicht mehr). Versand-Stufen bleiben gesperrt.
+- **Webhook [handlePickedUp](app/api/webhook/[secret]/route.ts):** Warn-Flag (`picked_up_at`) wird jetzt nur noch bei **`draft`** gesetzt (vorher `draft`||`finalized`). `sent`/`viewed`/`shared` weiter ausgenommen, `generated` liefert weiter aus — **Semantik unverändert**, nur der entfallene Status raus.
+
+### Status-Maschine im Code
+
+- **[order-status-badge.tsx](components/order-status-badge.tsx):** `'finalized'` aus `ORDER_STATUSES` + `STATUS_STYLES` entfernt (Badge-Stufen jetzt: neutral `draft`, gold `generated`, grün `sent`/`viewed`/`shared`). `OrderStatus`/`isOrderStatus` leiten sich ab ⇒ der Status-Dropdown verliert die Option automatisch.
+- **Quick-Filter ([lib/orders/filters.ts](lib/orders/filters.ts)):** `flagged` jetzt `picked_up_at` gesetzt **UND** `status IN (draft, generated)`. Der Filter **`ungenerated`** (war `draft, finalized`) ist mit dem Wegfall von `finalized` deckungsgleich mit `drafts` (`draft`) geworden und daher **entfernt** — `drafts` bleibt der „noch kein Booklet"-Filter.
+
+### Migration 0011 (manuell anwenden)
+
+[0011_orders_status_drop_finalized.sql](supabase/migrations/0011_orders_status_drop_finalized.sql) + [Verify](supabase/verify/0011_orders_status_checks.sql): **verengt** den `orders_status_check` auf `draft/generated/sent/viewed/shared` (drop/add wie 0005). Defense-in-depth — die App schreibt `finalized` ohnehin nicht mehr (Code-Änderung reicht funktional), der Constraint hält einen versehentlichen Schreibzugriff zusätzlich ab und spiegelt die Maschine in der DB. Holt etwaige Alt-Zeilen sicherheitshalber `finalized → draft` zurück (reine Testphase, es gibt keine). DEFAULT bleibt `draft`, keine neue Policy/GRANT. **Muss vor dem Live-Gang manuell im Supabase-SQL-Editor angewendet werden.**
+
+### Button-Layout der Detailseite ([page.tsx](app/portal/orders/[id]/page.tsx) + [generate-controls.tsx](app/portal/orders/[id]/generate-controls.tsx) + [deliver-controls.tsx](app/portal/orders/[id]/deliver-controls.tsx))
+
+Aktionszone am Seitenende, je Status (zwei gleich breite Spalten, `.booklet-actions-row`):
+
+- **`draft`:** oben **links „Booklet erstellen"** (gold, aktiv ⇒ `POST generate`, **kein `window.confirm`** — per Reopen reversibel) + **rechts „Reel erstellen" gesperrt** (`<LockedReelButton>`, grau; Klick zeigt `reel.lockedHint` „Bitte zuerst das Booklet erstellen" — das Reel braucht die Booklet-Daten). **Kein** „Bearbeiten"/„Ausliefern".
+- **`generated`:** **links „Booklet erstellen" grau/erledigt** („✓ Booklet erstellt", `generate.created`, nicht klickbar — das Booklet existiert) + **rechts „Reel erstellen" aktiv** (echter `<ReelButton>`, Poll/Ticker unverändert). **Darunter** zwei schmälere Buttons: **„Bearbeiten"** (`<ReopenButton>` = Reopen) + **„Ausliefern"** (`<DeliverButton>`, **Logik inkl. Safe-Mode/Connector/Doppelversand-Guard UNVERÄNDERT**, nur nicht mehr `capture-btn`-groß).
+- **`sent`/`viewed`/`shared`:** kein „Booklet erstellen"/„Ausliefern" mehr — nur der **Reel-Block** (FIX 7.1, Reel auch nach Versand renderbar, Order-Status unberührt). „Booklet ansehen"/„QR drucken" liegen weiter in der **oberen** Aktionsleiste (für alle Booklet-Stufen, schließt FLOW_REDESIGN-Lücke 5).
+
+Komponenten-Bilanz: `FinalizeButton`/`GenerateButton` → **`CreateBookletButton`** (status-bewusst: aktiv@draft ⇒ generate, grau@generated). `GeneratedActions` (Neu generieren + Bearbeiten in der oberen Leiste) **entfällt** — „Bearbeiten" wandert als `<ReopenButton>` in die untere Zone, das separate „Neu generieren" entfällt bewusst (Regeneration = „Bearbeiten" → „Booklet erstellen", FLOW_REDESIGN-Trade-off). [finalize-controls.tsx](app/portal/orders/[id]/generate-controls.tsx) gelöscht (`ReopenButton` lebt jetzt in `generate-controls.tsx`, `postAction` inline). i18n: `finalize.*`-Block → `reopen.{button,error}`; `generate.created` + `reel.lockedHint` neu; `orderStatus.finalized` + `orders.quickUngenerated` + `generate.regenerate` entfernt.
+
+### Darf nicht brechen — geprüft
+
+Doppelversand-`count`-Guard im deliver (unverändert), `access_token`/`short_code`-Erhalt bei Re-Generate (unverändert), FIX 7.1 (`RENDERABLE_STATUSES = generated|sent|viewed|shared`, Render lässt Order-Status unberührt), Webhook-`picked_up`-Semantik (jetzt nur `draft` → Badge), Quick-Filter-Exklusivität (Status- ↔ Quick-Achse), der „Reel braucht generated"-Constraint (Reel im Entwurf gesperrt). `business_id` aus Session/RLS, `service_role` nur serverseitig, kein `<form>`, kein `any`. `pnpm typecheck` + `pnpm build` grün.
+
+---
+
 ## Launch-Fahrplan & deferierte Härtung
 
 Detail-Referenz für die Risikobewertung: [SECURITY_REVIEW.md](SECURITY_REVIEW.md) (bleibt im Repo). Dieser Abschnitt fasst die **Reihenfolge** des Live-Gangs und die **vor Kunde #2 verpflichtende** Härtung zusammen.
@@ -2467,6 +2512,6 @@ Aus [SECURITY_REVIEW.md](SECURITY_REVIEW.md), nach ROI sortiert:
 
 ---
 
-> Nächste Migration: **0010**.
+> Nächste Migration: **0012**.
 
-> **WICHTIG:** Migration 0009 (`orders.picked_up_at`) muss vor dem Live-Gang manuell im Supabase-SQL-Editor angewendet werden (+ Verify-Gate ausführen), sonst scheitert das `picked_up_at`-Update im Webhook — es bleibt zwar non-fatal, aber der Warn-Badge erscheint nie. (Migration 0008 `booklets.short_code` ebenso, falls noch nicht geschehen; 0006 `analytics_events` + 0007 `orders.short_summary` ebenfalls.)
+> **WICHTIG:** Migration **0011** (`orders_status_check` ohne `finalized`) muss vor dem Live-Gang manuell im Supabase-SQL-Editor angewendet werden (+ Verify-Gate ausführen). Funktional reicht zwar die Code-Änderung (die App schreibt `finalized` nie mehr), aber der Constraint hält die DB mit der neuen Status-Maschine konsistent. Migration **0010** (`order_media.category`) ebenso, falls noch nicht geschehen; 0009 (`orders.picked_up_at`), 0008 (`booklets.short_code`), 0007 (`orders.short_summary`), 0006 (`analytics_events`) ebenfalls (sonst scheitern die zugehörigen Schreibzugriffe — beim Webhook non-fatal, der Warn-Badge erscheint dann aber nie).

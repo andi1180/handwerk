@@ -9,12 +9,15 @@ import type { OrderStatus } from "@/components/order-status-badge";
  *
  *  - `flagged`      → „Abgeholt, Booklet nicht versendet" (exakt die Warn-Badge-
  *                     Bedingung aus Block C / Schritt 2): `picked_up_at` gesetzt
- *                     UND Status ∈ {draft, finalized, generated}
- *                     (= NOT IN {sent, viewed, shared}).
+ *                     UND Status ∈ {draft, generated} (= NOT IN {sent, viewed,
+ *                     shared}; `finalized` existiert nicht mehr).
  *  - `drafts`       → Status === 'draft'.
- *  - `ungenerated`  → Status ∈ {draft, finalized}.
+ *
+ * Der frühere Quick-Filter `ungenerated` (war Status ∈ {draft, finalized}) ist
+ * mit dem Wegfall von `finalized` deckungsgleich mit `drafts` geworden und daher
+ * entfernt — eine Auswahl genügt für „noch kein Booklet".
  */
-export const QUICK_FILTERS = ["flagged", "drafts", "ungenerated"] as const;
+export const QUICK_FILTERS = ["flagged", "drafts"] as const;
 
 export type QuickFilter = (typeof QUICK_FILTERS)[number];
 

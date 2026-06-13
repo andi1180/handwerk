@@ -66,7 +66,6 @@ export const de = {
     quickLabel: "Schnellfilter",
     quickFlagged: "Geflaggt",
     quickDrafts: "Entwürfe",
-    quickUngenerated: "Nicht generiert",
     pagination: "Seiten-Navigation",
     prevPage: "Zurück",
     nextPage: "Weiter",
@@ -89,7 +88,6 @@ export const de = {
   },
   orderStatus: {
     draft: "Entwurf",
-    finalized: "Abgeschlossen",
     generated: "Generiert",
     sent: "Gesendet",
     viewed: "Angesehen",
@@ -247,28 +245,21 @@ export const de = {
     deselectAll: "Auswahl aufheben",
     error: "Aktion fehlgeschlagen. Bitte erneut versuchen.",
   },
-  finalize: {
-    // Schritt 1 des Erstellens (POST finalize) — bewusst dasselbe Label wie
-    // Schritt 2 (generate): der Nutzer erlebt EINE Aktion „Booklet erstellen",
-    // der Zwischenzustand zeigt sich nur als „Medien abgeschlossen"-Häkchen.
-    // Kein Bestätigungsdialog mehr — der Schritt ist per „Bearbeiten" voll
-    // reversibel.
-    button: "Booklet erstellen",
-    hint: "Schließt zuerst die Medien ab. Danach erstellst du mit einem zweiten Tippen die persönlichen Texte und den Kunden-Link.",
-    needMedia: "Bitte zuerst mindestens ein Medium hinzufügen.",
-    // 0010: nur Vorher/Nachher reicht nicht — mindestens ein Prozess-Medium nötig.
-    needProcess: "Mindestens ein Prozess-Bild oder -Video nötig.",
-    done: "Medien abgeschlossen",
-    reopen: "Bearbeiten",
+  // „Bearbeiten" (Reopen, generated → draft) — zurück in den Editier-Modus.
+  // Ersetzt den früheren `finalize`-Block (finalize ist entfallen; der eine
+  // Schritt „Booklet erstellen" liegt unter `generate`).
+  reopen: {
+    button: "Bearbeiten",
     error: "Aktion fehlgeschlagen. Bitte erneut versuchen.",
   },
   generate: {
-    // „Booklet erstellen" statt „Vorschau erzeugen" — der Schritt erstellt das
-    // echte Booklet (KI-Texte + Kunden-Link), keine Vorschau.
+    // Der EINE Erstellen-Schritt: „Booklet erstellen" führt direkt
+    // draft → generated aus (KI-Texte + Kunden-Link), keine Vorstufe.
     generate: "Booklet erstellen",
     generating: "Erstelle Booklet…",
+    // Erledigter, grauer Zustand, sobald das Booklet existiert (Status generated).
+    created: "Booklet erstellt",
     hint: "Erstellt die persönlichen Texte und den Kunden-Link. Jederzeit wieder änderbar.",
-    regenerate: "Neu generieren",
     needMedia: "Bitte zuerst mindestens ein Medium hinzufügen.",
     // 0010: nur Vorher/Nachher reicht nicht — mindestens ein Prozess-Medium nötig.
     needProcess: "Mindestens ein Prozess-Bild oder -Video nötig.",
@@ -281,6 +272,8 @@ export const de = {
   reel: {
     title: "Reel",
     create: "Reel erstellen",
+    // Gesperrter Platzhalter im Entwurf: das Reel braucht das Booklet als Basis.
+    lockedHint: "Bitte zuerst das Booklet erstellen.",
     starting: "Starte…",
     rendering: "Reel wird erstellt…",
     // Rotierende, rein kosmetische Fortschritts-Stufen während des Renders

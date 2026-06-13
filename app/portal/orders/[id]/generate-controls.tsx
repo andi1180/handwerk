@@ -3,21 +3,22 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { DEFAULT_LOCALE, t } from "@/lib/i18n";
-import { postAction } from "./finalize-controls";
 
 /**
- * Booklet-Generierung im Portal (Schritt 8a-1). Zwei kleine Client-Komponenten
- * mit geteilter Logik (`postGenerate` + Fehler-Mapping), `div + onClick`, kein
- * `<form>`:
+ * Booklet-Aktionen der Detailseite (Flow-Vereinfachung). Kleine Client-
+ * Komponenten, `div/button + onClick`, kein `<form>`:
  *
- *  - `<GenerateButton>` (Status `finalized`): prominenter „Booklet erstellen"-
- *    Button am Seitenende (Schritt 2: KI-Texte + Kunden-Link) → `POST generate`
- *    → `router.refresh()`.
- *  - `<GeneratedActions>` (Status `generated`): kleine Sekundär-Aktionen für
- *    die obere Aktionsleiste — „Neu generieren" (erneutes `POST generate`,
- *    überschreibt das Intro, behält den Token) und „Bearbeiten" (Reopen,
- *    geteilt über `postAction`). Der „Booklet ansehen"-Link wird server-seitig
- *    in der Seite gerendert.
+ *  - `<CreateBookletButton>`: der EINE „Booklet erstellen"-Schritt. Im `draft`
+ *    aktiv ⇒ `POST generate` (führt direkt `draft → generated` aus: KI-Texte +
+ *    Kunden-Link). Im `generated` als erledigter, grauer Zustand dargestellt
+ *    (`disabled`) — das Booklet existiert bereits.
+ *  - `<LockedReelButton>` (Status `draft`): gesperrter „Reel erstellen"-Platz-
+ *    halter neben dem Erstellen-Button; Klick zeigt den Hinweis, dass zuerst das
+ *    Booklet erstellt werden muss (das Reel braucht die Booklet-Daten).
+ *  - `<ReopenButton>` (Status `generated`): „Bearbeiten" ⇒ `POST reopen`
+ *    (`generated → draft`), zurück in den Editier-Modus. Token/Kurzlink bleiben.
+ *  - `<ReelButton>`: das echte Reel (Render + Poll), ab `generated` und auch
+ *    nach Versand (FIX 7.1).
  *
  * ISOLATION: kein Body; Betrieb/Order werden im Route Handler gegen die Session
  * geprüft, die `business_id` stammt aus der geladenen Order.
@@ -97,20 +98,34 @@ function NoticeBox({ text }: { text: string }) {
   );
 }
 
-/** Prominenter „Booklet erstellen"-Button (Status `finalized`). */
-export function GenerateButton({
+/**
+ * Der eine „Booklet erstellen"-Schritt (links oben in der Aktionszone).
+ *
+ *  - `disabled` (Status `generated`): Booklet existiert ⇒ grauer, nicht
+ *    klickbarer „✓ Booklet erstellt"-Zustand. Geändert/neu erzeugt wird über
+ *    „Bearbeiten" (Reopen) → erneut „Booklet erstellen".
+ *  - sonst (Status `draft`): aktiv ⇒ `POST generate`, das in EINEM Schritt
+ *    `draft → generated` ausführt (KI-Texte + Kunden-Link). Ohne process-Medium
+ *    kein Request (Server prüft zusätzlich, `need_process`). Während des
+ *    KI-Laufs Busy-Label + Spinner; Fehler ⇒ der Auftrag bleibt sauber `draft`
+ *    (Route-Fehlersicherheit), der Nutzer kann erneut tippen.
+ */
+export function CreateBookletButton({
   orderId,
   processCount,
+  disabled = false,
 }: {
   orderId: string;
   /** Anzahl process-Medien (0010) — Pflicht fürs Erstellen, before/after zählen nicht. */
   processCount: number;
+  /** true ⇒ Booklet existiert bereits (Status `generated`): erledigter, grauer Zustand. */
+  disabled?: boolean;
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
 
-  const handleGenerate = useCallback(() => {
+  const handleCreate = useCallback(() => {
     // Ohne process-Medium kein Request — direkt der Hinweis (Server prüft zusätzlich).
     if (processCount < 1) {
       setNotice(t(DEFAULT_LOCALE, "generate.needProcess"));
@@ -129,25 +144,58 @@ export function GenerateButton({
       } catch (error) {
         setNotice(noticeForThrow(error));
       } finally {
-        // Lade-Zustand IMMER zurücksetzen — nie ein Dauer-„Erzeuge…".
+        // Lade-Zustand IMMER zurücksetzen — nie ein Dauer-„Erstelle…".
         setBusy(false);
       }
     })();
   }, [processCount, orderId, router]);
 
+  // Generiert: das Booklet existiert ⇒ grauer, erledigter Zustand (kein Klick).
+  if (disabled) {
+    return (
+      <button
+        type="button"
+        className="capture-btn"
+        disabled
+        aria-disabled
+        style={{
+          width: "100%",
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 8,
+          background: "var(--surface-2)",
+          color: "var(--text-secondary)",
+          border: "1px solid var(--border)",
+          borderRadius: "var(--radius)",
+          fontFamily: "inherit",
+          fontWeight: 600,
+          cursor: "default",
+        }}
+      >
+        ✓ {t(DEFAULT_LOCALE, "generate.created")}
+      </button>
+    );
+  }
+
+  // Entwurf: ein Klick erzeugt das ganze Booklet (draft → generated).
   return (
-    // Sitzt in der Aktionszone direkt unter dem „Medien abgeschlossen"-Häkchen.
-    <div style={{ marginTop: 12 }}>
+    <div>
       <button
         type="button"
         className="btn-gold capture-btn"
-        onClick={handleGenerate}
+        onClick={handleCreate}
         disabled={busy}
         style={{ opacity: busy ? 0.6 : 1, cursor: busy ? "default" : "pointer" }}
       >
-        {busy
-          ? t(DEFAULT_LOCALE, "generate.generating")
-          : t(DEFAULT_LOCALE, "generate.generate")}
+        {busy ? (
+          <>
+            <Spinner />
+            {t(DEFAULT_LOCALE, "generate.generating")}
+          </>
+        ) : (
+          t(DEFAULT_LOCALE, "generate.generate")
+        )}
       </button>
 
       <p style={{ marginTop: 8, fontSize: 12, color: "var(--text-secondary)" }}>
@@ -160,82 +208,92 @@ export function GenerateButton({
 }
 
 /**
- * Kleine Sekundär-Aktionen „Neu generieren" + „Bearbeiten" (Status `generated`).
- * Fragment — wird in der oberen Aktionsleiste der Detailseite neben den
- * Ansehen-/QR-Links gerendert; der Fehler-Hinweis bricht in eine eigene Zeile
- * (flexBasis 100%).
+ * Gesperrter „Reel erstellen"-Platzhalter (Status `draft`, rechts oben neben
+ * „Booklet erstellen"). Das Reel braucht die Booklet-Daten als Basis — vor dem
+ * Erstellen ist es daher gesperrt. Bewusst NICHT `disabled` (sonst feuert kein
+ * Klick): ein Tap zeigt den Hinweis, zuerst das Booklet zu erstellen.
  */
-export function GeneratedActions({ orderId }: { orderId: string }) {
-  const router = useRouter();
-  const [busy, setBusy] = useState<null | "regenerate" | "reopen">(null);
+export function LockedReelButton() {
   const [notice, setNotice] = useState<string | null>(null);
-
-  const run = useCallback(
-    (action: "regenerate" | "reopen") => {
-      setBusy(action);
-      setNotice(null);
-      void (async () => {
-        try {
-          const res =
-            action === "regenerate"
-              ? await postGenerate(orderId)
-              : await postAction(orderId, "reopen");
-          if (!res.ok) {
-            setNotice(
-              action === "regenerate"
-                ? await noticeForError(res)
-                : t(DEFAULT_LOCALE, "generate.error"),
-            );
-            return;
-          }
-          router.refresh();
-        } catch (error) {
-          setNotice(noticeForThrow(error));
-        } finally {
-          // Lade-Zustand IMMER zurücksetzen — nie ein Dauer-„Erzeuge…".
-          setBusy(null);
-        }
-      })();
-    },
-    [orderId, router],
-  );
-
-  const disabled = busy !== null;
-
   return (
-    <>
+    <div>
       <button
         type="button"
-        className="btn-outline"
-        onClick={() => run("regenerate")}
-        disabled={disabled}
+        className="capture-btn"
+        aria-disabled
+        onClick={() => setNotice(t(DEFAULT_LOCALE, "reel.lockedHint"))}
         style={{
-          opacity: disabled ? 0.6 : 1,
-          cursor: disabled ? "default" : "pointer",
+          width: "100%",
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 10,
+          background: "var(--surface-2)",
+          color: "var(--text-secondary)",
+          border: "1px solid var(--border)",
+          borderRadius: "var(--radius)",
+          fontFamily: "inherit",
+          fontWeight: 600,
+          cursor: "not-allowed",
         }}
       >
-        {busy === "regenerate"
-          ? t(DEFAULT_LOCALE, "generate.generating")
-          : t(DEFAULT_LOCALE, "generate.regenerate")}
-      </button>
-      <button
-        type="button"
-        className="btn-outline"
-        onClick={() => run("reopen")}
-        disabled={disabled}
-        style={{
-          opacity: disabled ? 0.6 : 1,
-          cursor: disabled ? "default" : "pointer",
-        }}
-      >
-        {t(DEFAULT_LOCALE, "finalize.reopen")}
+        <LockIcon />
+        {t(DEFAULT_LOCALE, "reel.create")}
       </button>
       {notice ? (
-        <div style={{ flexBasis: "100%" }}>
-          <NoticeBox text={notice} />
-        </div>
+        <p style={{ marginTop: 8, fontSize: 12, color: "var(--text-secondary)" }}>
+          {notice}
+        </p>
       ) : null}
-    </>
+    </div>
+  );
+}
+
+/**
+ * „Bearbeiten"-Button (Status `generated`): `POST reopen` (`generated → draft`),
+ * zurück in den Editier-Modus. Das Booklet (Token/Kurzlink) bleibt bestehen;
+ * ein erneutes „Booklet erstellen" generiert die Texte neu, ohne den Link zu
+ * ändern. Kein Body — Betrieb/Order werden serverseitig gegen die Session geprüft.
+ */
+export function ReopenButton({ orderId }: { orderId: string }) {
+  const router = useRouter();
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const handleReopen = useCallback(() => {
+    setBusy(true);
+    setNotice(null);
+    void (async () => {
+      try {
+        const res = await fetch(`/api/portal/orders/${orderId}/reopen`, {
+          method: "POST",
+        });
+        if (!res.ok) throw new Error("reopen_failed");
+        router.refresh(); // zurück in den Editier-Modus
+      } catch {
+        setNotice(t(DEFAULT_LOCALE, "reopen.error"));
+        setBusy(false);
+      }
+    })();
+  }, [orderId, router]);
+
+  return (
+    <div>
+      <button
+        type="button"
+        className="btn-outline"
+        onClick={handleReopen}
+        disabled={busy}
+        style={{
+          width: "100%",
+          opacity: busy ? 0.6 : 1,
+          cursor: busy ? "default" : "pointer",
+        }}
+      >
+        {t(DEFAULT_LOCALE, "reopen.button")}
+      </button>
+      {notice ? <NoticeBox text={notice} /> : null}
+    </div>
   );
 }
 
@@ -385,8 +443,9 @@ export function ReelButton({
   const busy = starting || rendering;
 
   return (
-    // Sitzt im Reel-Block der Aktionszone direkt unter der „Reel"-Überschrift.
-    <div style={{ marginTop: 12 }}>
+    // Grid-Zelle der Aktionszone (rechts oben bei `generated`, eigener Block bei
+    // sent/viewed/shared) — kein eigener Top-Abstand, die Seite richtet aus.
+    <div>
       <div
         style={{
           display: "flex",
@@ -448,6 +507,27 @@ export function ReelButton({
       )}
       {notice ? <NoticeBox text={notice} /> : null}
     </div>
+  );
+}
+
+/** Schloss-Symbol für den gesperrten „Reel erstellen"-Platzhalter. Reine Deko. */
+function LockIcon() {
+  return (
+    <svg
+      width={16}
+      height={16}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+      style={{ flexShrink: 0 }}
+    >
+      <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+      <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+    </svg>
   );
 }
 

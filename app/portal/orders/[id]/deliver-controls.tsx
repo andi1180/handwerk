@@ -133,13 +133,19 @@ export function DeliverButton({
   }, [hasEmail, reelReady, connectorEnabled, orderId, router]);
 
   return (
-    <div style={{ marginTop: 24 }}>
+    // Grid-Zelle der Aktionszone (rechts unten bei `generated`, neben
+    // „Bearbeiten") — vollbreit in der Zelle, normale Höhe (kein capture-btn).
+    <div>
       <button
         type="button"
-        className={`${connectorEnabled ? "btn-gold" : "btn-dark"} capture-btn`}
+        className={connectorEnabled ? "btn-gold" : "btn-dark"}
         onClick={handleDeliver}
         disabled={busy}
-        style={{ opacity: busy ? 0.6 : 1, cursor: busy ? "default" : "pointer" }}
+        style={{
+          width: "100%",
+          opacity: busy ? 0.6 : 1,
+          cursor: busy ? "default" : "pointer",
+        }}
       >
         {busy
           ? t(DEFAULT_LOCALE, "deliver.delivering")

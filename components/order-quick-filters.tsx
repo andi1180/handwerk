@@ -21,13 +21,9 @@ import {
  * Genau EIN Quick kann aktiv sein (`active`); ist ein Status-Dropdown-Wert
  * aktiv, ist `active === null` und kein Button hervorgehoben.
  */
-const LABEL_KEY: Record<
-  QuickFilter,
-  "quickFlagged" | "quickDrafts" | "quickUngenerated"
-> = {
+const LABEL_KEY: Record<QuickFilter, "quickFlagged" | "quickDrafts"> = {
   flagged: "quickFlagged",
   drafts: "quickDrafts",
-  ungenerated: "quickUngenerated",
 };
 
 export function OrderQuickFilters({ active }: { active: QuickFilter | null }) {

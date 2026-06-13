@@ -8,7 +8,6 @@ import { DEFAULT_LOCALE, t } from "@/lib/i18n";
  */
 export const ORDER_STATUSES = [
   "draft",
-  "finalized",
   "generated",
   "sent",
   "viewed",
@@ -31,7 +30,7 @@ type BadgeStyle = { background: string; border: string; color: string };
  * Farbsätze nach **Lifecycle-Stufe** statt pro Status (6c) — die Liste zeigt so
  * auf einen Blick „in Arbeit / fertig / gesendet":
  *  - neutral  = in Arbeit (`draft`)
- *  - gold     = fertig (`finalized`, `generated`)
+ *  - gold     = fertig (`generated`)
  *  - grünlich = gesendet/gesehen (`sent`, `viewed`, `shared`)
  */
 const NEUTRAL: BadgeStyle = {
@@ -52,7 +51,6 @@ const GREEN: BadgeStyle = {
 
 const STATUS_STYLES: Record<OrderStatus, BadgeStyle> = {
   draft: NEUTRAL,
-  finalized: GOLD,
   generated: GOLD,
   sent: GREEN,
   viewed: GREEN,

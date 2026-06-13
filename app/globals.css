@@ -352,6 +352,17 @@ body {
   }
 }
 
+/* Aktionszone der Auftrags-Detailseite: zwei gleich breite Spalten
+   (oben „Booklet erstellen" / „Reel erstellen"; bei generated darunter
+   „Bearbeiten" / „Ausliefern"). Buttons oben ausgerichtet (align-items: start);
+   Hinweise/Fehler fließen je Spalte darunter. */
+.booklet-actions-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  align-items: start;
+}
+
 /* --- Auftragsliste: Kopf (Titel → Status-Dropdown → „Neuer Auftrag" →
    Quick-Filter), vertikal gestapelt (Block C / Schritt 3). --- */
 .orders-header {

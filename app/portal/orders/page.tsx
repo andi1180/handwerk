@@ -90,15 +90,13 @@ export default async function OrdersPage({
   // Quick-Filter ⇒ eigene WHERE-Logik (kein ?status=-Single-Value).
   if (activeQuick === "flagged") {
     // Exakt die Warn-Badge-Bedingung (Block C / Schritt 2): abgeholt, aber noch
-    // nicht versendet. NOT IN {sent, viewed, shared} == IN {draft, finalized,
-    // generated} über den vollen Status-Wertebereich.
+    // nicht versendet. NOT IN {sent, viewed, shared} == IN {draft, generated}
+    // (kein `finalized` mehr).
     query = query
       .not("picked_up_at", "is", null)
-      .in("status", ["draft", "finalized", "generated"]);
+      .in("status", ["draft", "generated"]);
   } else if (activeQuick === "drafts") {
     query = query.eq("status", "draft");
-  } else if (activeQuick === "ungenerated") {
-    query = query.in("status", ["draft", "finalized"]);
   } else if (activeStatus) {
     query = query.eq("status", activeStatus);
   }

@@ -334,14 +334,14 @@ async function handleOrderPickedUp(
   // Ausliefern lässt sich nur ein generiertes Booklet. Bei abweichendem Status
   // nach STATUS verzweigen (additiv zum Doppelversand-Schutz weiter unten):
   //
-  //  - draft/finalized ⇒ noch KEIN versendetes Booklet. Der Kunde hat abgeholt,
-  //    aber nichts bekommen ⇒ Warn-Flag `picked_up_at = now()` setzen (treibt den
-  //    roten Badge auf der Auftragskachel). KEINE Mail. Idempotent: erneutes
-  //    Setzen schadet nicht. (Block C / Schritt 2)
+  //  - draft ⇒ noch KEIN versendetes Booklet (kein `finalized` mehr). Der Kunde
+  //    hat abgeholt, aber nichts bekommen ⇒ Warn-Flag `picked_up_at = now()`
+  //    setzen (treibt den roten Badge auf der Auftragskachel). KEINE Mail.
+  //    Idempotent: erneutes Setzen schadet nicht. (Block C / Schritt 2)
   //  - sent/viewed/shared ⇒ Booklet ist bereits raus. NICHTS tun, KEIN Flag,
   //    KEINE Mail. Reparatur-Rückläufer (Kunde war schon abgeholt, kommt zurück,
   //    wird später erneut „Abgeholt") darf weder warnen noch doppelt mailen.
-  if (order.status === "draft" || order.status === "finalized") {
+  if (order.status === "draft") {
     // §13.5/§14.2: service_role, strikt auf die Order + aufgelöste business_id
     // gescoped — NIE aus dem Payload. NICHT-BLOCKIEREND (nur geloggt): scheitert
     // das Update, bleibt der Badge halt aus, der Webhook soll nicht retryen (§12).

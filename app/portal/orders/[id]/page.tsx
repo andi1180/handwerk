@@ -9,10 +9,10 @@ import { CUSTOMER_VIEW_QUERY } from "@/lib/booklet/customer-view";
 import { NO_TRACK_QUERY } from "@/lib/booklet/events";
 import { Capture } from "./capture";
 import { MediaList, type MediaWithUrl } from "./media-list";
-import { FinalizeButton, ReopenButton } from "./finalize-controls";
 import {
-  GenerateButton,
-  GeneratedActions,
+  CreateBookletButton,
+  LockedReelButton,
+  ReopenButton,
   ReelButton,
   type ReelStatus,
 } from "./generate-controls";
@@ -66,7 +66,7 @@ export default async function OrderDetailPage({
 
   // Booklet-Erstellung verlangt mindestens EIN process-Medium (0010) — nur
   // before/after ist nicht erstellbar. Der Client-Guard ist UX; der Server prüft
-  // zusätzlich (finalize/generate ⇒ need_process). Videos sind immer process.
+  // zusätzlich (generate ⇒ need_process). Videos sind immer process.
   const processCount = media.filter((m) => m.category === "process").length;
 
   const supabase = await createClient();
@@ -79,11 +79,11 @@ export default async function OrderDetailPage({
     }),
   );
 
-  // Editier-Modus nur im Entwurf (6c). Abgeschlossene/spätere Stufen sind
-  // read-only. `finalized` lässt sich abschließen/erzeugen, `generated` neu
-  // erzeugen — beide auch wieder öffnen (Reopen), solange nicht versendet.
+  // Editier-Modus nur im Entwurf. Spätere Stufen sind read-only. Es gibt keinen
+  // `finalized`-Zwischenschritt mehr: ein Klick „Booklet erstellen" führt direkt
+  // `draft → generated`; `generated` lässt sich neu erzeugen oder über
+  // „Bearbeiten" (Reopen) wieder öffnen, solange nicht versendet.
   const isDraft = order.status === "draft";
-  const isFinalized = order.status === "finalized";
   const isGenerated = order.status === "generated";
 
   // Versendet-Stufen (sent/viewed/shared): Booklet ist beim Kunden — Ansehen +
@@ -175,12 +175,11 @@ export default async function OrderDetailPage({
         </div>
       </div>
 
-      {/* Sekundäre Booklet-Aktionen (Layout-Umbau, ersetzt die früheren
-          Top-Banner): kleine, dezente Leiste für ALLE Stufen mit Booklet
-          (generated/sent/viewed/shared) — „Booklet ansehen" (`?c=1` Kunden-
-          Sicht §9d + `&p=1` No-Track §10a.1) und „QR drucken" (9c-2); bei
-          `generated` zusätzlich „Neu generieren" + „Bearbeiten". Die große
-          Folge-Aktion (Erstellen/Ausliefern) lebt unten in der Aktionszone. */}
+      {/* Sekundäre Booklet-Aktionen: kleine, dezente Leiste für ALLE Stufen mit
+          Booklet (generated/sent/viewed/shared) — „Booklet ansehen" (`?c=1`
+          Kunden-Sicht §9d + `&p=1` No-Track §10a.1) und „QR drucken" (9c-2). Die
+          großen Folge-Aktionen (Erstellen/Reel/Bearbeiten/Ausliefern) leben
+          unten in der Aktionszone. */}
       {(isGenerated || isDelivered) && bookletToken ? (
         <div
           style={{
@@ -224,7 +223,6 @@ export default async function OrderDetailPage({
           >
             {t(DEFAULT_LOCALE, "qr.printButton")}
           </a>
-          {isGenerated ? <GeneratedActions orderId={order.id} /> : null}
         </div>
       ) : null}
 
@@ -300,42 +298,65 @@ export default async function OrderDetailPage({
         </div>
       </section>
 
-      {/* ───── Aktionszone am Seitenende: immer die nächste fällige Aktion. ───── */}
+      {/* ───── Aktionszone am Seitenende. ───── */}
 
-      {/* draft: „Booklet erstellen" (POSTet finalize — Schritt 1, kein Confirm,
-          kein Chaining; nach dem Refresh erscheint an derselben Stelle Schritt 2). */}
-      {isDraft ? (
-        <FinalizeButton orderId={order.id} processCount={processCount} />
-      ) : null}
+      {/* draft + generated: oben zwei Buttons nebeneinander — links „Booklet
+          erstellen", rechts „Reel erstellen".
+            • draft:     Erstellen aktiv (POSTet generate → draft→generated in
+                         EINEM Schritt); Reel gesperrt (Hinweis bei Klick).
+            • generated: Erstellen grau/erledigt; Reel aktiv (echter Render). */}
+      {isDraft || isGenerated ? (
+        <div
+          style={{
+            marginTop: 32,
+            display: "flex",
+            flexDirection: "column",
+            gap: 12,
+          }}
+        >
+          <div className="booklet-actions-row">
+            <CreateBookletButton
+              orderId={order.id}
+              processCount={processCount}
+              disabled={isGenerated}
+            />
+            {isDraft ? (
+              <LockedReelButton />
+            ) : (
+              <ReelButton
+                orderId={order.id}
+                initialStatus={reelStatus}
+                initialUrl={reelUrl}
+              />
+            )}
+          </div>
 
-      {/* finalized: „Booklet erstellen" (POSTet generate, 8a-1) — mit
-          Fortschritts-Häkchen („Medien abgeschlossen") + kleinem „Bearbeiten"
-          (Reopen). Dient zugleich als Recovery, falls generate scheiterte. */}
-      {isFinalized ? (
-        <div style={{ marginTop: 24 }}>
-          <p
-            style={{
-              margin: 0,
-              fontSize: 13,
-              fontWeight: 600,
-              color: "#8A7320",
-            }}
-          >
-            ✓ {t(DEFAULT_LOCALE, "finalize.done")}
-          </p>
-          <GenerateButton orderId={order.id} processCount={processCount} />
-          <ReopenButton orderId={order.id} />
+          {/* generated: darunter zwei schmälere Buttons — „Bearbeiten" (Reopen,
+              generated→draft) und „Ausliefern" (deliver, unveränderte Logik
+              inkl. Safe-Mode/Connector/Doppelversand-Guard). */}
+          {isGenerated ? (
+            <div className="booklet-actions-row">
+              <ReopenButton orderId={order.id} />
+              <DeliverButton
+                orderId={order.id}
+                hasEmail={Boolean(order.customer_email)}
+                reelReady={reelStatus === "ready"}
+                connectorEnabled={
+                  business?.settings.connector_roapp_enabled ?? true
+                }
+              />
+            </div>
+          ) : null}
         </div>
       ) : null}
 
-      {/* Reel-Block (8b-1a): async Render + Poll, eigener Abschnitt. Ab
-          `generated` und AUCH nach dem Versand (FIX 7.1) — so lässt sich ein
-          Reel nachträglich erzeugen, falls vor dem Render ausgeliefert wurde.
-          Der Render ändert den Order-Status nicht; das Reel erscheint im
-          bestehenden Booklet-Link. */}
-      {canRenderReel ? (
+      {/* sent/viewed/shared: kein „Booklet erstellen"/„Ausliefern" mehr — nur der
+          Reel-Block (FIX 7.1: Reel auch nach dem Versand renderbar; der Render
+          lässt den Order-Status unberührt und erscheint im bestehenden Link).
+          „Booklet ansehen"/„QR drucken" liegen oben in der Aktionsleiste. */}
+      {isDelivered ? (
         <section style={{ marginTop: 32 }}>
-          <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>
+          <h2 style={{ margin: "0 0 12px", fontSize: 16, fontWeight: 700 }}>
             {t(DEFAULT_LOCALE, "reel.title")}
           </h2>
           <ReelButton
@@ -344,17 +365,6 @@ export default async function OrderDetailPage({
             initialUrl={reelUrl}
           />
         </section>
-      ) : null}
-
-      {/* Auslieferung (nur Status generated, 9c-1): die finale Aktion. Warnt,
-          wenn das Reel noch rendert oder keine E-Mail hinterlegt ist (kein Block). */}
-      {isGenerated ? (
-        <DeliverButton
-          orderId={order.id}
-          hasEmail={Boolean(order.customer_email)}
-          reelReady={reelStatus === "ready"}
-          connectorEnabled={business?.settings.connector_roapp_enabled ?? true}
-        />
       ) : null}
     </div>
   );
