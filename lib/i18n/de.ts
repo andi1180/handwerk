@@ -351,7 +351,7 @@ export const de = {
     // Belohnung gekoppelt, keine Sterne-Vorgabe (harter Google-ToS-Verstoß).
     // „Google" trägt im Button der farbige Wortmarken-Schriftzug, daher hier ohne.
     button: "Bewertung schreiben",
-    hint: "Textvorschlag (KI) ist kopiert. Bei Google ins Feld einfügen (paste).",
+    hint: "Textvorschlag (KI) im Clipboard abgelegt - bei Google ins Textfeld tippen und einfügen/paste wählen.",
     copied: "✓ Entwurf kopiert",
   },
   igCaption: {
