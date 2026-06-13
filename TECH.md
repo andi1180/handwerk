@@ -2352,6 +2352,28 @@ Komponenten-Bilanz: `FinalizeBanner` → `ReopenButton` (klein, Aktionszone), `G
 
 ---
 
+## UI-Politur — Betriebs-Logo im Kopf + Refresh-Button (nur Frontend)
+
+Zwei kleine Verbesserungen am Portal. **Keine Migration, keine Logik-/Route-/Isolations-Änderung** — reine Anzeige; alle Daten weiter über den AUTHENTICATED Client (RLS, `business_id` aus Session), kein `<form>`, kein `any`, Server Components wo möglich.
+
+### Geteilter Logo-Helfer ([lib/branding/logo.ts](lib/branding/logo.ts))
+
+`getBusinessLogoUrl(business)` signiert `branding.logo_url` aus dem privaten `branding`-Bucket (1 h, AUTHENTICATED Client) bzw. gibt `null` (kein Logo ⇒ Name-Fallback). **Eine Quelle** für Portal-Shell **und** Dashboard — gleicher Signier-Pfad wie die Settings-Vorschau (7a), aber nicht mehr dupliziert.
+
+### Punkt 3a — Logo in der Mobile-Top-Bar ([app/portal/layout.tsx](app/portal/layout.tsx))
+
+Die schlanke Mobile-Top-Bar zeigte links den Betriebsnamen. Ist ein Logo hochgeladen, steht dort jetzt linksbündig das **signierte Logo** (`.portal-topbar-logo`, `max-height: 32px`, `object-fit: contain`), sonst weiter der Betriebsname (`.portal-topbar-brand`). `eslint-disable @next/next/no-img-element` (signiertes Branding-Asset, Muster wie die bestehenden `<img>`-Stellen). Desktop-Sidebar (Valooro-Logo) **unverändert**.
+
+### Punkt 3b — Dashboard-Kopf statt „Willkommen" ([app/portal/page.tsx](app/portal/page.tsx))
+
+Die `portal.welcome`-Begrüßung (`.dashboard-welcome`) ist **entfernt**. Stattdessen ein konsistenter Seitenkopf (`.dashboard-head`, oben links): Logo (bzw. Betriebsname-Fallback) + `<h1>`-Titel **„Dashboard"** (`dashboard.title`) — gleiche Struktur/Optik wie die „Aufträge"-Überschrift (`.dashboard-title` = `.orders-header h1`). Das Logo wird im bestehenden `Promise.all` (neben Funnel-/Events-Queries) parallel signiert. `header` einmal gebaut, in Leer- **und** Daten-Zustand gerendert. `portal.welcome` bleibt im Dictionary (harmlos ungenutzt).
+
+### Punkt 4 — Refresh-Button der Auftragsliste ([components/orders-refresh-button.tsx](components/orders-refresh-button.tsx))
+
+Neue Client-Komponente (`"use client"`, einzige Insel auf der Server-Component-Seite): Icon-Button (Kreispfeil) oben rechts in der neuen Titelzeile (`.orders-title-row`: h1 links, Button rechts, `space-between`). Klick ⇒ `router.refresh()` in `useTransition` ⇒ holt per Webhook frisch angelegte Aufträge nach, ohne vollen Reload; während des Übergangs `disabled` + `data-pending="true"` ⇒ rotierendes Icon (`@keyframes orders-refresh-spin`, `prefers-reduced-motion`-fest). i18n `orders.refresh` (aria-label/title). Dezent (40×40 rund, `--border` → Hover `--gold-border`), auf Mobile gut erreichbar. `pnpm typecheck` + `pnpm build` grün.
+
+---
+
 ## Launch-Fahrplan & deferierte Härtung
 
 Detail-Referenz für die Risikobewertung: [SECURITY_REVIEW.md](SECURITY_REVIEW.md) (bleibt im Repo). Dieser Abschnitt fasst die **Reihenfolge** des Live-Gangs und die **vor Kunde #2 verpflichtende** Härtung zusammen.

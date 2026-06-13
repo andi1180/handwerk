@@ -11,6 +11,7 @@ import {
 import { OrderStatusFilter } from "@/components/order-status-filter";
 import { OrderQuickFilters } from "@/components/order-quick-filters";
 import { OrdersPagination } from "@/components/orders-pagination";
+import { OrdersRefreshButton } from "@/components/orders-refresh-button";
 import {
   ReelStatePill,
   type ReelStatus,
@@ -149,9 +150,13 @@ export default async function OrdersPage({
   return (
     <div style={{ maxWidth: 720, margin: "0 auto" }}>
       <div className="orders-header">
-        <h1 style={{ fontSize: 22, fontWeight: 700 }}>
-          {t(DEFAULT_LOCALE, "orders.title")}
-        </h1>
+        <div className="orders-title-row">
+          <h1 style={{ fontSize: 22, fontWeight: 700 }}>
+            {t(DEFAULT_LOCALE, "orders.title")}
+          </h1>
+          {/* Refresh oben rechts: holt per Webhook reingekommene Aufträge nach. */}
+          <OrdersRefreshButton />
+        </div>
 
         {showFilter ? (
           <>

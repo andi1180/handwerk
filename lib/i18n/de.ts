@@ -56,6 +56,7 @@ export const de = {
   },
   orders: {
     title: "Aufträge",
+    refresh: "Aktualisieren",
     new: "Neuer Auftrag",
     empty: "Noch keine Aufträge angelegt.",
     emptyFiltered: "Keine Aufträge für diese Auswahl.",
@@ -351,6 +352,7 @@ export const de = {
   },
   dashboard: {
     // Analytics-Dashboard auf der Startseite (Schritt 10b).
+    title: "Dashboard",
     shareRate: "Teil-Rate",
     shareRateHint:
       "Anteil der ausgelieferten Booklets, die geteilt wurden — die Kernkennzahl.",

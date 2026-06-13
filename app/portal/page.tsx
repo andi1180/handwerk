@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentBusiness } from "@/lib/auth/current-business";
+import { getBusinessLogoUrl } from "@/lib/branding/logo";
 import { DEFAULT_LOCALE, t } from "@/lib/i18n";
 import type { OrderStatus } from "@/components/order-status-badge";
 
@@ -43,16 +44,18 @@ export default async function PortalDashboardPage() {
     return count ?? 0;
   };
 
-  const [delivered, viewedCount, sharedCount, eventsResult] = await Promise.all([
-    countOrders(["sent", "viewed", "shared"]),
-    countOrders(["viewed", "shared"]),
-    countOrders(["shared"]),
-    supabase
-      .from("booklet_events")
-      .select("event_type, channel, ip_hash")
-      .eq("business_id", business.id)
-      .returns<EventRow[]>(),
-  ]);
+  const [delivered, viewedCount, sharedCount, eventsResult, logoUrl] =
+    await Promise.all([
+      countOrders(["sent", "viewed", "shared"]),
+      countOrders(["viewed", "shared"]),
+      countOrders(["shared"]),
+      supabase
+        .from("booklet_events")
+        .select("event_type, channel, ip_hash")
+        .eq("business_id", business.id)
+        .returns<EventRow[]>(),
+      getBusinessLogoUrl(business),
+    ]);
 
   const events = eventsResult.data ?? [];
 
@@ -91,14 +94,26 @@ export default async function PortalDashboardPage() {
   const shareRate =
     delivered > 0 ? Math.round((sharedCount / delivered) * 100) : 0;
 
-  const welcome = t(DEFAULT_LOCALE, "portal.welcome", { name: business.name });
+  // Konsistenter Seitenkopf (analog zur „Aufträge"-Überschrift): Logo bzw.
+  // Betriebsname-Fallback oben links + „Dashboard"-Titel.
+  const header = (
+    <div className="dashboard-head">
+      {logoUrl ? (
+        // eslint-disable-next-line @next/next/no-img-element -- signiertes Branding-Asset (privater Bucket), keine next/image-Optimierung nötig.
+        <img className="dashboard-head-logo" src={logoUrl} alt={business.name} />
+      ) : (
+        <span className="dashboard-head-brand">{business.name}</span>
+      )}
+      <h1 className="dashboard-title">{t(DEFAULT_LOCALE, "dashboard.title")}</h1>
+    </div>
+  );
 
   // Leerer Zustand: noch nichts ausgeliefert UND keine Events.
   const hasData = delivered > 0 || events.length > 0;
   if (!hasData) {
     return (
       <div className="dashboard">
-        <h1 className="dashboard-welcome">{welcome}</h1>
+        {header}
         <div className="card dashboard-empty">
           <p style={{ margin: 0, color: "var(--text-secondary)" }}>
             {t(DEFAULT_LOCALE, "dashboard.empty")}
@@ -115,7 +130,7 @@ export default async function PortalDashboardPage() {
 
   return (
     <div className="dashboard">
-      <h1 className="dashboard-welcome">{welcome}</h1>
+      {header}
 
       {/* Headline: Share-Rate — die Kernkennzahl der Produkt-These. */}
       <section className="card dashboard-hero">

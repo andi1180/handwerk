@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentBusiness } from "@/lib/auth/current-business";
+import { getBusinessLogoUrl } from "@/lib/branding/logo";
 import { DEFAULT_LOCALE, t } from "@/lib/i18n";
 import LogoutButton from "./logout-button";
 import PortalNav, { PortalTabNav } from "./portal-nav";
@@ -41,6 +42,10 @@ export default async function PortalLayout({
     );
   }
 
+  // Logo des Betriebs (privater `branding`-Bucket, server-signiert) für die
+  // Mobile-Top-Bar — fehlt eines, bleibt der Betriebsname als Fallback.
+  const logoUrl = await getBusinessLogoUrl(business);
+
   return (
     <div className="portal-shell">
       {/* Desktop: Sidebar links (auf Mobile per CSS ausgeblendet). */}
@@ -61,9 +66,19 @@ export default async function PortalLayout({
       </aside>
 
       {/* Mobile: schlanke Top-Bar (auf Desktop per CSS ausgeblendet). Logout
-          wohnt jetzt in der Bottom-Tab-Nav (dezent), nicht mehr hier oben. */}
+          wohnt jetzt in der Bottom-Tab-Nav (dezent), nicht mehr hier oben.
+          Logo (sofern hochgeladen) linksbündig, sonst Betriebsname als Fallback. */}
       <header className="portal-topbar">
-        <span className="portal-topbar-brand">{business.name}</span>
+        {logoUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element -- signiertes Branding-Asset (privater Bucket), keine next/image-Optimierung nötig.
+          <img
+            className="portal-topbar-logo"
+            src={logoUrl}
+            alt={business.name}
+          />
+        ) : (
+          <span className="portal-topbar-brand">{business.name}</span>
+        )}
       </header>
 
       <main className="portal-main">{children}</main>

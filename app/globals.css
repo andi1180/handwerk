@@ -244,6 +244,16 @@ body {
     white-space: nowrap;
   }
 
+  /* Betriebs-Logo linksbündig in der Top-Bar (Fallback: Betriebsname). */
+  .portal-topbar-logo {
+    display: block;
+    max-height: 32px;
+    max-width: 160px;
+    width: auto;
+    height: auto;
+    object-fit: contain;
+  }
+
   /* App-artige Bottom-Tab-Nav, daumenreichbar fixiert. */
   .portal-tabnav {
     display: flex;
@@ -352,6 +362,57 @@ body {
 
 .orders-header h1 {
   margin: 0;
+}
+
+/* Titelzeile: „Aufträge"-Überschrift links, Refresh-Button rechts (Punkt 4). */
+.orders-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+}
+
+.orders-refresh {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.orders-refresh:hover {
+  color: var(--text-primary);
+  border-color: var(--gold-border);
+}
+
+.orders-refresh:disabled {
+  cursor: default;
+}
+
+/* Während des Refreshs dreht sich das Icon. */
+.orders-refresh[data-pending="true"] svg {
+  animation: orders-refresh-spin 0.7s linear infinite;
+}
+
+@keyframes orders-refresh-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .orders-refresh[data-pending="true"] svg {
+    animation: none;
+  }
 }
 
 @media (max-width: 768px) {
@@ -677,7 +738,31 @@ body {
   gap: 20px;
 }
 
-.dashboard-welcome {
+/* Seitenkopf: Logo (bzw. Betriebsname-Fallback) + „Dashboard"-Titel, oben
+   links — konsistent zur „Aufträge"-Überschrift (Punkt 3b). */
+.dashboard-head {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.dashboard-head-logo {
+  display: block;
+  max-height: 40px;
+  max-width: 180px;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+}
+
+.dashboard-head-brand {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+
+.dashboard-title {
   margin: 0;
   font-size: 22px;
   font-weight: 700;
