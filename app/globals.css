@@ -227,7 +227,9 @@ body {
     top: 0;
     z-index: 20;
     align-items: center;
-    justify-content: space-between;
+    /* Logo (bzw. Betriebsname) horizontal zentriert; Logout wohnt in der
+       Bottom-Tab-Nav, die Top-Bar trägt nur noch das Branding. */
+    justify-content: center;
     gap: 12px;
     height: var(--portal-topbar-h);
     padding: 0 16px;
@@ -244,7 +246,7 @@ body {
     white-space: nowrap;
   }
 
-  /* Betriebs-Logo linksbündig in der Top-Bar (Fallback: Betriebsname). */
+  /* Betriebs-Logo zentriert in der Top-Bar (Fallback: Betriebsname). */
   .portal-topbar-logo {
     display: block;
     max-height: 32px;
@@ -252,6 +254,13 @@ body {
     width: auto;
     height: auto;
     object-fit: contain;
+  }
+
+  /* Auf Mobile trägt die Top-Bar das Logo — der Dashboard-Kopf würde es ein
+     zweites Mal darunter zeigen, daher hier ausgeblendet (nur der Titel bleibt). */
+  .dashboard-head-logo,
+  .dashboard-head-brand {
+    display: none;
   }
 
   /* App-artige Bottom-Tab-Nav, daumenreichbar fixiert. */
@@ -850,7 +859,8 @@ body {
 .dashboard-head {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
+  align-items: center;
+  text-align: center;
   gap: 8px;
 }
 

@@ -277,13 +277,25 @@
    Hintergrund — so bleiben Texte/Buttons lesbar und das Outro-Design schimmert
    ringsum durch (kompakt, nicht bildschirmfüllend). Innerhalb der Karte gelten
    dunkle Schriftfarben (das Outro selbst ist hell auf dunkel). */
-.booklet-share {
-  /* TODO (später): Hintergrund-Deckkraft/-Farbe der Teilen-Karte pro Betrieb in
-     den Einstellungen konfigurierbar machen (aktuell fest ~88 % Weiß). */
+/* Geteilte „Frosted-Glass"-Karte: halbtransparent weiß + Blur + dunkle Schrift.
+   Genutzt von der Teilen-Karte (Outro) UND dem Intro-Beschreibungstext, damit
+   beide optisch konsistent sind und ein unruhiger Hintergrund den Text nicht
+   schluckt. Die --share-ink*-Vars kaskadieren an die Kind-Elemente. */
+.booklet-frost {
+  /* TODO (später): Hintergrund-Deckkraft/-Farbe der Karten pro Betrieb in den
+     Einstellungen konfigurierbar machen (aktuell fest ~88 % Weiß). */
   --share-surface: rgba(255, 255, 255, 0.88);
   --share-ink: #1a1814;
   --share-ink-soft: rgba(26, 24, 20, 0.62);
   --share-line: rgba(0, 0, 0, 0.13);
+  background: var(--share-surface);
+  border-radius: 18px;
+  box-shadow: 0 10px 34px rgba(0, 0, 0, 0.28);
+  -webkit-backdrop-filter: blur(3px);
+  backdrop-filter: blur(3px);
+}
+
+.booklet-share {
   width: 100%;
   max-width: 360px;
   margin-top: 18px;
@@ -291,11 +303,22 @@
   display: flex;
   flex-direction: column;
   gap: 10px;
-  background: var(--share-surface);
-  border-radius: 18px;
-  box-shadow: 0 10px 34px rgba(0, 0, 0, 0.28);
-  -webkit-backdrop-filter: blur(3px);
-  backdrop-filter: blur(3px);
+}
+
+/* Intro-Beschreibungstext in derselben Frosted-Karte (dunkle Schrift, kein
+   Schatten — der Hintergrund kommt von .booklet-frost). */
+.booklet-desc-card {
+  width: 100%;
+  max-width: 360px;
+  margin-top: 18px;
+  padding: 16px 18px;
+}
+
+.booklet-desc-card .booklet-desc {
+  max-width: none;
+  color: var(--share-ink);
+  opacity: 1;
+  text-shadow: none;
 }
 
 .booklet-share-heading {

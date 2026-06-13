@@ -187,7 +187,7 @@ export function ShareBar({
   const showReview = Boolean(googleReviewUrl && reviewDraft);
 
   return (
-    <div className="booklet-share">
+    <div className="booklet-share booklet-frost">
       <p className="booklet-share-heading">{t(locale, "share.heading")}</p>
 
       {reelSignedUrl ? (

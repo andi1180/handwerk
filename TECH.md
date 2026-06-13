@@ -2427,6 +2427,18 @@ Jedes **Bild** trägt eine **Kategorie**, die den festen Booklet-Aufbau steuert.
 
 ---
 
+## UI-Fixes — Logo-Kopf + Intro-Text-Karte (nur Frontend)
+
+Drei kleine Anzeige-Korrekturen. **Keine Migration, keine Logik-/Route-/Isolations-Änderung.**
+
+- **Fix 1 — doppeltes Dashboard-Logo:** Auf Mobile zeigten Top-Bar (`.portal-topbar-logo`) **und** Dashboard-Kopf (`.dashboard-head-logo`) das Logo untereinander. Der Dashboard-Kopf wird auf Mobile (`@media max-width:768px`) jetzt ausgeblendet (`.dashboard-head-logo`/`.dashboard-head-brand { display:none }`) — die Top-Bar trägt das Logo, der Dashboard-Kopf nur noch den Titel. Auf Desktop (keine Top-Bar) bleibt das Dashboard-Kopf-Logo.
+- **Fix 2 — Logos zentriert:** `.portal-topbar` `justify-content: space-between → center` (Logout sitzt seit dem Logout-Umbau in der Bottom-Tab-Nav, die Top-Bar trägt nur noch das Branding); `.dashboard-head` `align-items: flex-start → center` (+ `text-align: center`). Beide Köpfe zentrieren das Logo konsistent.
+- **Fix 3 — Frosted-Karte hinter dem Intro-Text:** Der Intro-Beschreibungsabsatz (`.booklet-desc`) steckt jetzt in derselben halbtransparent-weißen Blur-Karte wie die Teilen-Sektion (Block A / Punkt 10), damit unruhige Hintergründe den Text nicht schlucken. Die Karten-Optik (`--share-surface`/`--share-ink*`, Background, `backdrop-filter: blur`, Radius, Schatten) ist in eine geteilte Klasse **`.booklet-frost`** gezogen; `.booklet-share` und die neue `.booklet-desc-card` nutzen sie gemeinsam (eine Quelle, konsistent). Im Intro-Text dunkle Schrift (`var(--share-ink)`, kein Text-Schatten). [share-bar.tsx](app/b/[token]/share-bar.tsx) trägt `booklet-share booklet-frost`, [page.tsx](app/b/[token]/page.tsx) wrappt die Beschreibung in `booklet-frost booklet-desc-card`.
+
+`pnpm typecheck` + `pnpm build` grün.
+
+---
+
 ## Launch-Fahrplan & deferierte Härtung
 
 Detail-Referenz für die Risikobewertung: [SECURITY_REVIEW.md](SECURITY_REVIEW.md) (bleibt im Repo). Dieser Abschnitt fasst die **Reihenfolge** des Live-Gangs und die **vor Kunde #2 verpflichtende** Härtung zusammen.

@@ -133,7 +133,9 @@ function IntroSection({
         <h1 className="booklet-title">{title}</h1>
         <div className="booklet-accent" aria-hidden />
         {data.introDescription ? (
-          <p className="booklet-desc">{data.introDescription}</p>
+          <div className="booklet-frost booklet-desc-card">
+            <p className="booklet-desc">{data.introDescription}</p>
+          </div>
         ) : null}
         {data.settings.intro_tagline ? (
           <p className="booklet-tagline">{data.settings.intro_tagline}</p>
