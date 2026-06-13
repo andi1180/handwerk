@@ -676,6 +676,9 @@ function MediaViewer({
 
 /** Read-only-Anzeige der Caption (Abgeschlossen-Modus) — kein Edit, kein KI-Button. */
 function CaptionReadOnly({ media }: { media: MediaWithUrl }) {
+  // Spiegelt displayCaption (caption ?? keyword) — das ist, was der Kunde im
+  // Booklet/Reel sieht; ohne beides bleibt es der „leer"-Hinweis.
+  const shown = media.caption ?? media.keyword;
   return (
     <div
       onClick={(e) => e.stopPropagation()}
@@ -695,10 +698,10 @@ function CaptionReadOnly({ media }: { media: MediaWithUrl }) {
       <span
         style={{
           fontSize: 14,
-          color: media.caption ? "var(--text-primary)" : "var(--text-secondary)",
+          color: shown ? "var(--text-primary)" : "var(--text-secondary)",
         }}
       >
-        {media.caption ?? t(DEFAULT_LOCALE, "captions.empty")}
+        {shown ?? t(DEFAULT_LOCALE, "captions.empty")}
       </span>
     </div>
   );
@@ -714,7 +717,13 @@ function CaptionEditor({
   media: MediaWithUrl;
   onCaptionChange: (id: string, caption: string) => void;
 }) {
-  const [text, setText] = useState(media.caption ?? "");
+  // Vorbefüllung: bereits gespeicherte Caption, sonst das bei der Aufnahme
+  // getippte Stichwort (`keyword`) als initialer, frei editierbarer Text. So
+  // steht der Text direkt IM Feld statt als separate Zeile über einem leeren
+  // Feld. Speichern macht daraus eine echte Caption; ohne Speichern bleibt
+  // `caption` null (Kachel bleibt KI-wählbar, Booklet zeigt das Stichwort via
+  // displayCaption). KI-Generierung überschreibt das Feld später komplett.
+  const [text, setText] = useState(media.caption ?? media.keyword ?? "");
   const [saving, setSaving] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
   const [feedback, setFeedback] = useState<"saved" | "error" | null>(null);
@@ -817,12 +826,6 @@ function CaptionEditor({
           <span>{t(DEFAULT_LOCALE, "captions.regenerate")}</span>
         </button>
       </div>
-
-      {media.keyword ? (
-        <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>
-          {t(DEFAULT_LOCALE, "capture.keyword")}: {media.keyword}
-        </span>
-      ) : null}
 
       <textarea
         className="form-input"
