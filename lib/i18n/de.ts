@@ -199,7 +199,7 @@ export const de = {
       "Das Video ist zu lang (max. {max} Sekunden). Bitte kürzer aufnehmen.",
     keywordOptional: "Stichwort (optional)",
     save: "Speichern",
-    discard: "Verwerfen",
+    discard: "Aufnahme verwerfen",
     uploading: "lädt…",
     error: "Fehler",
     uploadError: "Upload fehlgeschlagen. Bitte erneut.",

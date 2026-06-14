@@ -2604,6 +2604,12 @@ Die Teilen-Sektion im Outro der öffentlichen Web-Story war über die Schritte 9
 
 ---
 
+## i18n: `capture.discard` „Verwerfen" → „Aufnahme verwerfen" ([lib/i18n/de.ts](lib/i18n/de.ts))
+
+Reine i18n-Wertänderung — keine Logik, keine weiteren Dateien, keine Migration. `pnpm typecheck` + `pnpm build` grün.
+
+---
+
 ## Bugfix: „Als Insta/TikTok-Story teilen" brauchte zwei Taps ([share-bar.tsx](app/b/[token]/share-bar.tsx), nur Frontend)
 
 **Bestätigte Ursache.** `handleShareReel` lud die Reel-Datei erst **beim Klick** (`await fetch(reelSignedUrl)` → `blob()` → `new File(...)`) und rief **danach** `navigator.share({ files })`. Das `await` zwischen User-Geste und `navigator.share` verbraucht auf **iOS Safari** die transient activation ⇒ der erste Tap warf `NotAllowedError` (im `catch` geschluckt, kein sichtbarer Effekt), erst der zweite Tap teilte die inzwischen geladene Datei innerhalb der frischen Geste. Klassischer 2-Tap-Fall.
