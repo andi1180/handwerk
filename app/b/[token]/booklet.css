@@ -385,7 +385,7 @@
   color: var(--share-ink);
 }
 
-/* Hauptaktion: Reel teilen — Branding-Farbe, prominent. */
+/* Hauptaktion: Booklet teilen — Branding-Farbe, prominent. */
 .booklet-share-primary {
   display: inline-flex;
   align-items: center;
@@ -416,102 +416,43 @@
   pointer-events: none;
 }
 
-/* Sekundäraktionen: Story / WhatsApp / Link — gleich breite Outline-Kacheln. */
-.booklet-share-row {
-  display: flex;
-  gap: 8px;
-}
-.booklet-share-btn {
-  flex: 1;
+/* Sekundäraktion: „Als Insta/TikTok-Story teilen" (Reel als Datei) — volle
+   Breite, Outline-Pill, eine Spur dezenter als die gold-prominente Hauptaktion. */
+.booklet-share-secondary {
   display: inline-flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 4px;
+  gap: 9px;
   min-height: 42px;
-  padding: 6px 4px;
-  color: var(--share-ink);
-  font-size: 0.72rem;
-  font-weight: 600;
-  text-align: center;
-  cursor: pointer;
-  user-select: none;
+  padding: 9px 16px;
+  border-radius: 999px;
   background: rgba(255, 255, 255, 0.5);
   border: 1px solid var(--share-line);
-  border-radius: 14px;
+  color: var(--share-ink);
+  font-size: 0.92rem;
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
   transition:
     border-color 0.15s ease,
     background 0.15s ease;
 }
-.booklet-share-btn:hover {
+.booklet-share-secondary:hover {
   border-color: var(--bk-primary);
   background: rgba(0, 0, 0, 0.04);
 }
-.booklet-share-btn svg {
+.booklet-share-secondary:active {
+  transform: translateY(1px);
+}
+.booklet-share-secondary[aria-disabled="true"] {
+  opacity: 0.7;
+  pointer-events: none;
+}
+.booklet-share-secondary svg {
   color: var(--bk-primary);
   flex-shrink: 0;
   width: 18px;
   height: 18px;
-}
-
-/* --- IG-Caption-Vorschlag (Schritt 9b) — nahe „Reel teilen", zum Kopieren --- */
-.booklet-ig {
-  width: 100%;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 11px 13px;
-  border: 1px solid var(--share-line);
-  border-radius: 14px;
-  background: rgba(0, 0, 0, 0.03);
-}
-.booklet-ig-head {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 0.78rem;
-  font-weight: 700;
-  letter-spacing: 0.01em;
-  color: var(--share-ink);
-}
-.booklet-ig-head svg {
-  color: var(--bk-primary);
-  flex-shrink: 0;
-}
-.booklet-ig-text {
-  margin: 0;
-  white-space: pre-line;
-  font-size: 0.8rem;
-  line-height: 1.5;
-  color: var(--share-ink);
-  opacity: 0.85;
-}
-.booklet-ig-copy {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 7px;
-  align-self: flex-start;
-  min-height: 34px;
-  padding: 6px 13px;
-  border-radius: 999px;
-  border: 1px solid var(--share-line);
-  color: var(--share-ink);
-  font-size: 0.76rem;
-  font-weight: 600;
-  cursor: pointer;
-  user-select: none;
-  transition:
-    border-color 0.15s ease,
-    background 0.15s ease;
-}
-.booklet-ig-copy:hover {
-  border-color: var(--bk-primary);
-  background: rgba(0, 0, 0, 0.04);
-}
-.booklet-ig-copy svg {
-  color: var(--bk-primary);
-  flex-shrink: 0;
 }
 
 /* --- Google-Bewertung (Schritt 9b, §8.6) — Vorschlag, NIE „einfügen"/Belohnung --- */

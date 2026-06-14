@@ -2582,6 +2582,28 @@ Zwei kleine Korrekturen aus dem Praxistest. Keine Migration, keine Logik-/Routen
 
 ---
 
+## Teilen-Box auf drei Aktionen reduziert ([share-bar.tsx](app/b/[token]/share-bar.tsx), nur Frontend)
+
+Die Teilen-Sektion im Outro der öffentlichen Web-Story war über die Schritte 9a/9b/Block A gewachsen (Reel teilen, IG-Caption-Panel, Story teilen, WhatsApp, Link kopieren, Google-Bewertung) und überlud den Mobile-Screen. Sie wird auf **genau drei Aktionen** verschlankt. **Reine Frontend-Änderung + i18n** — **keine Migration**, **kein** Eingriff in den Event-Endpoint ([app/api/b/[token]/event/route.ts](app/api/b/[token]/event/route.ts)), die Taxonomie ([lib/booklet/events.ts](lib/booklet/events.ts)), den Track-Helfer ([lib/booklet/track.ts](lib/booklet/track.ts)), den Lifecycle oder irgendeinen Status-Pfad. Kein `<form>`, kein `any`. `?c=1`-Gating der Box (§9d) und `p=1`-No-Track (§10a.1) unverändert.
+
+**Ziel-Zustand der Box** (Überschrift „Gefällt's dir? Teile es!" unverändert), in dieser Reihenfolge:
+
+1. **„Booklet teilen"** (PRIMÄR, zuerst) = die bisherige „Story teilen"-Aktion (`handleShareBooklet`, ehem. `handleShareStory`): `navigator.share({ url })` mit der **nackten** `storyUrl` (ohne Marker, §9d), Fallback = Link kopieren. Feuert **unverändert** `shared/story`. Nur umbenannt + nach oben gezogen; nutzt jetzt `.booklet-share-primary` (gold, prominent). Bei Copy-Fallback zeigt der Button kurz „✓ Link kopiert" (`copiedKey === "link"`, reuse `share.copied`).
+2. **„Als Insta/TikTok-Story teilen"** (zweitens) = die bisherige „Reel teilen"-Aktion (`handleShareReel`, unverändert): Reel als **Datei** via `navigator.share({ files })` → IG/TikTok-Composer; ohne File-Sharing (Desktop) Fallback = Download. **Reel-Existenz-Gating beibehalten** (nur sichtbar, wenn `reelSignedUrl` gesetzt). Feuert **unverändert** `shared/reel`. Nur umbenannt; neue, dezentere `.booklet-share-secondary`-Outline-Pill (volle Breite, ersetzt die Kachel-Reihe).
+3. **„Google-Bewertung schreiben"** = **unverändert** (`writeReview`, `link_click/review`, §8.6: Vorschlag/in deinen Worten, kein Belohnungsbezug).
+
+**Aus der UI entfernt (nur die Buttons):** „Story teilen" als eigener Outline-Button (wird zu #1), „WhatsApp" (`wa.me`, `shared/whatsapp`), „Link kopieren" (`shared/copy`) und das bereits per `SHOW_IG_CAPTION = false` ausgeblendete IG-Caption-Panel (`link_click/ig`). Entfernte Handler: `handleWhatsApp`, `handleCopyLink`, `copyIgCaption`; entfernte Icons: `SendIcon`, `WhatsAppIcon`, `LinkIcon`, `CopyIcon` (jetzt #1 = `ShareIcon`, #2 = `InstagramIcon`). `igCaption`-Prop aus `<ShareBar>` entfernt ([page.tsx](app/b/[token]/page.tsx) reicht sie nicht mehr durch; `data.igCaption` wird in [load.ts](lib/booklet/load.ts) weiterhin geladen, nur nicht angezeigt — Generierung `buildIgCaption` unangetastet). `CopiedKey` von `"link" | "ig" | "review"` auf `"link" | "review"` verengt.
+
+**Taxonomie NICHT angefasst:** Die Channels `whatsapp`/`copy`/`ig` bleiben in [lib/booklet/events.ts](lib/booklet/events.ts) **gültig** (Whitelist unverändert) — nur die UI feuert sie nicht mehr; historische Daten + das Dashboard (`dashboard.whatsapp`/`copy`/`ig`) bleiben intakt.
+
+**i18n** ([lib/i18n/de.ts](lib/i18n/de.ts)): neuer Key `share.shareBooklet` („Booklet teilen"); `share.shareReel` umbenannt auf „Als Insta/TikTok-Story teilen"; verwaiste Keys entfernt (`share.shareStory`, `share.whatsapp`, `share.copyLink` und der komplette `igCaption.*`-Block — alle sauber ungenutzt). `share.download`/`copied`/`sharing`/`shareTitle`/`message` bleiben.
+
+**CSS** ([booklet.css](app/b/[token]/booklet.css)): neue `.booklet-share-secondary` (volle Breite, Outline-Pill); verwaiste `.booklet-share-row`/`.booklet-share-btn` und der `.booklet-ig*`-Block entfernt; `.booklet-share-primary`-Kommentar von „Reel teilen" auf „Booklet teilen" angepasst.
+
+`pnpm typecheck` + `pnpm build` grün.
+
+---
+
 ## Launch-Fahrplan & deferierte Härtung
 
 Detail-Referenz für die Risikobewertung: [SECURITY_REVIEW.md](SECURITY_REVIEW.md) (bleibt im Repo). Dieser Abschnitt fasst die **Reihenfolge** des Live-Gangs und die **vor Kunde #2 verpflichtende** Härtung zusammen.

@@ -272,9 +272,9 @@ function OutroSection({
           <p className="booklet-outro-message">{data.settings.outro_message}</p>
         ) : null}
 
-        {/* §9d: Teilen-Sektion (+ IG-Caption + Review) NUR in der Kunden-Sicht
-            (markierter Link `?c=1`). Empfänger des nackten Links sehen das
-            normale Settings-Outro ohne Teilen-Schicht. */}
+        {/* §9d: Teilen-Sektion (Booklet/Reel teilen + Google-Bewertung) NUR in
+            der Kunden-Sicht (markierter Link `?c=1`). Empfänger des nackten
+            Links sehen das normale Settings-Outro ohne Teilen-Schicht. */}
         {isCustomerView ? (
           <ShareBar
             token={token}
@@ -282,7 +282,6 @@ function OutroSection({
             reelSignedUrl={reelSignedUrl}
             reviewDraft={data.reviewDraft}
             googleReviewUrl={data.settings.google_review_url}
-            igCaption={data.igCaption}
             locale={locale}
           />
         ) : null}

@@ -332,14 +332,14 @@ export const de = {
   },
   share: {
     heading: "Gefällt's dir? Teile es!",
-    shareReel: "Reel teilen",
+    // Button 1 (PRIMÄR): Story-URL teilen, Fallback = Link kopieren.
+    shareBooklet: "Booklet teilen",
+    // Button 2: Reel als Datei → IG/TikTok-Composer (Fallback = Download).
+    shareReel: "Als Insta/TikTok-Story teilen",
     download: "Reel herunterladen",
-    shareStory: "Story teilen",
-    whatsapp: "WhatsApp",
-    copyLink: "Link kopieren",
     copied: "✓ Link kopiert",
     sharing: "Wird vorbereitet…",
-    // Titel/Text für navigator.share + WhatsApp-Deeplink (Kunden-Perspektive).
+    // Titel/Text für navigator.share (Kunden-Perspektive).
     shareTitle: "Mein Booklet",
     // Fester, schlichter Teilen-Text (kein dynamischer Kontext) — neugierig
     // machend, nicht spammy. Sprache = Booklet-Sprache.
@@ -353,11 +353,6 @@ export const de = {
     button: "Bewertung schreiben",
     hint: "Textvorschlag (KI) im Clipboard abgelegt - bei Google ins Textfeld tippen und einfügen/paste wählen.",
     copied: "✓ Entwurf kopiert",
-  },
-  igCaption: {
-    label: "Instagram-Caption",
-    copy: "Caption kopieren",
-    copied: "✓ Kopiert",
   },
   qr: {
     // QR-Druckansicht (9c-2): Handover am Tresen. Der QR kodiert den
