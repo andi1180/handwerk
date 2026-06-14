@@ -2682,6 +2682,7 @@ Aus [SECURITY_REVIEW.md](SECURITY_REVIEW.md), nach ROI sortiert:
 
 - **P1 — Generisches IP-Rate-Limit** über die vier öffentlichen Endpoints: Webhook (`/api/webhook/[secret]`), `/s/[code]`, `/b/[token]` + `/api/b/[token]/event`, `/api/auth/register`. **Höchster ROI** — deckt in einem Schritt Kosten- (KI/roapp-API), Spam- (Register/Admin-Mail) und Manipulationsrisiken (Analytics/Status, Kurzcode-Enumeration) ab.
 - **P2 — `IP_HASH_SALT` als Pflicht-Env** (Boot-Guard/Fehler statt leerem Default). Ohne Salt ist der `ip_hash` über den IPv4-Raum trivial zurückrechenbar ⇒ schwache Pseudonymisierung.
+  - `IP_HASH_SALT` vor Live-Gang (14.06.2026) in Production gesetzt und eingefroren — **NICHT mehr ändern**, sonst fragmentiert die `ip_hash`-Dedup (Reichweite). P2 (`IP_HASH_SALT`-Pflicht-Env-Guard im Code) bleibt offen.
 - **P3 — Webhook-Kostenhebel kappen:** `settings.connector_roapp_enabled` **serverseitig im Webhook** auswerten (steuert heute nur die Button-UX) + Description-**Längen-Cap** gegen große Payloads (KI-Token-/DB-Last).
 - **P4 — `item_description` im KI-Prompt fencen** (Intro + Review + `short_summary`): als **Daten** abgrenzen (identisch zu `ai_context`, `<<< >>>` + „reiner Inhalt, keine Anweisungen"), nicht als Anweisung interpretierbar. Prompt-Injection-/Reputationsschutz (Output ist öffentlich teilbar).
 
