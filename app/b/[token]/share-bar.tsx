@@ -46,25 +46,60 @@ export function ShareBar({
   locale: Locale;
 }) {
   const [copiedKey, setCopiedKey] = useState<CopiedKey | null>(null);
-  const [reelBusy, setReelBusy] = useState(false);
   // Optimistisch: die Zielgruppe (Kunde am Handy) kann i. d. R. Dateien teilen.
   // Nach dem Mount per Capability-Probe ggf. auf „Herunterladen" korrigiert.
   const [canShareFiles, setCanShareFiles] = useState(true);
+  // Die fertig vorab geladene Reel-Datei (Prefetch) — bereit, sobald gesetzt.
+  const reelFileRef = useRef<File | null>(null);
+  const [reelReady, setReelReady] = useState(false);
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Capability-Probe + Reel-PREFETCH beim Mount.
+  //
+  // Auf iOS Safari verbraucht ein `await` zwischen User-Geste und
+  // `navigator.share` die transient activation → der erste Tap wirft (geschluckt),
+  // erst der zweite teilt. Deshalb laden wir die Reel-Datei VORAB in einen Ref,
+  // damit der Klick-Handler `navigator.share({ files })` SYNCHRON aus der Geste
+  // aufrufen kann. Die ShareBar rendert nur in der Kunden-Sicht (?c=1), also genau
+  // für den beabsichtigten Teiler — der Prefetch-Cost fällt nicht bei Empfängern an.
   useEffect(() => {
+    let canShare = false;
     try {
       const probe = new File([new Blob([], { type: "video/mp4" })], "probe.mp4", {
         type: "video/mp4",
       });
-      setCanShareFiles(
+      canShare =
         typeof navigator.canShare === "function" &&
-          navigator.canShare({ files: [probe] }),
-      );
+        navigator.canShare({ files: [probe] });
     } catch {
-      setCanShareFiles(false);
+      canShare = false;
     }
-  }, []);
+    setCanShareFiles(canShare);
+
+    // Prefetch nur, wenn ein Reel vorliegt UND Datei-Sharing möglich ist
+    // (sonst greift der Download-Fallback, der die URL direkt nutzt).
+    if (!reelSignedUrl || !canShare) return;
+    let cancelled = false;
+    const controller = new AbortController();
+    void (async () => {
+      try {
+        const res = await fetch(reelSignedUrl, { signal: controller.signal });
+        if (!res.ok) throw new Error(`fetch ${res.status}`);
+        const blob = await res.blob();
+        if (cancelled) return;
+        reelFileRef.current = new File([blob], "reel.mp4", { type: "video/mp4" });
+        setReelReady(true);
+      } catch {
+        // Prefetch fehlgeschlagen (Netz/CORS/Abbruch) → auf Download-Fallback
+        // herabstufen: Button wird wieder bedienbar, Klick lädt herunter.
+        if (!cancelled) setCanShareFiles(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [reelSignedUrl]);
 
   useEffect(
     () => () => {
@@ -127,40 +162,39 @@ export function ShareBar({
     }
   }
 
-  /** „Als Insta/TikTok-Story teilen": Reel als Datei, Fallback = Download. */
-  async function handleShareReel() {
-    if (!reelSignedUrl || reelBusy) return;
+  /**
+   * „Als Insta/TikTok-Story teilen": Reel als Datei, Fallback = Download.
+   *
+   * SYNCHRON aus der Geste — KEIN await vor `navigator.share` (sonst geht auf
+   * iOS Safari die transient activation verloren ⇒ Doppel-Tap). Die Datei wurde
+   * beim Mount vorab geladen; solange das läuft, ist der Button disabled.
+   */
+  function handleShareReel() {
+    if (!reelSignedUrl || reelLoading) return;
     // Reel teilen/Download zählt als shared/reel (Intent, unabhängig vom Pfad).
     trackBookletEvent(token, "shared", "reel");
-    setReelBusy(true);
-    try {
-      const res = await fetch(reelSignedUrl);
-      if (!res.ok) throw new Error(`fetch ${res.status}`);
-      const blob = await res.blob();
-      const file = new File([blob], "reel.mp4", { type: "video/mp4" });
 
-      if (
-        typeof navigator.canShare === "function" &&
-        navigator.canShare({ files: [file] }) &&
-        typeof navigator.share === "function"
-      ) {
-        try {
-          await navigator.share({ files: [file], title: t(locale, "share.shareTitle") });
-        } catch {
+    const file = reelFileRef.current;
+    if (
+      file &&
+      typeof navigator.canShare === "function" &&
+      navigator.canShare({ files: [file] }) &&
+      typeof navigator.share === "function"
+    ) {
+      navigator
+        .share({ files: [file], title: t(locale, "share.shareTitle") })
+        .catch(() => {
           // Abbruch durch den Nutzer ist kein Fehler — kein Toast, kein Download.
-        }
-      } else {
-        downloadReel(reelSignedUrl);
-      }
-    } catch {
-      // Blob-Fetch fehlgeschlagen (Netz/CORS) → Download-Fallback.
-      downloadReel(reelSignedUrl);
-    } finally {
-      setReelBusy(false);
+        });
+      return;
     }
+    // Keine teilbare Datei (kein File-Sharing / Prefetch verworfen) → Download.
+    downloadReel(reelSignedUrl);
   }
 
   const showReview = Boolean(googleReviewUrl && reviewDraft);
+  // Datei-Share-Pfad, aber Prefetch noch nicht fertig → Button disabled/Ladezustand.
+  const reelLoading = canShareFiles && !reelReady;
 
   return (
     <div className="booklet-share booklet-frost">
@@ -179,11 +213,11 @@ export function ShareBar({
         <Pressable
           className="booklet-share-secondary"
           onPress={handleShareReel}
-          disabled={reelBusy}
+          disabled={reelLoading}
         >
           <InstagramIcon />
           <span>
-            {reelBusy
+            {reelLoading
               ? t(locale, "share.sharing")
               : canShareFiles
                 ? t(locale, "share.shareReel")

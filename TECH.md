@@ -2604,6 +2604,22 @@ Die Teilen-Sektion im Outro der öffentlichen Web-Story war über die Schritte 9
 
 ---
 
+## Bugfix: „Als Insta/TikTok-Story teilen" brauchte zwei Taps ([share-bar.tsx](app/b/[token]/share-bar.tsx), nur Frontend)
+
+**Bestätigte Ursache.** `handleShareReel` lud die Reel-Datei erst **beim Klick** (`await fetch(reelSignedUrl)` → `blob()` → `new File(...)`) und rief **danach** `navigator.share({ files })`. Das `await` zwischen User-Geste und `navigator.share` verbraucht auf **iOS Safari** die transient activation ⇒ der erste Tap warf `NotAllowedError` (im `catch` geschluckt, kein sichtbarer Effekt), erst der zweite Tap teilte die inzwischen geladene Datei innerhalb der frischen Geste. Klassischer 2-Tap-Fall.
+
+**Fix — Datei vorab laden, Share synchron aus der Geste.** Reine Frontend-Änderung; **keine Migration**, **kein** Eingriff in Event-Endpoint/Track-Helfer/Lifecycle/Taxonomie; `?c=1`/`p=1`-Verhalten unverändert, kein `<form>`, kein `any`.
+
+- **Prefetch beim Mount:** der bestehende Capability-Probe-`useEffect` lädt jetzt zusätzlich — **nur** wenn `reelSignedUrl` gesetzt **und** Datei-Sharing möglich (`canShare`) — die Reel-Datei (`fetch` → `blob` → `File`) in einen `reelFileRef` (`AbortController` + `cancelled`-Guard fürs Cleanup). Die ShareBar rendert nur in der Kunden-Sicht (`?c=1`), also genau für den beabsichtigten Teiler — der Prefetch-Cost fällt **nicht** bei den Empfängern an.
+- **Synchroner Handler:** `handleShareReel` ist nicht mehr `async`; es ruft `navigator.share({ files: [reelFileRef.current], title })` **synchron** aus der Geste (kein `await` davor), `.catch()` schluckt nur den Nutzer-Abbruch. `reelBusy` entfällt.
+- **Ladezustand statt 2. Tap:** neuer abgeleiteter `reelLoading = canShareFiles && !reelReady` ⇒ Button `disabled` (vorhandenes `[aria-disabled]`-CSS: `opacity .7` + `pointer-events: none`) mit Label `share.sharing` („Wird vorbereitet…"), solange der Prefetch läuft. Damit kann gar nicht vor Bereitschaft getippt werden — der 2-Tap-Fall ist eliminiert.
+- **Prefetch-Fehler (Netz/CORS):** `setCanShareFiles(false)` ⇒ Button degradiert sauber auf den **Download-Fallback** (nutzt die URL direkt), bleibt bedienbar statt dauerhaft disabled.
+- **Unverändert:** Download-Fallback (kein `canShare`/Desktop, Anchor mit `download`), Capability-Probe + optimistische Label-Logik (`shareReel` vs. `download`), `shared/reel`-Event feuert weiter beim Tippen, „nur sichtbar wenn `reelSignedUrl`". Keine CSS-Änderung nötig (der Disabled-Look existierte bereits).
+
+`pnpm typecheck` + `pnpm build` grün.
+
+---
+
 ## Reichweiten-/VIP-Analyse auf dem Dashboard + CSV-Export
 
 Eine zweite Analytics-Sektion auf der `/portal`-Startseite — **pro-Kunde** statt nur business-weit (10b): welcher Auftrag wie viele Personen erreicht hat (eindeutige Aufrufe), plus Gesamt-Öffnungen und Teilen-Aktivitäten, mit Datumsbereich-/Sortier-Filter und CSV-Export der vollen Liste. **Keine Migration.** Ausschließlich über den **AUTHENTICATED Client** (RLS) + defensiver `business_id`-Filter — **KEIN** `service_role`, `business_id` **nur** aus der Session. **KEIN RPC/View** — Aggregation in TypeScript im Server Component, analog zum bestehenden Dashboard (10b).
