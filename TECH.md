@@ -2604,6 +2604,45 @@ Die Teilen-Sektion im Outro der öffentlichen Web-Story war über die Schritte 9
 
 ---
 
+## Reichweiten-/VIP-Analyse auf dem Dashboard + CSV-Export
+
+Eine zweite Analytics-Sektion auf der `/portal`-Startseite — **pro-Kunde** statt nur business-weit (10b): welcher Auftrag wie viele Personen erreicht hat (eindeutige Aufrufe), plus Gesamt-Öffnungen und Teilen-Aktivitäten, mit Datumsbereich-/Sortier-Filter und CSV-Export der vollen Liste. **Keine Migration.** Ausschließlich über den **AUTHENTICATED Client** (RLS) + defensiver `business_id`-Filter — **KEIN** `service_role`, `business_id` **nur** aus der Session. **KEIN RPC/View** — Aggregation in TypeScript im Server Component, analog zum bestehenden Dashboard (10b).
+
+### Geteilte Aggregation ([lib/analytics/reach.ts](lib/analytics/reach.ts))
+
+EINE Quelle für Seite (Top 10) **und** CSV-Export (volle Liste) — `loadReachRows(supabase, businessId, { from, to, sort })`. Drei Queries (RLS + defensiver `business_id`-Filter), dann TS-Aggregation:
+
+- **Zeilen** = `orders` mit `status ∈ {sent, viewed, shared}`, die ein **Booklet** haben (1:1 über `order_id`; das Booklet liefert `booklet_id` für die Event-Aggregation **und** `sent_at` als Versanddatum). Aufträge ohne Booklet werden übersprungen.
+- **Events**: EINE `booklet_events`-Query (`booklet_id, event_type, ip_hash`) im optionalen Datumsbereich — `from` ⇒ `gte created_at $from T00:00Z`, `to` **inklusiv** ⇒ `lt created_at` (Folgetag 00:00Z, UTC-Grenzen; bewusst MVP-pragmatisch). Ohne Filter = alle. Je `booklet_id` aggregiert: **Reichweite** = distinct nicht-null `ip_hash` unter `event_type='viewed'` (JS-`Set`), **Gesamt-Öffnungen** = `count(viewed)` (roh, inkl. null-IP), **Teilen-Aktivitäten** = `count(shared)` (alle Kanäle). Booklets ohne Events im Zeitraum ⇒ 0.
+- **Sortierung** nach der Aggregation (`sort`): `reichweite` (Default, desc) | `oeffnungen` (desc) | `teilen` (desc) | `versanddatum` (desc, null ans Ende) | `name` (A–Z, `localeCompare("de")`); Sekundärschlüssel immer Name (deterministisch).
+
+`ReachSort`/`REACH_SORTS`/`isReachSort` + `DEFAULT_REACH_SORT`, `parseDateParam` (YYYY-MM-DD, Round-trip-Check gegen unmögliche Tage ⇒ null) und `formatReachDate` (ISO → TT.MM.JJJJ) liegen ebenfalls hier (geteilt von Seite + Export). Der Client-Typ kommt via `Awaited<ReturnType<typeof createClient>>` (kein `any`).
+
+### Spalten (Tabelle + CSV, gleiche Reihenfolge)
+
+Kundenname | E-Mail | roapp-Nr. (`external_ref`) | Beschreibung (`short_summary ?? item_description`) | Booklet-Versanddatum (`booklets.sent_at`) | Reichweite (eindeutig) | Gesamt-Öffnungen | Teilen-Aktivitäten.
+
+### Filter (server-seitig über URL-Search-Params, kein `<form>`)
+
+[components/reach-filter-bar.tsx](components/reach-filter-bar.tsx) (kleine Client-Insel): zwei `type="date"`-Inputs (von/bis, wirken auf `event.created_at`, Default = alles) + ein Sortier-`<select>`. Jede Änderung setzt den jeweiligen Param via **`router.replace`** (bestehende Params bleiben über `useSearchParams` erhalten) — der Server (Dashboard-Server-Component) filtert/sortiert dann. Sortier-Labels über statische `Record<ReachSort, …>`-Map (Muster wie die Quick-Filter, typsicherer `t`-Key).
+
+### UI ([app/portal/page.tsx](app/portal/page.tsx))
+
+Die Seite liest jetzt `searchParams` (`from`/`to`/`sort`, Next-15-`Promise`), parst sie und ruft `loadReachRows`. Neue `<ReachSection>` (Server Component im selben File, Muster wie `Stat`/`BarRow`) unter dem bestehenden `.dashboard-grid`: Kopf (Titel „Reichweite / VIP-Analyse" + Hinweis + Export-Button), Filter-Leiste, Tabelle mit den **TOP-10** Zeilen nach aktueller Sortierung (`rows.slice(0,10)`). Leeres Ergebnis ⇒ Hinweis (`reach.empty`), Filter-Leiste bleibt. Die Sektion erscheint im Daten-Zustand des Dashboards (der `!hasData`-Early-Return für komplett leere Betriebe bleibt unberührt). 8-Spalten-Tabelle horizontal scrollbar auf schmalen Viewports (`.reach-table-wrap { overflow-x:auto }`).
+
+### Export-Route ([app/portal/analytics/reichweite/export/route.ts](app/portal/analytics/reichweite/export/route.ts), GET)
+
+AUTHENTICATED (kein User ⇒ 401, kein Betrieb ⇒ 403) + RLS + business-scoped über **dieselbe** `loadReachRows`-Aggregation, honoriert `?from=`/`?to=`/`?sort=` wie die Seite (Export-Anchor = `<a download>` mit den aktuellen Params, lädt die **VOLLE** Liste, nicht nur die 10). Liegt unter `/portal/*` ⇒ Middleware-Schutz greift zusätzlich. **Ausgabe** `text/csv; charset=utf-8`, **UTF-8-BOM (U+FEFF) vorangestellt**, **Semikolon-getrennt**, **CRLF**-Zeilenenden, deutsche Header-Zeile; Felder mit `;`/`"`/Zeilenumbruch in `"…"` gequotet (interne `"` verdoppelt, RFC-4180-Stil). `Content-Disposition: attachment; filename="reichweite_<YYYY-MM-DD>.csv"`. **BOM + Semikolon, damit österreichisches Excel Umlaute und Spalten korrekt öffnet.** Der Export enthält Name + E-Mail (eigene Kundendaten des Betriebs, DSGVO-konform) — kein zusätzliches Gate nötig.
+
+### i18n & CSS
+
+- i18n-Block `reach.*` in [lib/i18n/de.ts](lib/i18n/de.ts): `title`/`hint`/`export`/`empty`, Filter (`from`/`to`/`sort` + `sortReach`/`sortOpens`/`sortShares`/`sortSent`/`sortName`), Spalten (`colCustomer`/`colEmail`/`colRef`/`colDescription`/`colSentAt`/`colReach`/`colOpens`/`colShares`). Die CSV-Header sind bewusst ausführlicher (Route-lokal), keine Inline-Strings im JSX.
+- CSS: `.reach-*` in [app/globals.css](app/globals.css) (Kopf, Filter-Leiste, scrollbare Tabelle, Zahl-/Muted-/Strong-Zellen).
+
+`pnpm typecheck` + `pnpm build` grün.
+
+---
+
 ## Launch-Fahrplan & deferierte Härtung
 
 Detail-Referenz für die Risikobewertung: [SECURITY_REVIEW.md](SECURITY_REVIEW.md) (bleibt im Repo). Dieser Abschnitt fasst die **Reihenfolge** des Live-Gangs und die **vor Kunde #2 verpflichtende** Härtung zusammen.

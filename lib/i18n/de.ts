@@ -389,4 +389,29 @@ export const de = {
     empty:
       "Noch keine Daten. Sobald Booklets ausgeliefert und angesehen werden, erscheinen hier die Kennzahlen.",
   },
+  reach: {
+    // Reichweiten-/VIP-Analyse-Sektion auf dem Dashboard.
+    title: "Reichweite / VIP-Analyse",
+    hint: "Pro Kunde: Reichweite (eindeutige Aufrufe), Gesamt-Öffnungen und Teilen-Aktivitäten der ausgelieferten Booklets. Zeitraum optional einschränken.",
+    export: "Als CSV exportieren",
+    empty: "Noch keine ausgelieferten Booklets.",
+    // Filter-Leiste.
+    from: "Von",
+    to: "Bis",
+    sort: "Sortierung",
+    sortReach: "Reichweite",
+    sortOpens: "Öffnungen",
+    sortShares: "Teilen",
+    sortSent: "Versanddatum",
+    sortName: "Name (A–Z)",
+    // Tabellen-Spalten (kompakt; der CSV-Export nutzt ausführlichere Header).
+    colCustomer: "Kundenname",
+    colEmail: "E-Mail",
+    colRef: "roapp-Nr.",
+    colDescription: "Beschreibung",
+    colSentAt: "Versanddatum",
+    colReach: "Reichweite",
+    colOpens: "Öffnungen",
+    colShares: "Teilen",
+  },
 } as const;

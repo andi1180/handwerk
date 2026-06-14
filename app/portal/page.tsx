@@ -2,6 +2,16 @@ import { createClient } from "@/lib/supabase/server";
 import { getCurrentBusiness } from "@/lib/auth/current-business";
 import { DEFAULT_LOCALE, t } from "@/lib/i18n";
 import type { OrderStatus } from "@/components/order-status-badge";
+import { ReachFilterBar } from "@/components/reach-filter-bar";
+import {
+  DEFAULT_REACH_SORT,
+  formatReachDate,
+  isReachSort,
+  loadReachRows,
+  parseDateParam,
+  type ReachRow,
+  type ReachSort,
+} from "@/lib/analytics/reach";
 
 /** Rohzeile der Events-Query (nur die für die Aggregation nötigen Felder). */
 type EventRow = {
@@ -28,11 +38,23 @@ type ClickChannel = (typeof CLICK_CHANNELS)[number];
  * Single-fetch + JS-Aggregation ist bewusst MVP — bei Skalierung später ein
  * SQL-Aggregat/RPC (dann mit der REVOKE-EXECUTE-Konvention, §14.3). Jetzt nicht.
  */
-export default async function PortalDashboardPage() {
+export default async function PortalDashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ from?: string; to?: string; sort?: string }>;
+}) {
   const business = await getCurrentBusiness();
   if (!business) return null;
 
   const supabase = await createClient();
+
+  // Reichweiten-/VIP-Analyse-Filter aus den URL-Params (server-seitig).
+  const { from: fromParam, to: toParam, sort: sortParam } = await searchParams;
+  const reachFrom = parseDateParam(fromParam);
+  const reachTo = parseDateParam(toParam);
+  const reachSort: ReachSort = isReachSort(sortParam)
+    ? sortParam
+    : DEFAULT_REACH_SORT;
 
   const countOrders = async (statuses: OrderStatus[]): Promise<number> => {
     const { count } = await supabase
@@ -120,6 +142,15 @@ export default async function PortalDashboardPage() {
   // zum größten Wert (1 als Untergrenze gegen Division durch 0).
   const maxShare = Math.max(1, ...SHARE_CHANNELS.map((c) => shares[c]));
   const maxClick = Math.max(1, ...CLICK_CHANNELS.map((c) => clicks[c]));
+
+  // Reichweiten-/VIP-Analyse: ausgelieferte Booklets je mit Engagement im
+  // gewählten Zeitraum. Geteilte Aggregation (lib/analytics/reach.ts) — dieselbe
+  // Quelle wie der CSV-Export; die Seite zeigt die Top 10 nach Sortierung.
+  const reachRows = await loadReachRows(supabase, business.id, {
+    from: reachFrom,
+    to: reachTo,
+    sort: reachSort,
+  });
 
   return (
     <div className="dashboard">
@@ -221,7 +252,113 @@ export default async function PortalDashboardPage() {
           ))}
         </section>
       </div>
+
+      <ReachSection
+        rows={reachRows}
+        from={reachFrom ?? ""}
+        to={reachTo ?? ""}
+        sort={reachSort}
+      />
     </div>
+  );
+}
+
+/** Baut den Export-Link mit den aktuellen Filter-Params (Default-Sort inklusive). */
+function buildReachExportHref(q: {
+  from: string | null;
+  to: string | null;
+  sort: ReachSort;
+}): string {
+  const params = new URLSearchParams();
+  if (q.from) params.set("from", q.from);
+  if (q.to) params.set("to", q.to);
+  params.set("sort", q.sort);
+  return `/portal/analytics/reichweite/export?${params.toString()}`;
+}
+
+/**
+ * Reichweiten-/VIP-Analyse-Sektion (Server Component): Filter-Leiste +
+ * Export-Button + Tabelle mit den TOP-10 Zeilen nach aktueller Sortierung. Der
+ * Export-Anchor lädt die VOLLE gefilterte+sortierte Liste über die Route.
+ */
+function ReachSection({
+  rows,
+  from,
+  to,
+  sort,
+}: {
+  rows: ReachRow[];
+  from: string;
+  to: string;
+  sort: ReachSort;
+}) {
+  const top = rows.slice(0, 10);
+  const exportHref = buildReachExportHref({
+    from: from || null,
+    to: to || null,
+    sort,
+  });
+
+  return (
+    <section className="card reach">
+      <div className="reach-head">
+        <div>
+          <h2 className="dashboard-section-title" style={{ marginBottom: 4 }}>
+            {t(DEFAULT_LOCALE, "reach.title")}
+          </h2>
+          <p className="reach-hint">{t(DEFAULT_LOCALE, "reach.hint")}</p>
+        </div>
+        {/* Export der VOLLEN Liste (nicht nur Top 10) mit den aktuellen Params. */}
+        <a className="btn-outline reach-export" href={exportHref} download>
+          {t(DEFAULT_LOCALE, "reach.export")}
+        </a>
+      </div>
+
+      <ReachFilterBar from={from} to={to} sort={sort} />
+
+      {top.length === 0 ? (
+        <p className="reach-empty">{t(DEFAULT_LOCALE, "reach.empty")}</p>
+      ) : (
+        <div className="reach-table-wrap">
+          <table className="reach-table">
+            <thead>
+              <tr>
+                <th>{t(DEFAULT_LOCALE, "reach.colCustomer")}</th>
+                <th>{t(DEFAULT_LOCALE, "reach.colEmail")}</th>
+                <th>{t(DEFAULT_LOCALE, "reach.colRef")}</th>
+                <th>{t(DEFAULT_LOCALE, "reach.colDescription")}</th>
+                <th>{t(DEFAULT_LOCALE, "reach.colSentAt")}</th>
+                <th className="reach-num">
+                  {t(DEFAULT_LOCALE, "reach.colReach")}
+                </th>
+                <th className="reach-num">
+                  {t(DEFAULT_LOCALE, "reach.colOpens")}
+                </th>
+                <th className="reach-num">
+                  {t(DEFAULT_LOCALE, "reach.colShares")}
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {top.map((r) => (
+                <tr key={r.orderId}>
+                  <td>{r.customerName}</td>
+                  <td className="reach-muted">{r.email ?? "—"}</td>
+                  <td className="reach-muted">{r.externalRef ?? "—"}</td>
+                  <td className="reach-muted">{r.description ?? "—"}</td>
+                  <td className="reach-muted">
+                    {formatReachDate(r.sentAt) || "—"}
+                  </td>
+                  <td className="reach-num reach-strong">{r.reach}</td>
+                  <td className="reach-num">{r.opens}</td>
+                  <td className="reach-num">{r.shares}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
   );
 }
 

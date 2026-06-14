@@ -1099,6 +1099,103 @@ body {
   color: var(--text-secondary);
 }
 
+/* --- Reichweiten-/VIP-Analyse-Sektion --- */
+.reach-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.reach-hint {
+  margin: 0;
+  max-width: 520px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.reach-export {
+  flex-shrink: 0;
+  font-size: 13px;
+  padding: 8px 14px;
+}
+
+/* Filter-Leiste: Von / Bis / Sortierung nebeneinander, mobil umbrechend. */
+.reach-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.reach-filter-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.reach-filter-field .form-input {
+  width: auto;
+  min-width: 150px;
+}
+
+/* Tabelle: horizontal scrollbar auf schmalen Viewports (8 Spalten). */
+.reach-table-wrap {
+  overflow-x: auto;
+  margin: 0 -4px;
+}
+
+.reach-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.reach-table th,
+.reach-table td {
+  padding: 8px 10px;
+  text-align: left;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--border);
+}
+
+.reach-table th {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+
+.reach-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.reach-table .reach-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.reach-table .reach-strong {
+  font-weight: 700;
+  color: var(--gold);
+}
+
+.reach-table .reach-muted {
+  color: var(--text-secondary);
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.reach-empty {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
 /* --- Valooro-Logo im Sidebar-Header (Schritt 10b) --- */
 .portal-sidebar-logo {
   display: block;
