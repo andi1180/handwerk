@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { compressImage } from "@/lib/media/compress";
 import { getVideoDuration } from "@/lib/media/video";
+import { extractVideoFrames } from "@/lib/media/extract-frames";
+import { videoFramePath } from "@/lib/media/video-frames";
 import { MAX_VIDEO_SECONDS } from "@/lib/media/constants";
 import { DEFAULT_LOCALE, t } from "@/lib/i18n";
 import type { MediaCategory } from "@/lib/orders/queries";
@@ -195,6 +197,49 @@ export function Capture({
     [],
   );
 
+  /**
+   * Phase 1 — Vorschau-Frames eines hochgeladenen Videos extrahieren und unter
+   * dem Konventions-Pfad ({video-pfad}.frame-{i}.jpg) in denselben Bucket legen.
+   * Läuft **nach** dem Video-Upload als Hintergrund-Schritt, ist **best-effort
+   * und graceful**: schlägt die Extraktion fehl oder liefert nur schwarze Frames,
+   * bleibt das Video unverändert (heutiges Verhalten), nur ohne Frames.
+   *
+   * ISOLATION: Direkt-Upload in den privaten Bucket unter dem RLS-skopierten
+   * `{business_id}/{order_id}/`-Präfix (aus dem Video-Pfad abgeleitet) — KEINE
+   * business_id aus dem Client, KEINE DB-Zeile (Frames sind reine Storage-Objekte).
+   */
+  const extractAndUploadFrames = useCallback(
+    async (videoFile: File, videoStoragePath: string) => {
+      const ctx = `order ${orderId}, ${videoStoragePath}`;
+      let frames: Awaited<ReturnType<typeof extractVideoFrames>>;
+      try {
+        frames = await extractVideoFrames(videoFile);
+      } catch (err) {
+        console.error(`[capture] Frame-Extraktion fehlgeschlagen (${ctx}):`, err);
+        return;
+      }
+      if (frames.length === 0) return; // kein brauchbarer Frame → Video bleibt ohne
+
+      let uploaded = 0;
+      for (const frame of frames) {
+        const path = videoFramePath(videoStoragePath, frame.index);
+        try {
+          await uploadWithRetry(supabase, path, frame.blob, "image/jpeg");
+          uploaded++;
+        } catch (err) {
+          console.error(
+            `[capture] Frame-Upload fehlgeschlagen (${ctx}, frame ${frame.index}):`,
+            err,
+          );
+          // übrige Frames weiter versuchen
+        }
+      }
+      // Server-Liste neu laden, damit die Detailseite die Frames signiert + anzeigt.
+      if (uploaded > 0) router.refresh();
+    },
+    [supabase, orderId, router],
+  );
+
   const runUpload = useCallback(
     async (item: PendingItem) => {
       setItems((prev) =>
@@ -281,8 +326,15 @@ export function Capture({
         return prev.filter((it) => it.id !== item.id);
       });
       router.refresh();
+
+      // Phase 1: Bei Videos im Hintergrund Vorschau-Frames ziehen + hochladen.
+      // Bewusst NACH dem refresh (Video erscheint sofort) und fire-and-forget —
+      // schlägt es fehl, bleibt das Video unangetastet (graceful, kein Breaking).
+      if (item.mediaType === "video") {
+        void extractAndUploadFrames(item.file, item.storagePath);
+      }
     },
-    [supabase, orderId, router],
+    [supabase, orderId, router, extractAndUploadFrames],
   );
 
   const openPhoto = () => photoInputRef.current?.click();

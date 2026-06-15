@@ -18,6 +18,7 @@ import {
 } from "./generate-controls";
 import { DeliverButton } from "./deliver-controls";
 import { getOrderById, getOrderMedia } from "@/lib/orders/queries";
+import { videoFramePaths } from "@/lib/media/video-frames";
 
 const DATE_FORMAT = new Intl.DateTimeFormat("de-DE", {
   day: "2-digit",
@@ -70,12 +71,56 @@ export default async function OrderDetailPage({
   const processCount = media.filter((m) => m.category === "process").length;
 
   const supabase = await createClient();
+
+  // Phase 1 (Video-Vorschau-Frames): Die extrahierten Frames sind KEINE
+  // order_media-Zeilen, sondern Storage-Objekte unter dem Konventions-Pfad
+  // {video-pfad}.frame-{i}.jpg. Den Auftrags-Ordner einmal listen (RLS +
+  // 0002-Präfix-Policy, AUTHENTICATED — kein service_role) und daraus je Video
+  // die tatsächlich vorhandenen Frame-Pfade bestimmen, dann signieren.
+  const orderFolder = `${order.business_id}/${order.id}`;
+  const { data: folderObjects } = await supabase.storage
+    .from("order-media")
+    .list(orderFolder, { limit: 1000 });
+  const existingPaths = new Set(
+    (folderObjects ?? []).map((o) => `${orderFolder}/${o.name}`),
+  );
+  const frameTargets = media
+    .filter((m) => m.media_type === "video")
+    .map((m) => ({
+      id: m.id,
+      paths: videoFramePaths(m.storage_path).filter((p) => existingPaths.has(p)),
+    }))
+    .filter((t) => t.paths.length > 0);
+
+  const frameUrlsByMedia = new Map<string, string[]>();
+  const allFramePaths = frameTargets.flatMap((t) => t.paths);
+  if (allFramePaths.length > 0) {
+    const { data: signed } = await supabase.storage
+      .from("order-media")
+      .createSignedUrls(allFramePaths, SIGNED_URL_TTL_SECONDS);
+    const urlByPath = new Map<string, string>();
+    (signed ?? []).forEach((s, idx) => {
+      const path = allFramePaths[idx];
+      if (path && !s.error && s.signedUrl) urlByPath.set(path, s.signedUrl);
+    });
+    for (const t of frameTargets) {
+      const urls = t.paths
+        .map((p) => urlByPath.get(p))
+        .filter((u): u is string => Boolean(u));
+      if (urls.length > 0) frameUrlsByMedia.set(t.id, urls);
+    }
+  }
+
   const mediaWithUrls: MediaWithUrl[] = await Promise.all(
     media.map(async (item) => {
       const { data } = await supabase.storage
         .from("order-media")
         .createSignedUrl(item.storage_path, SIGNED_URL_TTL_SECONDS);
-      return { ...item, signedUrl: data?.signedUrl ?? null };
+      return {
+        ...item,
+        signedUrl: data?.signedUrl ?? null,
+        frameUrls: frameUrlsByMedia.get(item.id) ?? [],
+      };
     }),
   );
 

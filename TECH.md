@@ -2703,6 +2703,32 @@ Der jetzt redundante Quick-Filter **`drafts`/„Entwürfe" entfernt** (`QUICK_FI
 
 ---
 
+## Video-Vorschau-Frames (Phase 1 — Extraktion + Verifizieren)
+
+**Ziel von Phase 1:** beweisen, dass auf iOS Safari aus einem frisch aufgenommenen Video **3 brauchbare (nicht schwarze) Standbilder** entstehen und sicher im Storage landen. **Phase 2** (noch NICHT gebaut) schickt diese Frames als Vision-Input an die KI (Caption/Reel-Frame-Auswahl). Phase 1 fasst die Caption-Pipeline (`captions.ts`/`media-caption.ts`/Caption-Routes/Booklet) **nicht** an — Frames gehen noch **nicht** an die KI.
+
+**Keine Migration, keine DB-Zeile:** die Frames sind **reine Storage-Objekte** unter einem **Konventions-Pfad**, der direkt vom Video-Pfad abgeleitet ist — Existenz wird allein über den Pfad bestimmt.
+
+### Konventions-Pfad ([lib/media/video-frames.ts](lib/media/video-frames.ts))
+
+Reines Helfer-Modul (kein DOM, kein Server-Import → client- UND server-importierbar): `VIDEO_FRAME_POSITIONS = [0.1, 0.5, 0.9]` (≈10/50/90 % der Dauer — bewusst nicht 0/100 %, dort oft schwarz/unvollständig), `videoFramePath(videoStoragePath, i)` = `{video-pfad-ohne-endung}.frame-{i}.jpg`, `videoFramePaths()` = alle Kandidaten. Die Frames behalten das `{business_id}/{order_id}/`-Präfix des Videos ⇒ die **Storage-RLS aus 0002** (erstes Pfad-Segment = business_id) greift unverändert. Eindeutigkeit: das Frame leitet sich vom Video-`{uuid}` ab (`{uuid}.frame-0.jpg` ≠ `{uuid}.jpg`/`{uuid}.mov`/fremde uuids) — keine Kollision.
+
+### Extraktion ([lib/media/extract-frames.ts](lib/media/extract-frames.ts), Client/DOM)
+
+`extractVideoFrames(file) → ExtractedFrame[]` (`{index, blob}`). Verstecktes `<video>` (gemutet, `playsInline`, `preload="auto"`) an `duration * position` seeken → `seeked` abwarten → **2× rAF** (iOS-Paint-Garantie) → `drawImage` auf ein Canvas (skaliert wie die Foto-Kompression: längste Kante ≤ `MAX_IMAGE_DIM`, `JPEG_QUALITY`) → JPEG-Blob. Die DRY-Helfer `scaledSize`/`canvasToJpeg` werden aus [compress.ts](lib/media/compress.ts) **exportiert + wiederverwendet** (nicht dupliziert). **Schwarz-/Leer-Guard** (`isMostlyBlack`): Pixel-Stichprobe (~4 k Samples), Anteil Pixel mit Luma < 16 > 98 % ⇒ Frame **verworfen** (nicht hochgeladen/gezählt). **Best-effort + graceful:** jeder Fehler (Metadaten-/Seek-Timeout, Decode-Problem, nur schwarze Frames) ⇒ *weniger oder keine* Frames, **nie** ein Throw nach außen — Seek/Metadaten sind timeout-geschützt.
+
+### Upload ([capture.tsx](app/portal/orders/[id]/capture.tsx))
+
+`extractAndUploadFrames(videoFile, videoStoragePath)` läuft in `runUpload` **nach** dem erfolgreichen Video-Upload + `router.refresh()` (Video erscheint sofort), **fire-and-forget**: extrahiert, lädt jeden gültigen Frame per **`uploadWithRetry`** (wiederverwendet) direkt in `order-media` unter `videoFramePath(...)` (`image/jpeg`, `upsert`), danach **einmal** `router.refresh()` (Frames werden signiert + sichtbar). **ISOLATION:** Direkt-Upload unter dem RLS-skopierten `{business_id}/{order_id}/`-Präfix (aus dem Video-Pfad), **keine** business_id aus dem Client, **kein** Metadaten-POST (Frames sind keine `order_media`-Zeilen). Schlägt alles fehl ⇒ Video bleibt unverändert (heutiges Verhalten), nur ohne Frames — **kein Breaking**.
+
+### Verifizier-Ansicht ([page.tsx](app/portal/orders/[id]/page.tsx) + [media-list.tsx](app/portal/orders/[id]/media-list.tsx))
+
+Server (page.tsx): den Auftrags-Ordner `{business_id}/{order_id}` **einmal** `list()`-en (AUTHENTICATED, RLS + 0002-Präfix-Policy, **kein** service_role) → vorhandene Pfade als Set → je Video die tatsächlich existierenden `videoFramePaths` bestimmen → **batch** `createSignedUrls` (TTL 3600 s) → `MediaWithUrl.frameUrls: string[]` (Foto/frameloses Video ⇒ leer). Client (media-list.tsx, **Viewer**): bei Video mit `frameUrls.length > 0` eine kleine **Thumbnail-Reihe** (72×96, `i18n assembler.videoFrames` „Erkannte Video-Bilder") direkt unter dem Medium — damit der Nutzer am iPhone **sieht**, dass echte (nicht schwarze) Frames entstanden sind. **Reine Anzeige** — die Frames sind keine eigenen Kacheln, erscheinen nur im Vollbild-Viewer des Videos.
+
+**Konventionen:** keine Migration (Konventions-Pfad); AUTHENTICATED + RLS + Storage-Präfix-Policy, kein `service_role`; kein `<form>`, kein `any`. `pnpm typecheck` + `pnpm build` grün.
+
+---
+
 ## Launch-Fahrplan & deferierte Härtung
 
 Detail-Referenz für die Risikobewertung: [SECURITY_REVIEW.md](SECURITY_REVIEW.md) (bleibt im Repo). Dieser Abschnitt fasst die **Reihenfolge** des Live-Gangs und die **vor Kunde #2 verpflichtende** Härtung zusammen.

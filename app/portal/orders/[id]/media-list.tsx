@@ -31,8 +31,15 @@ import type { MediaCategory, OrderMedia } from "@/lib/orders/queries";
 /** Auswählbare Kategorien im Viewer-Selektor in fester Reihenfolge (0010). */
 const CATEGORY_OPTIONS: MediaCategory[] = ["before", "after", "process"];
 
-/** Medien-Item samt server-seitig erzeugter, befristeter Signed-URL (page.tsx). */
-export type MediaWithUrl = OrderMedia & { signedUrl: string | null };
+/**
+ * Medien-Item samt server-seitig erzeugter, befristeter Signed-URL (page.tsx).
+ * `frameUrls` (Phase 1): signierte Vorschau-Frames eines Videos (Konventions-
+ * Pfad, keine DB-Zeile); bei Fotos und framelosen Videos leer.
+ */
+export type MediaWithUrl = OrderMedia & {
+  signedUrl: string | null;
+  frameUrls: string[];
+};
 
 /** Wie lange ein Reorder-/Delete-Hinweis sichtbar bleibt (ms). */
 const NOTICE_TIMEOUT_MS = 4000;
@@ -852,6 +859,44 @@ function MediaViewer({
           )
         ) : null}
       </div>
+
+      {/* Verifizier-Ansicht (Phase 1): bei Videos die extrahierten Vorschau-
+          Frames als kleine Thumbnails — damit am iPhone sichtbar ist, dass echte
+          (nicht schwarze) Frames entstanden sind. Reine Anzeige. */}
+      {media.media_type === "video" && media.frameUrls.length > 0 ? (
+        <div
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            background: "var(--surface)",
+            borderTop: "1px solid var(--border)",
+            padding: "10px 16px",
+            display: "flex",
+            flexDirection: "column",
+            gap: 8,
+          }}
+        >
+          <span style={{ fontSize: 13, fontWeight: 600 }}>
+            {t(DEFAULT_LOCALE, "assembler.videoFrames")}
+          </span>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {media.frameUrls.map((url, i) => (
+              // eslint-disable-next-line @next/next/no-img-element -- Signed-URL aus privatem Bucket.
+              <img
+                key={i}
+                src={url}
+                alt=""
+                style={{
+                  width: 72,
+                  height: 96,
+                  objectFit: "cover",
+                  borderRadius: "var(--radius)",
+                  background: "var(--surface-2)",
+                }}
+              />
+            ))}
+          </div>
+        </div>
+      ) : null}
 
       {/* Kategorie-Wechsel (0010) — nur Foto im Editier-Modus. Video bleibt
           immer 'process' (kein Selektor). Belegte before/after-Slots sind

@@ -34,7 +34,7 @@ export async function compressImage(file: File): Promise<CompressedImage> {
 }
 
 /** Skaliert (srcW × srcH) so, dass die längste Kante ≤ MAX_IMAGE_DIM ist. */
-function scaledSize(
+export function scaledSize(
   srcW: number,
   srcH: number,
 ): { width: number; height: number } {
@@ -46,7 +46,7 @@ function scaledSize(
 }
 
 /** Exportiert das Canvas als JPEG-Blob (promisifiziertes `toBlob`). */
-function canvasToJpeg(canvas: HTMLCanvasElement): Promise<Blob> {
+export function canvasToJpeg(canvas: HTMLCanvasElement): Promise<Blob> {
   return new Promise<Blob>((resolve, reject) => {
     canvas.toBlob(
       (blob) => {

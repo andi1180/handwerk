@@ -230,6 +230,8 @@ export const de = {
     processEmpty: "Noch keine Prozess-Bilder.",
     categoryLabel: "Kategorie",
     categoryError: "Kategorie konnte nicht geändert werden.",
+    // Verifizier-Ansicht der extrahierten Video-Vorschau-Frames (Phase 1).
+    videoFrames: "Erkannte Video-Bilder",
   },
   captions: {
     generate: "Captions generieren",
