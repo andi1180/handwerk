@@ -1,5 +1,6 @@
 import type { createClient } from "@/lib/supabase/server";
 import type { MediaCategory } from "@/lib/orders/queries";
+import { videoFramePaths } from "@/lib/media/video-frames";
 import { generateCaption, type ImageMediaType } from "./captions";
 
 /** Privater Bucket mit den Auftrags-Medien (siehe Migration 0002). */
@@ -27,21 +28,50 @@ function imageMediaTypeFromPath(path: string): ImageMediaType {
 }
 
 /**
- * Erzeugt eine Caption für ein Medium. Das Bild wird **server-seitig** über den
+ * Lädt die in Phase 1 extrahierten Video-Vorschau-Frames als base64-Strings
+ * (Phase 2). Die Konventions-Pfade werden vom Video-Storage-Pfad abgeleitet
+ * (`videoFramePath`) und behalten dessen `{business_id}/{order_id}/`-Präfix — die
+ * Storage-RLS (0002) greift unverändert über den übergebenen AUTHENTICATED Client
+ * (kein `service_role`). Noch nicht extrahierte / fehlende Frames (404 ⇒ `data`
+ * null) werden übersprungen; die Reihenfolge der vorhandenen Frames bleibt erhalten.
+ */
+async function loadVideoFrames(
+  supabase: ServerClient,
+  videoStoragePath: string,
+): Promise<string[]> {
+  const paths = videoFramePaths(videoStoragePath);
+  const downloads = await Promise.all(
+    paths.map((path) => supabase.storage.from(STORAGE_BUCKET).download(path)),
+  );
+  const frames: string[] = [];
+  for (const { data: blob } of downloads) {
+    if (!blob) continue; // nicht vorhanden (404) → überspringen
+    frames.push(Buffer.from(await blob.arrayBuffer()).toString("base64"));
+  }
+  return frames;
+}
+
+/**
+ * Erzeugt eine Caption für ein Medium. Bilder werden **server-seitig** über den
  * übergebenen AUTHENTICATED Client (RLS) aus dem privaten Bucket geladen und als
- * base64 an Haiku gegeben (Foto). Video → nur Stichwort (Frame-Extraktion folgt
- * später mit dem Reel).
+ * base64 an Haiku gegeben: FOTO → das Bild selbst; VIDEO → die in Phase 1
+ * extrahierten Vorschau-Frames (Phase 2). Sind keine Frames vorhanden, fällt das
+ * Video auf den bisherigen Stichwort-only-Pfad zurück.
  */
 export async function captionForMedia(
   supabase: ServerClient,
   media: CaptionableMedia,
 ): Promise<string> {
   if (media.media_type !== "photo") {
+    // Phase 2: die in Phase 1 extrahierten Vorschau-Frames als Vision-Input laden
+    // (über RLS aus dem privaten Bucket). Keine Frames ⇒ Stichwort-only (wie bisher).
+    const frames = await loadVideoFrames(supabase, media.storage_path);
     // Videos sind immer 'process' (kein Vorher/Nachher); category trotzdem durchreichen.
     return generateCaption({
       mediaType: "video",
       keyword: media.keyword,
       category: media.category,
+      frames,
     });
   }
 

@@ -2703,9 +2703,9 @@ Der jetzt redundante Quick-Filter **`drafts`/„Entwürfe" entfernt** (`QUICK_FI
 
 ---
 
-## Video-Vorschau-Frames (Phase 1 — Extraktion + Verifizieren)
+## Video-Vorschau-Frames (Phase 1 — Extraktion + Verifizieren; Phase 2 — KI-Captions)
 
-**Ziel von Phase 1:** beweisen, dass auf iOS Safari aus einem frisch aufgenommenen Video **3 brauchbare (nicht schwarze) Standbilder** entstehen und sicher im Storage landen. **Phase 2** (noch NICHT gebaut) schickt diese Frames als Vision-Input an die KI (Caption/Reel-Frame-Auswahl). Phase 1 fasst die Caption-Pipeline (`captions.ts`/`media-caption.ts`/Caption-Routes/Booklet) **nicht** an — Frames gehen noch **nicht** an die KI.
+**Ziel von Phase 1:** beweisen, dass auf iOS Safari aus einem frisch aufgenommenen Video **3 brauchbare (nicht schwarze) Standbilder** entstehen und sicher im Storage landen. **Phase 2 (✅ gebaut):** diese Frames gehen jetzt als **Vision-Input** in die **Caption-Generierung** (Haiku) — siehe Abschnitt „Phase 2" unten. Reihenfolge/Reel-Frame-Auswahl bleibt Folgearbeit; Phase 2 fasst **nur** die Caption-Erzeugung an (Reel/Booklet-Render unverändert).
 
 **Keine Migration, keine DB-Zeile:** die Frames sind **reine Storage-Objekte** unter einem **Konventions-Pfad**, der direkt vom Video-Pfad abgeleitet ist — Existenz wird allein über den Pfad bestimmt.
 
@@ -2726,6 +2726,18 @@ Reines Helfer-Modul (kein DOM, kein Server-Import → client- UND server-importi
 Server (page.tsx): den Auftrags-Ordner `{business_id}/{order_id}` **einmal** `list()`-en (AUTHENTICATED, RLS + 0002-Präfix-Policy, **kein** service_role) → vorhandene Pfade als Set → je Video die tatsächlich existierenden `videoFramePaths` bestimmen → **batch** `createSignedUrls` (TTL 3600 s) → `MediaWithUrl.frameUrls: string[]` (Foto/frameloses Video ⇒ leer). Client (media-list.tsx, **Viewer**): bei Video mit `frameUrls.length > 0` eine kleine **Thumbnail-Reihe** (72×96, `i18n assembler.videoFrames` „Erkannte Video-Bilder") direkt unter dem Medium — damit der Nutzer am iPhone **sieht**, dass echte (nicht schwarze) Frames entstanden sind. **Reine Anzeige** — die Frames sind keine eigenen Kacheln, erscheinen nur im Vollbild-Viewer des Videos.
 
 **Konventionen:** keine Migration (Konventions-Pfad); AUTHENTICATED + RLS + Storage-Präfix-Policy, kein `service_role`; kein `<form>`, kein `any`. `pnpm typecheck` + `pnpm build` grün.
+
+### Phase 2 — Frames als Vision-Input in die Caption-Generierung
+
+Die in Phase 1 extrahierten Frames speisen jetzt die **KI-Caption-Erzeugung** (Haiku). **Keine Migration**, **kein** `service_role` — alles über den AUTHENTICATED Client (RLS); die Caption-**Routes** ändern sich **nicht** (sie erben das über `captionForMedia` → `generateCaption`). Der **Foto-Caption-Pfad** bleibt funktional unverändert (außer dem unten geteilten Guard).
+
+**Frame-Lader ([lib/ai/media-caption.ts](lib/ai/media-caption.ts), `loadVideoFrames`):** für ein Video die Konventions-Pfade via `videoFramePaths(storage_path)` (Phase 1) ableiten, jeden über den übergebenen AUTHENTICATED Client (RLS) aus dem privaten `order-media`-Bucket `download`-en (→ base64). Nicht vorhandene Frames (noch nicht extrahiert / 404 ⇒ `data` null) werden **übersprungen**, die Reihenfolge der vorhandenen bleibt erhalten — dieselbe `{business_id}/{order_id}/`-Präfix-Isolation (0002) wie der bestehende Foto-Download. `captionForMedia` lädt im Video-Zweig die Frames und reicht sie an `generateCaption({ mediaType:'video', keyword, category, frames })`; **keine Frames ⇒ Stichwort-only** (bisheriges Verhalten).
+
+**`generateCaption` Video-Erweiterung ([lib/ai/captions.ts](lib/ai/captions.ts)):** `CaptionInput.frames?: string[]` (base64). Liegt **≥ 1 Frame** vor, gehen sie als mehrere `{type:'image'}`-Blöcke + Stichwort an Haiku — **genau wie der Foto-Pfad**, nur mehrere Bilder statt eines (Frames sind per Konvention immer JPEG ⇒ `image/jpeg`); der Prompt nennt den Clip „gezeigt als mehrere Standbilder daraus", damit Haiku die Frames als **einen** Clip behandelt. **0 Frames:** unverändert — Stichwort-only, ein Video **ohne Frames UND ohne Stichwort** liefert ohne API-Call den leeren String.
+
+**Stufe-1-Guard gegen Meta-Antworten (`isMetaResponse`, [lib/ai/captions.ts](lib/ai/captions.ts)):** zentral in `generateCaption` auf dem **Roh-Text** (vor `cleanCaption`/Kürzung) ⇒ gilt **automatisch für FOTO UND VIDEO** (beide Medientypen laufen durch dieselbe Funktion). Sieht die Antwort wie eine Rückfrage/Meta-Antwort aus statt einer Caption — **enthält `?`**, **beginnt** mit einem Meta-/Ich-/Bitte-/Entschuldigungs-Präfix (`ich `, `bitte`, `leider`, `tut mir leid`, `entschuldigung`, `als ki`, …) oder ist **auffällig lang/satzartig** (> 40 Wörter statt eines ~12–15-Wort-Fragments) — wird sie als **leer** behandelt (`""`), also **nicht gespeichert**. Die Kachel bleibt „Caption fehlt" zum manuellen Nachtragen (Batch: `if (!caption) return null` ⇒ kein Update; Regenerate: `""` ⇒ `null`).
+
+**Konventionen Phase 2:** keine Migration; AUTHENTICATED + RLS, kein `service_role`; kein `<form>`, kein `any`. `pnpm typecheck` + `pnpm build` grün.
 
 ---
 
