@@ -28,6 +28,39 @@ function imageMediaTypeFromPath(path: string): ImageMediaType {
 }
 
 /**
+ * Auftrags-ID aus dem Storage-Pfad ableiten. Der Pfad ist serverseitig auf
+ * `{business_id}/{order_id}/{uuid}.ext` festgelegt (media-Upload validiert das
+ * Präfix) — das zweite Segment ist die order_id. Kein gültiges Segment ⇒ null.
+ */
+function orderIdFromStoragePath(path: string): string | null {
+  const segment = path.split("/")[1];
+  return segment && segment.length > 0 ? segment : null;
+}
+
+/**
+ * Lädt den Auftragskontext (`orders.item_description`) für ein Medium und reicht
+ * ihn als GUARDRAIL an die Caption-Generierung weiter (erdet die Caption
+ * thematisch, ohne als Bildbeschreibung zu dienen). Über den übergebenen
+ * AUTHENTICATED Client (RLS — fremde/fehlende Order ⇒ kein Treffer); die order_id
+ * wird defensiv aus dem (serverseitig validierten) Storage-Pfad abgeleitet. Ohne
+ * gültige id oder ohne (getrimmte) Beschreibung ⇒ undefined (kein Kontext-Block).
+ */
+async function loadOrderContext(
+  supabase: ServerClient,
+  storagePath: string,
+): Promise<string | undefined> {
+  const orderId = orderIdFromStoragePath(storagePath);
+  if (!orderId) return undefined;
+  const { data: order } = await supabase
+    .from("orders")
+    .select("item_description")
+    .eq("id", orderId)
+    .maybeSingle<{ item_description: string | null }>();
+  const description = order?.item_description?.trim();
+  return description ? description : undefined;
+}
+
+/**
  * Lädt die in Phase 1 extrahierten Video-Vorschau-Frames als base64-Strings
  * (Phase 2). Die Konventions-Pfade werden vom Video-Storage-Pfad abgeleitet
  * (`videoFramePath`) und behalten dessen `{business_id}/{order_id}/`-Präfix — die
@@ -57,11 +90,19 @@ async function loadVideoFrames(
  * base64 an Haiku gegeben: FOTO → das Bild selbst; VIDEO → die in Phase 1
  * extrahierten Vorschau-Frames (Phase 2). Sind keine Frames vorhanden, fällt das
  * Video auf den bisherigen Stichwort-only-Pfad zurück.
+ *
+ * Zusätzlich wird der Auftragskontext (`orders.item_description`) als GUARDRAIL
+ * geladen (RLS) und durchgereicht — er erdet die Caption thematisch, dient aber
+ * nicht als Bildbeschreibung. Ohne Beschreibung ⇒ Verhalten wie bisher.
  */
 export async function captionForMedia(
   supabase: ServerClient,
   media: CaptionableMedia,
 ): Promise<string> {
+  // Auftragskontext (item_description) als Guardrail laden — über RLS, order_id
+  // defensiv aus dem Storage-Pfad. Für alle Medientypen gleich.
+  const orderContext = await loadOrderContext(supabase, media.storage_path);
+
   if (media.media_type !== "photo") {
     // Phase 2: die in Phase 1 extrahierten Vorschau-Frames als Vision-Input laden
     // (über RLS aus dem privaten Bucket). Keine Frames ⇒ Stichwort-only (wie bisher).
@@ -72,6 +113,7 @@ export async function captionForMedia(
       keyword: media.keyword,
       category: media.category,
       frames,
+      orderContext,
     });
   }
 
@@ -85,6 +127,7 @@ export async function captionForMedia(
       mediaType: "photo",
       keyword: media.keyword,
       category: media.category,
+      orderContext,
     });
   }
 
@@ -95,5 +138,6 @@ export async function captionForMedia(
     category: media.category,
     imageBase64,
     imageMediaType: imageMediaTypeFromPath(media.storage_path),
+    orderContext,
   });
 }

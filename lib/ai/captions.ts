@@ -27,7 +27,30 @@ export type CaptionInput = {
    * Leer/undefiniert ⇒ bisheriges Verhalten (nur Stichwort).
    */
   frames?: string[];
+  /**
+   * Optionaler Auftragskontext (`orders.item_description`) — erdet die Caption
+   * thematisch (GUARDRAIL, analog zum KONTEXT-Block in intro.ts): er beschreibt
+   * den AUFTRAG, NICHT das Bild, und wird NICHT wörtlich als Caption übernommen.
+   * Leer/undefiniert ⇒ kein Kontext-Block (Verhalten wie bisher).
+   */
+  orderContext?: string;
 };
+
+/**
+ * Auftragskontext-Block für den User-Prompt (analog zum KONTEXT-Block in
+ * intro.ts). Klar abgegrenzt via `<<<…>>>` und als Guardrail markiert: er erdet
+ * die Caption thematisch, ist aber KEINE Bildbeschreibung und darf nicht wörtlich
+ * übernommen werden. Leer/undefiniert ⇒ leerer String (kein Block).
+ */
+function orderContextBlock(orderContext: string | undefined): string {
+  if (!orderContext) return "";
+  return (
+    ` Auftragskontext: <<<${orderContext}>>> ` +
+    "Dieser Kontext ist ein Guardrail — er beschreibt den Auftrag, nicht das Bild. " +
+    "Beschreibe was auf diesem Bild/diesen Frames konkret zu sehen ist, bleibe dabei " +
+    "im Rahmen des Auftragskontexts. Übernehme den Auftragskontext NICHT wörtlich als Caption."
+  );
+}
 
 /** Kategorie-Zusatz für den Caption-Prompt (0010): before/after explizit erden. */
 function categoryHint(category: MediaCategory | undefined): string {
@@ -167,7 +190,7 @@ export async function generateCaption(input: CaptionInput): Promise<string> {
         : "diesen Video-Clip";
   content.push({
     type: "text",
-    text: `Schreibe eine kurze Bildunterschrift für ${subject}. ${keywordLine}${categoryHint(input.category)}`,
+    text: `Schreibe eine kurze Bildunterschrift für ${subject}. ${keywordLine}${categoryHint(input.category)}${orderContextBlock(input.orderContext)}`,
   });
 
   const anthropic = getAnthropic();

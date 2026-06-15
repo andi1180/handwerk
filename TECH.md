@@ -2739,6 +2739,20 @@ Die in Phase 1 extrahierten Frames speisen jetzt die **KI-Caption-Erzeugung** (H
 
 **Konventionen Phase 2:** keine Migration; AUTHENTICATED + RLS, kein `service_role`; kein `<form>`, kein `any`. `pnpm typecheck` + `pnpm build` grün.
 
+### Auftragskontext (`item_description`) als Caption-Guardrail
+
+Die Caption-Generierung bekommt den Auftragskontext (`orders.item_description`) als **Guardrail** — er erdet die Caption thematisch, ohne als Bildbeschreibung zu dienen. **Keine Migration**, **kein** `service_role`, **keine Route-Änderung** (Batch- und Regenerate-Route erben es über `captionForMedia` → `generateCaption`).
+
+**`generateCaption`-Erweiterung ([lib/ai/captions.ts](lib/ai/captions.ts)):** optionales `CaptionInput.orderContext?: string`. Liegt es vor, wird im **User-Prompt** (Text-Block nach Stichwort + Kategorie-Hinweis) ein klar abgegrenzter KONTEXT-Block angehängt (`orderContextBlock`, analog zum `<<<…>>>`-Block in [intro.ts](lib/ai/intro.ts)/[review.ts](lib/ai/review.ts)). Der konkrete Block:
+
+> ` Auftragskontext: <<<{orderContext}>>> Dieser Kontext ist ein Guardrail — er beschreibt den Auftrag, nicht das Bild. Beschreibe was auf diesem Bild/diesen Frames konkret zu sehen ist, bleibe dabei im Rahmen des Auftragskontexts. Übernehme den Auftragskontext NICHT wörtlich als Caption.`
+
+Leer/`undefined` ⇒ **kein** Block angehängt (leerer String), Verhalten exakt wie bisher — kein Fallback-Text, kein leerer `<<<>>>`-Block. Gilt automatisch für FOTO **und** VIDEO (beide laufen durch `generateCaption`); der Block steht hinter `categoryHint` und vor dem (unveränderten) System-Prompt-/Guard-Pfad.
+
+**`captionForMedia`-Erweiterung ([lib/ai/media-caption.ts](lib/ai/media-caption.ts)):** lädt zusätzlich `orders.item_description` über den übergebenen **AUTHENTICATED** Client (RLS — fremde/fehlende Order ⇒ kein Treffer) und reicht es als `orderContext` an **alle** `generateCaption`-Aufrufe (Video, Foto-ohne-Blob, Foto-mit-Bild) weiter. Die `order_id` wird **defensiv** aus dem Storage-Pfad abgeleitet (`orderIdFromStoragePath` ⇒ zweites Segment von `{business_id}/{order_id}/{uuid}.ext`; der Pfad ist beim Upload serverseitig auf dieses Präfix validiert) — so braucht es **keine** Route-/Typänderung an `CaptionableMedia`. Ohne gültige id oder ohne (getrimmte) Beschreibung ⇒ `undefined` (kein Block). `item_description` ist hier ROH-Kontext (Daten, kein Befehl) — die Fence-/Daten-Abgrenzung des Guardrail-Blocks deckt sich mit dem deferierten Härtungspunkt P4 (Prompt-Injection-Schutz).
+
+**Konventionen:** keine Migration; AUTHENTICATED + RLS, kein `service_role`; kein `<form>`, kein `any`. `pnpm typecheck` + `pnpm build` grün.
+
 ---
 
 ## Launch-Fahrplan & deferierte Härtung
