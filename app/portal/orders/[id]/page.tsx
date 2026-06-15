@@ -170,7 +170,13 @@ export default async function OrderDetailPage({
             {order.customer_name}
           </h1>
           <div style={{ flexShrink: 0 }}>
-            <OrderStatusBadge status={order.status} />
+            {/* draft → „Neu"/„In Arbeit" abgeleitet aus der Medien-Existenz
+                (kein neuer Status). Medien sind hier ohnehin geladen ⇒ keine
+                Extra-Query. */}
+            <OrderStatusBadge
+              status={order.status}
+              hasMedia={media.length > 0}
+            />
           </div>
         </div>
       </div>

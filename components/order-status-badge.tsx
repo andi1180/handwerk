@@ -28,8 +28,9 @@ type BadgeStyle = { background: string; border: string; color: string };
 
 /**
  * Farbsätze nach **Lifecycle-Stufe** statt pro Status (6c) — die Liste zeigt so
- * auf einen Blick „in Arbeit / fertig / gesendet":
- *  - neutral  = in Arbeit (`draft`)
+ * auf einen Blick „neu / in Arbeit / fertig / gesendet":
+ *  - neutral  = neuer Entwurf (`draft` ohne Medien)
+ *  - amber    = Entwurf in Arbeit (`draft` mit ≥1 Medium)
  *  - gold     = fertig (`generated`)
  *  - grünlich = gesendet/gesehen (`sent`, `viewed`, `shared`)
  */
@@ -37,6 +38,11 @@ const NEUTRAL: BadgeStyle = {
   background: "var(--surface)",
   border: "var(--border)",
   color: "var(--text-secondary)",
+};
+const AMBER: BadgeStyle = {
+  background: "var(--amber-light)",
+  border: "var(--amber-border)",
+  color: "var(--amber-text)",
 };
 const GOLD: BadgeStyle = {
   background: "var(--gold-light)",
@@ -60,9 +66,24 @@ const STATUS_STYLES: Record<OrderStatus, BadgeStyle> = {
 /**
  * Status-Badge eines Auftrags: i18n-Label + Stil (pill, border-radius 999px).
  * Reine Präsentation — kann als Server Component gerendert werden.
+ *
+ * Der DB-Status `draft` wird für die ANZEIGE in zwei abgeleitete Zustände
+ * gesplittet (KEIN neuer `orders.status`-Wert, keine Migration): `hasMedia`
+ * ⇒ „In Arbeit" (amber), sonst „Neu" (grau, wie bisher der Entwurf). Alle
+ * übrigen Status sind unverändert; `hasMedia` wirkt nur auf `draft`.
  */
-export function OrderStatusBadge({ status }: { status: OrderStatus }) {
-  const style = STATUS_STYLES[status];
+export function OrderStatusBadge({
+  status,
+  hasMedia = false,
+}: {
+  status: OrderStatus;
+  hasMedia?: boolean;
+}) {
+  const inProgress = status === "draft" && hasMedia;
+  const style = inProgress ? AMBER : STATUS_STYLES[status];
+  const label = inProgress
+    ? t(DEFAULT_LOCALE, "orderStatus.inProgress")
+    : t(DEFAULT_LOCALE, `orderStatus.${status}`);
   return (
     <span
       style={{
@@ -78,7 +99,7 @@ export function OrderStatusBadge({ status }: { status: OrderStatus }) {
         color: style.color,
       }}
     >
-      {t(DEFAULT_LOCALE, `orderStatus.${status}`)}
+      {label}
     </span>
   );
 }

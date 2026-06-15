@@ -2,20 +2,40 @@
 
 import { useRouter } from "next/navigation";
 import { DEFAULT_LOCALE, t } from "@/lib/i18n";
-import { buildOrdersUrl, type QuickFilter } from "@/lib/orders/filters";
 import {
-  ORDER_STATUSES,
-  isOrderStatus,
-  type OrderStatus,
-} from "./order-status-badge";
+  STATUS_FILTERS,
+  buildOrdersUrl,
+  isStatusFilter,
+  type QuickFilter,
+  type StatusFilter,
+} from "@/lib/orders/filters";
 
 /** Sentinel-Wert der deaktivierten Platzhalter-Option (kein echter Status). */
 const QUICK_PLACEHOLDER = "__quick__";
 
 /**
+ * Status-Filter-Wert → i18n-Label-Key. Die zwei Entwurfs-Ableitungen teilen sich
+ * die `orderStatus`-Labels mit dem Badge (`draft` = „Neu", `inProgress` = „In
+ * Arbeit") — eine Quelle, kein Drift.
+ */
+const FILTER_LABEL_KEY: Record<
+  StatusFilter,
+  "draft" | "inProgress" | "generated" | "sent" | "viewed" | "shared"
+> = {
+  new: "draft",
+  in_progress: "inProgress",
+  generated: "generated",
+  sent: "sent",
+  viewed: "viewed",
+  shared: "shared",
+};
+
+/**
  * Status-Filter über der Auftragsliste (Block B, Punkt 5). Ein einfaches
- * `<select>` (EINE Auswahl): „Alle" (Default) + alle Auftrags-Status aus
- * `ORDER_STATUSES`. Die Liste lädt server-seitig (Server Component), daher
+ * `<select>` (EINE Auswahl): „Alle" (Default) + die Filter-Werte aus
+ * `STATUS_FILTERS`. Der DB-Status `draft` ist dabei in zwei abgeleitete Werte
+ * gesplittet („Neu" / „In Arbeit", anhand der Medien-Existenz) — KEIN neuer
+ * `orders.status`-Wert. Die Liste lädt server-seitig (Server Component), daher
  * navigiert die Auswahl per Query-Param (`buildOrdersUrl`) — der Server filtert
  * dann. Kein `<form>`: reine Navigation per `onChange`.
  *
@@ -34,7 +54,7 @@ export function OrderStatusFilter({
   value,
   quick,
 }: {
-  value: OrderStatus | "all";
+  value: StatusFilter | "all";
   quick: QuickFilter | null;
 }) {
   const router = useRouter();
@@ -57,12 +77,12 @@ export function OrderStatusFilter({
         value={selectValue}
         aria-label={t(DEFAULT_LOCALE, "orders.filterLabel")}
         onChange={(e) => {
-          // isOrderStatus filtert „all" UND den Platzhalter aus ⇒ status: null
+          // isStatusFilter filtert „all" UND den Platzhalter aus ⇒ status: null
           // ⇒ buildOrdersUrl baut die nackte Liste (droppt ?status= und ?quick=).
-          // Ein echter Status ⇒ ?status=X (ebenfalls ohne ?quick=).
+          // Ein echter Filter-Wert ⇒ ?status=X (ebenfalls ohne ?quick=).
           const next = e.target.value;
           router.push(
-            buildOrdersUrl({ status: isOrderStatus(next) ? next : null }),
+            buildOrdersUrl({ status: isStatusFilter(next) ? next : null }),
           );
         }}
         style={{ width: "auto", minWidth: 150 }}
@@ -73,9 +93,9 @@ export function OrderStatusFilter({
             {t(DEFAULT_LOCALE, "orders.filterQuickActive")}
           </option>
         ) : null}
-        {ORDER_STATUSES.map((status) => (
-          <option key={status} value={status}>
-            {t(DEFAULT_LOCALE, `orderStatus.${status}`)}
+        {STATUS_FILTERS.map((filter) => (
+          <option key={filter} value={filter}>
+            {t(DEFAULT_LOCALE, `orderStatus.${FILTER_LABEL_KEY[filter]}`)}
           </option>
         ))}
       </select>

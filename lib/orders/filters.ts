@@ -1,23 +1,53 @@
-import type { OrderStatus } from "@/components/order-status-badge";
+/**
+ * Werte der Status-Dropdown-Achse (`?status=`). Der DB-Status `draft` wird für
+ * Anzeige UND Filterung in **zwei abgeleitete** Zustände gesplittet (KEIN neuer
+ * `orders.status`-Wert, keine Migration — reine Präsentations-/Filter-Ableitung
+ * aus `status='draft'` + Medien-Existenz):
+ *
+ *  - `new`         → `status='draft'` UND KEIN `order_media`  („Neu").
+ *  - `in_progress` → `status='draft'` UND ≥1 `order_media`    („In Arbeit").
+ *
+ * Die übrigen Werte sind echte `OrderStatus` (`generated`/`sent`/`viewed`/
+ * `shared`) und werden direkt auf `status=<wert>` übersetzt. Die Server-seitige
+ * Übersetzung der beiden Entwurfs-Ableitungen passiert in der Auftragsliste —
+ * die Medien-Bedingung muss dort IN die Query (sonst bricht die Pagination).
+ */
+export const STATUS_FILTERS = [
+  "new",
+  "in_progress",
+  "generated",
+  "sent",
+  "viewed",
+  "shared",
+] as const;
+
+export type StatusFilter = (typeof STATUS_FILTERS)[number];
+
+/** Typ-Guard: ist der String ein gültiger Status-Filter-Wert? */
+export function isStatusFilter(value: unknown): value is StatusFilter {
+  return (
+    typeof value === "string" &&
+    (STATUS_FILTERS as readonly string[]).includes(value)
+  );
+}
 
 /**
  * Quick-Filter der Auftragsliste (Block C / Schritt 3). Eigene Achse **neben**
- * dem Status-Dropdown (`?status=`) — sie deckt Mehrfach-/Sonderbedingungen ab,
- * die kein einzelner Status-Wert ausdrückt, und läuft daher über einen eigenen
+ * dem Status-Dropdown (`?status=`) — sie deckt Sonderbedingungen ab, die kein
+ * einzelner Status-Wert ausdrückt, und läuft daher über einen eigenen
  * Query-Parameter `?quick=`. Dropdown und Quick schließen sich gegenseitig aus
  * (immer nur einer führt).
  *
- *  - `flagged`      → „Abgeholt, Booklet nicht versendet" (exakt die Warn-Badge-
- *                     Bedingung aus Block C / Schritt 2): `picked_up_at` gesetzt
- *                     UND Status ∈ {draft, generated} (= NOT IN {sent, viewed,
- *                     shared}; `finalized` existiert nicht mehr).
- *  - `drafts`       → Status === 'draft'.
+ *  - `flagged` → „Abgeholt, Booklet nicht versendet" (exakt die Warn-Badge-
+ *                Bedingung aus Block C / Schritt 2): `picked_up_at` gesetzt UND
+ *                Status ∈ {draft, generated} (= NOT IN {sent, viewed, shared};
+ *                `finalized` existiert nicht mehr).
  *
- * Der frühere Quick-Filter `ungenerated` (war Status ∈ {draft, finalized}) ist
- * mit dem Wegfall von `finalized` deckungsgleich mit `drafts` geworden und daher
- * entfernt — eine Auswahl genügt für „noch kein Booklet".
+ * Der frühere Quick-Filter `drafts` (Status === 'draft') ist mit dem
+ * Entwurfs-Split der Status-Dropdown-Achse (Neu / In Arbeit) redundant geworden
+ * und daher entfernt.
  */
-export const QUICK_FILTERS = ["flagged", "drafts"] as const;
+export const QUICK_FILTERS = ["flagged"] as const;
 
 export type QuickFilter = (typeof QUICK_FILTERS)[number];
 
@@ -39,7 +69,7 @@ export const ORDERS_PAGE_SIZE = 20;
  * wird nur ab Seite 2 angehängt (Seite 1 = nackte URL).
  */
 export function buildOrdersUrl(opts: {
-  status?: OrderStatus | null;
+  status?: StatusFilter | null;
   quick?: QuickFilter | null;
   page?: number;
 }): string {

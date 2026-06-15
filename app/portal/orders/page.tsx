@@ -21,7 +21,9 @@ import {
   ORDERS_PAGE_SIZE,
   buildOrdersUrl,
   isQuickFilter,
+  isStatusFilter,
   type QuickFilter,
+  type StatusFilter,
 } from "@/lib/orders/filters";
 
 /** Eine Zeile der Auftragsliste — nur die für die Übersicht benötigten Felder. */
@@ -66,28 +68,54 @@ export default async function OrdersPage({
     page: pageParam,
   } = await searchParams;
 
-  // Zwei Filter-Achsen, mutually exclusive: Quick führt, sonst Status. Ist ein
-  // Quick aktiv, wird der Dropdown-Wert verworfen (Dropdown zeigt „Alle").
+  // Zwei Filter-Achsen, mutually exclusive: Quick führt, sonst Status-Dropdown.
+  // Ist ein Quick aktiv, wird der Dropdown-Wert verworfen (Dropdown zeigt „Alle").
   const activeQuick: QuickFilter | null = isQuickFilter(quickParam)
     ? quickParam
     : null;
-  const activeStatus: OrderStatus | null =
-    !activeQuick && isOrderStatus(statusParam) ? statusParam : null;
+  // Status-Dropdown-Achse: `draft` ist in zwei ABGELEITETE Werte gesplittet
+  // („new"/„in_progress"); die übrigen sind echte Lifecycle-Status. KEIN neuer
+  // `orders.status`-Wert — reine Filter-/Anzeige-Ableitung.
+  const activeStatusFilter: StatusFilter | null =
+    !activeQuick && isStatusFilter(statusParam) ? statusParam : null;
 
   // Seite (1-indexiert, Default 1). Ungültig/≤0 ⇒ 1.
   const parsedPage = Number.parseInt(pageParam ?? "1", 10);
   const page = Number.isFinite(parsedPage) && parsedPage >= 1 ? parsedPage : 1;
 
   const supabase = await createClient();
+
+  // EINE Zweitquery, die das Badge UND den Filter speist (Muster wie die
+  // reel_status-Query unten): alle Entwürfe (status='draft') des Betriebs MIT
+  // ≥1 Medium. `order_media!inner` ⇒ PostgREST liefert nur Aufträge mit
+  // mindestens einem Medium (eine Zeile je Auftrag, Kinder genested). RLS
+  // skopiert auf den Betrieb; zusätzlich defensiver business_id-Filter, kein
+  // service_role. **Geschäftsweit** (nicht seiten-skopiert), weil der „Neu"-
+  // Filter unten ein `id NOT IN (…)` über die GESAMTE Entwurfs-mit-Medium-Menge
+  // braucht (die Pagination greift erst nach dem WHERE).
+  const { data: draftMediaRows } = await supabase
+    .from("orders")
+    .select("id, order_media!inner(id)")
+    .eq("business_id", business.id)
+    .eq("status", "draft")
+    .returns<{ id: string }[]>();
+  const draftWithMedia = new Set((draftMediaRows ?? []).map((r) => r.id));
+
+  // „In Arbeit" = Entwurf MIT Medium ⇒ order_media!inner direkt in der Hauptquery
+  // (PostgREST nestet die Kinder ⇒ count + Pagination zählen Eltern-Zeilen,
+  // bleiben also korrekt). Die Medien-Bedingung MUSS so in die Query — nach dem
+  // Fetch filtern würde die server-seitige Pagination zerstören.
+  const mediaJoin = activeStatusFilter === "in_progress";
+  const selectCols =
+    "id, customer_name, external_ref, short_summary, status, picked_up_at, created_at" +
+    (mediaJoin ? ", order_media!inner(id)" : "");
+
   let query = supabase
     .from("orders")
-    .select(
-      "id, customer_name, external_ref, short_summary, status, picked_up_at, created_at",
-      { count: "exact" },
-    )
+    .select(selectCols, { count: "exact" })
     .eq("business_id", business.id);
 
-  // Quick-Filter ⇒ eigene WHERE-Logik (kein ?status=-Single-Value).
+  // Filter-Übersetzung server-seitig (IN die Query, damit Pagination heil bleibt).
   if (activeQuick === "flagged") {
     // Exakt die Warn-Badge-Bedingung (Block C / Schritt 2): abgeholt, aber noch
     // nicht versendet. NOT IN {sent, viewed, shared} == IN {draft, generated}
@@ -95,10 +123,21 @@ export default async function OrdersPage({
     query = query
       .not("picked_up_at", "is", null)
       .in("status", ["draft", "generated"]);
-  } else if (activeQuick === "drafts") {
+  } else if (activeStatusFilter === "new") {
+    // „Neu" = Entwurf OHNE Medium ⇒ alle Entwürfe minus die mit Medium. Leere
+    // Menge ⇒ alle Entwürfe sind „neu" (kein NOT-IN nötig).
     query = query.eq("status", "draft");
-  } else if (activeStatus) {
-    query = query.eq("status", activeStatus);
+    if (draftWithMedia.size > 0) {
+      query = query.not("id", "in", `(${[...draftWithMedia].join(",")})`);
+    }
+  } else if (activeStatusFilter === "in_progress") {
+    // „In Arbeit" = Entwurf MIT Medium ⇒ status='draft' + der order_media!inner-
+    // Join aus selectCols. Hat kein Entwurf Medien, liefert der inner-Join von
+    // selbst nichts (kein Sonderfall nötig).
+    query = query.eq("status", "draft");
+  } else if (isOrderStatus(activeStatusFilter)) {
+    // Echte Lifecycle-Status (generated/sent/viewed/shared) direkt.
+    query = query.eq("status", activeStatusFilter);
   }
 
   const from = (page - 1) * ORDERS_PAGE_SIZE;
@@ -117,14 +156,14 @@ export default async function OrdersPage({
   if (page > totalPages) {
     redirect(
       buildOrdersUrl({
-        status: activeStatus,
+        status: activeStatusFilter,
         quick: activeQuick,
         page: totalPages,
       }),
     );
   }
 
-  const hasActiveFilter = activeQuick !== null || activeStatus !== null;
+  const hasActiveFilter = activeQuick !== null || activeStatusFilter !== null;
   // Filter-Leiste zeigen, sobald es Aufträge gibt ODER ein Filter aktiv ist
   // (damit man aus einem leeren Filter-Ergebnis wieder zurück auf „Alle" kann).
   const showFilter = total > 0 || hasActiveFilter;
@@ -159,7 +198,7 @@ export default async function OrdersPage({
         {showFilter ? (
           <>
             <OrderStatusFilter
-              value={activeStatus ?? "all"}
+              value={activeStatusFilter ?? "all"}
               quick={activeQuick}
             />
             <Link href="/portal/orders/new" className="btn-dark orders-new-btn">
@@ -298,7 +337,10 @@ export default async function OrdersPage({
                       gap: 6,
                     }}
                   >
-                    <OrderStatusBadge status={order.status} />
+                    <OrderStatusBadge
+                      status={order.status}
+                      hasMedia={draftWithMedia.has(order.id)}
+                    />
                     {order.status === "generated" ? (
                       <ReelStatePill
                         reelStatus={reelByOrder.get(order.id) ?? null}
@@ -325,7 +367,7 @@ export default async function OrdersPage({
           <OrdersPagination
             page={page}
             totalPages={totalPages}
-            status={activeStatus}
+            status={activeStatusFilter}
             quick={activeQuick}
           />
         </>

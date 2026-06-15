@@ -1,7 +1,10 @@
 import Link from "next/link";
 import { DEFAULT_LOCALE, t } from "@/lib/i18n";
-import type { OrderStatus } from "@/components/order-status-badge";
-import { buildOrdersUrl, type QuickFilter } from "@/lib/orders/filters";
+import {
+  buildOrdersUrl,
+  type QuickFilter,
+  type StatusFilter,
+} from "@/lib/orders/filters";
 
 /**
  * Seiten-Navigation der Auftragsliste (Block C / Schritt 3). Server-seitige
@@ -17,7 +20,7 @@ export function OrdersPagination({
 }: {
   page: number;
   totalPages: number;
-  status: OrderStatus | null;
+  status: StatusFilter | null;
   quick: QuickFilter | null;
 }) {
   if (totalPages <= 1) return null;

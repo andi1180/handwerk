@@ -7,7 +7,7 @@ import {
 } from "@/lib/orders/filters";
 
 /**
- * Drei Schnellfilter-Buttons über der Auftragsliste (Block C / Schritt 3).
+ * Schnellfilter-Buttons über der Auftragsliste (Block C / Schritt 3).
  * Server-Component-fähig: jeder Button ist ein `<Link>` — kein Client-State,
  * keine `<form>`.
  *
@@ -21,9 +21,8 @@ import {
  * Genau EIN Quick kann aktiv sein (`active`); ist ein Status-Dropdown-Wert
  * aktiv, ist `active === null` und kein Button hervorgehoben.
  */
-const LABEL_KEY: Record<QuickFilter, "quickFlagged" | "quickDrafts"> = {
+const LABEL_KEY: Record<QuickFilter, "quickFlagged"> = {
   flagged: "quickFlagged",
-  drafts: "quickDrafts",
 };
 
 export function OrderQuickFilters({ active }: { active: QuickFilter | null }) {

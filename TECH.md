@@ -2665,6 +2665,44 @@ AUTHENTICATED (kein User ⇒ 401, kein Betrieb ⇒ 403) + RLS + business-scoped 
 
 ---
 
+## Entwurfs-Status gesplittet: „Neu" / „In Arbeit" (abgeleitet, **kein** neuer DB-Status)
+
+Die Anzeige des DB-Status `draft` wird in **zwei abgeleitete Zustände** aufgeteilt — **ohne** die Status-Maschine anzufassen: **kein** neuer `orders.status`-Wert, **keine** Migration, **kein** Eingriff in Webhook/Lifecycle/Delivery/Check-Constraint. „Neu"/„In Arbeit" sind reine **Präsentations- und Filter-Ableitungen** aus `(status='draft', hat Medien)`:
+
+- `draft` + **0** Medien → **„Neu"** (grau, wie bisher der Entwurf).
+- `draft` + **≥1** Medium → **„In Arbeit"** (amber, bestehende `--amber-*`-Tokens aus 8d/Reel-Pill).
+- `generated`/`sent`/`viewed`/`shared` → **unverändert**.
+
+Die Status-Maschine bleibt `draft → generated → sent → viewed → shared`; `OrderStatus` + die DB-Check-Constraint werden **nicht** erweitert (kein Fake-Status).
+
+### Badge ([components/order-status-badge.tsx](components/order-status-badge.tsx))
+
+Optionales Prop `hasMedia?: boolean` (Default `false`). Wirkt **nur** auf `draft`: `hasMedia` ⇒ Label „In Arbeit" + neuer amber `BadgeStyle` (`--amber-light`/`--amber-border`/`--amber-text`), sonst Label „Neu" + bisheriger neutraler Stil. Alle übrigen Status unberührt (Label + Stil wie gehabt). i18n: `orderStatus.draft`-Wert von „Entwurf" → **„Neu"**, neuer Key `orderStatus.inProgress` → **„In Arbeit"**. `OrderStatus`/`ORDER_STATUSES`/`STATUS_STYLES` unverändert.
+
+### Medien-Existenz — EINE Query, die Badge UND Filter speist ([app/portal/orders/page.tsx](app/portal/orders/page.tsx))
+
+Eine zusätzliche Query (Muster wie die bestehende `reel_status`-Zweitquery) liefert die **geschäftsweite** Menge der Entwürfe mit ≥1 Medium: `orders` + `order_media!inner(id)`, `status='draft'`, `business_id`-skopiert (AUTHENTICATED, RLS, **kein** `service_role`) → `Set<order_id>` (`draftWithMedia`). `order_media!inner` ⇒ PostgREST liefert nur Aufträge mit Medium (eine Zeile je Auftrag, Kinder genested). **Geschäftsweit** (nicht seiten-skopiert), weil der „Neu"-Filter ein `id NOT IN (…)` über die GESAMTE Menge braucht (Pagination greift erst nach dem WHERE). Aus dem Set wird je Zeile `hasMedia={draftWithMedia.has(order.id)}` ans Badge gegeben.
+
+### Detailseite ([app/portal/orders/[id]/page.tsx](app/portal/orders/[id]/page.tsx))
+
+Die Detailseite lädt die Medien ohnehin (Signed-URLs) ⇒ `hasMedia={media.length > 0}` ans Header-Badge, **keine** Extra-Query.
+
+### Status-Filter wird 6-teilig ([lib/orders/filters.ts](lib/orders/filters.ts), [order-status-filter.tsx](components/order-status-filter.tsx))
+
+Neue Filter-Achse `STATUS_FILTERS = ['new','in_progress','generated','sent','viewed','shared']` (Typ `StatusFilter` + Guard `isStatusFilter`) **neben** `ORDER_STATUSES` (Badge-/Lifecycle-Quelle bleibt). `new`/`in_progress` sind abgeleitet, die übrigen vier echte `OrderStatus`. Dropdown-Optionen: **Alle | Neu | In Arbeit | Generiert | Gesendet | Angesehen | Geteilt** (`FILTER_LABEL_KEY` mappt `new→draft`/`in_progress→inProgress` auf dieselben `orderStatus.*`-Labels wie das Badge ⇒ eine Quelle, kein Drift). `buildOrdersUrl`-`status` nun `StatusFilter | null`; `OrdersPagination`-`status`-Prop ebenso; `OrderStatusFilter.onChange` nutzt `isStatusFilter` statt `isOrderStatus`.
+
+**Server-seitige Übersetzung** (die Medien-Bedingung muss IN die Query, sonst bricht die Pagination):
+
+- **`new`** → `status='draft'`; ist `draftWithMedia` nicht leer, zusätzlich `id NOT IN (draftWithMedia)`. Leere Menge ⇒ alle Entwürfe sind „neu" (kein NOT-IN).
+- **`in_progress`** → `status='draft'` + `order_media!inner(id)` **direkt in der Hauptquery** (`selectCols` bekommt den Embed nur in diesem Fall). PostgREST nestet die Kinder ⇒ `count`/`.range()` zählen Eltern-Zeilen ⇒ Pagination korrekt; hat kein Entwurf Medien, liefert der inner-Join von selbst nichts (kein Sonderfall).
+- **`generated`/`sent`/`viewed`/`shared`** → `.eq('status', …)` (über `isOrderStatus`-Narrowing).
+
+Der jetzt redundante Quick-Filter **`drafts`/„Entwürfe" entfernt** (`QUICK_FILTERS = ['flagged']`, `LABEL_KEY` ohne `drafts`, i18n `orders.quickDrafts` raus); **`flagged`/„Geflaggt" unverändert** (`picked_up_at` gesetzt UND `status IN {draft, generated}`). Die `?status=`/`?quick=`-Achsen-Mechanik (mutually exclusive, Quick führt, Platzhalter-Option bei aktivem Quick) bleibt sonst unverändert.
+
+**Unverändert:** Warn-Badge/Flag-Logik, `reel_status`-Pill (nur `generated`), Webhook, Lifecycle, Delivery, Check-Constraint. **Konventionen:** keine Migration; AUTHENTICATED + RLS + defensiver `business_id`-Filter, kein `service_role`; Server Components default; kein `<form>`, kein `any`; `--amber-*` wiederverwendet. `pnpm typecheck` + `pnpm build` grün.
+
+---
+
 ## Launch-Fahrplan & deferierte Härtung
 
 Detail-Referenz für die Risikobewertung: [SECURITY_REVIEW.md](SECURITY_REVIEW.md) (bleibt im Repo). Dieser Abschnitt fasst die **Reihenfolge** des Live-Gangs und die **vor Kunde #2 verpflichtende** Härtung zusammen.

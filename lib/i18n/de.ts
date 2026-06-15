@@ -65,7 +65,6 @@ export const de = {
     filterQuickActive: "Schnellfilter aktiv",
     quickLabel: "Schnellfilter",
     quickFlagged: "Geflaggt",
-    quickDrafts: "Entwürfe",
     pagination: "Seiten-Navigation",
     prevPage: "Zurück",
     nextPage: "Weiter",
@@ -87,7 +86,8 @@ export const de = {
       "Der Auftrag konnte nicht angelegt werden. Bitte erneut versuchen.",
   },
   orderStatus: {
-    draft: "Entwurf",
+    draft: "Neu",
+    inProgress: "In Arbeit",
     generated: "Generiert",
     sent: "Gesendet",
     viewed: "Angesehen",
