@@ -66,19 +66,21 @@ export async function POST(
     return NextResponse.json({ error: "generation_failed" }, { status: 502 });
   }
 
-  // Leere Caption als null speichern (z. B. Video ohne Stichwort).
-  const captionValue = caption.length > 0 ? caption : null;
+  // Leeres Ergebnis (Video ohne Stichwort, isMetaResponse-Fehlalarm, …):
+  // KEIN DB-Update — eine bestehende Caption bleibt erhalten. Der Client zeigt
+  // stattdessen einen Hinweis zum manuellen Ergänzen.
+  if (caption.length === 0) {
+    return NextResponse.json({ id: media.id, caption: null, empty: true }, { status: 200 });
+  }
+
   const { error } = await supabase
     .from("order_media")
-    .update({ caption: captionValue })
+    .update({ caption })
     .eq("id", media.id)
     .eq("order_id", orderId);
   if (error) {
     return NextResponse.json({ error: "update_failed" }, { status: 500 });
   }
 
-  return NextResponse.json(
-    { id: media.id, caption: captionValue ?? "" },
-    { status: 200 },
-  );
+  return NextResponse.json({ id: media.id, caption }, { status: 200 });
 }

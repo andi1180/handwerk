@@ -247,6 +247,7 @@ export const de = {
     selectAll: "Alle auswählen",
     deselectAll: "Auswahl aufheben",
     error: "Aktion fehlgeschlagen. Bitte erneut versuchen.",
+    emptyResult: "Keine Bildunterschrift erzeugt – bitte manuell ergänzen.",
   },
   // „Bearbeiten" (Reopen, generated → draft) — zurück in den Editier-Modus.
   // Ersetzt den früheren `finalize`-Block (finalize ist entfallen; der eine

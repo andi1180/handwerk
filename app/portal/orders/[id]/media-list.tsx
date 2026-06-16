@@ -1037,7 +1037,7 @@ function CaptionEditor({
   const [text, setText] = useState(media.caption ?? media.keyword ?? "");
   const [saving, setSaving] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
-  const [feedback, setFeedback] = useState<"saved" | "error" | null>(null);
+  const [feedback, setFeedback] = useState<"saved" | "error" | "emptyResult" | null>(null);
 
   const busy = saving || regenerating;
 
@@ -1077,7 +1077,17 @@ function CaptionEditor({
           { method: "POST" },
         );
         if (!res.ok) throw new Error("regenerate_failed");
-        const data = (await res.json()) as { id: string; caption: string };
+        const data = (await res.json()) as {
+          id: string;
+          caption: string | null;
+          empty?: boolean;
+        };
+        // Leeres Ergebnis (isMetaResponse-Fehlalarm, Video ohne Frames/Stichwort,
+        // …): Feld und DB-Caption bleiben unangetastet — kein destruktiver Apply.
+        if (data.empty || !data.caption) {
+          setFeedback("emptyResult");
+          return;
+        }
         setText(data.caption);
         onCaptionChange(media.id, data.caption);
       } catch {
@@ -1148,7 +1158,8 @@ function CaptionEditor({
         maxLength={CAPTION_MAX_LENGTH}
         rows={2}
         placeholder={t(DEFAULT_LOCALE, "captions.empty")}
-        style={{ resize: "none" }}
+        disabled={busy}
+        style={{ resize: "none", opacity: busy ? 0.6 : 1 }}
       />
 
       <div
@@ -1163,14 +1174,21 @@ function CaptionEditor({
           style={{
             fontSize: 13,
             minHeight: 18,
-            color: feedback === "error" ? "#B23B3B" : "var(--text-secondary)",
+            color:
+              feedback === "error"
+                ? "#B23B3B"
+                : feedback === "emptyResult"
+                  ? "var(--text-secondary)"
+                  : "var(--text-secondary)",
           }}
         >
           {feedback === "saved"
             ? t(DEFAULT_LOCALE, "captions.saved")
             : feedback === "error"
               ? t(DEFAULT_LOCALE, "captions.error")
-              : ""}
+              : feedback === "emptyResult"
+                ? t(DEFAULT_LOCALE, "captions.emptyResult")
+                : ""}
         </span>
         <button
           type="button"
