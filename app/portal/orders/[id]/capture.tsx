@@ -150,6 +150,7 @@ export function Capture({
   videoCount,
   hasBefore,
   hasAfter,
+  onFramesUploaded,
 }: {
   businessId: string;
   orderId: string;
@@ -167,6 +168,14 @@ export function Capture({
   hasBefore: boolean;
   /** Ist der Nachher-Slot bereits durch ein gespeichertes Bild belegt? (0010) */
   hasAfter: boolean;
+  /**
+   * Nach erfolgreichem Frame-Upload: signed URLs der neuen Frames übergeben,
+   * damit der Viewer sie OHNE router.refresh() sofort anzeigen kann. Die Frames
+   * landen im Storage, werden aber nicht via Full-Page-Refresh re-signiert —
+   * dadurch bleibt der <video src> der bestehenden Tiles stabil (kein src-Swap,
+   * kein iOS-Compositing-Regressions-Bug).
+   */
+  onFramesUploaded?: (videoStoragePath: string, frameUrls: string[]) => void;
 }) {
   const router = useRouter();
   const supabase = useMemo(() => createClient(), []);
@@ -219,12 +228,13 @@ export function Capture({
       }
       if (frames.length === 0) return; // kein brauchbarer Frame → Video bleibt ohne
 
-      let uploaded = 0;
+      // Frames hochladen und Pfade der erfolgreichen Uploads sammeln.
+      const uploadedPaths: string[] = [];
       for (const frame of frames) {
         const path = videoFramePath(videoStoragePath, frame.index);
         try {
           await uploadWithRetry(supabase, path, frame.blob, "image/jpeg");
-          uploaded++;
+          uploadedPaths.push(path);
         } catch (err) {
           console.error(
             `[capture] Frame-Upload fehlgeschlagen (${ctx}, frame ${frame.index}):`,
@@ -233,10 +243,23 @@ export function Capture({
           // übrige Frames weiter versuchen
         }
       }
-      // Server-Liste neu laden, damit die Detailseite die Frames signiert + anzeigt.
-      if (uploaded > 0) router.refresh();
+      if (uploadedPaths.length === 0) return;
+
+      // Signed URLs für die hochgeladenen Frames erzeugen und über den Callback
+      // in den lokalen Viewer-State einspeisen — KEIN router.refresh().
+      // Damit bleibt der <video src> aller bestehenden Kacheln stabil (kein
+      // src-Swap, kein iOS-Compositing-Regressions-Bug bei den Tile-Controls).
+      const { data: signed } = await supabase.storage
+        .from("order-media")
+        .createSignedUrls(uploadedPaths, 3600);
+      const signedUrls = (signed ?? [])
+        .filter((s) => !s.error && s.signedUrl)
+        .map((s) => s.signedUrl as string);
+      if (signedUrls.length > 0) {
+        onFramesUploaded?.(videoStoragePath, signedUrls);
+      }
     },
-    [supabase, orderId, router],
+    [supabase, orderId, onFramesUploaded],
   );
 
   const runUpload = useCallback(

@@ -785,6 +785,7 @@ function MediaViewer({
         position: "fixed",
         inset: 0,
         zIndex: 60,
+        overflowY: "auto",
         display: "flex",
         flexDirection: "column",
         background: "rgba(0, 0, 0, 0.82)",
@@ -817,11 +818,13 @@ function MediaViewer({
         <CloseIcon />
       </div>
 
-      {/* Medien-Bereich (füllt den Platz oberhalb des Caption-Panels). */}
+      {/* Medien-Bereich. Kein flex:1 mehr — die Panels darunter müssen auf kurzen
+          Handy-Schirmen erreichbar sein; der Viewer-Container scrollt (overflowY
+          auto). maxHeight:55dvh begrenzt das Medium, damit die Panels sichtbar
+          bleiben, ohne scrollen zu müssen. */}
       <div
         style={{
-          flex: 1,
-          minHeight: 0,
+          flexShrink: 0,
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
@@ -838,7 +841,7 @@ function MediaViewer({
               onClick={(e) => e.stopPropagation()}
               style={{
                 maxWidth: "100%",
-                maxHeight: "100%",
+                maxHeight: "55dvh",
                 borderRadius: "var(--radius)",
                 background: "#000",
               }}
@@ -851,7 +854,7 @@ function MediaViewer({
               onClick={(e) => e.stopPropagation()}
               style={{
                 maxWidth: "100%",
-                maxHeight: "100%",
+                maxHeight: "55dvh",
                 objectFit: "contain",
                 borderRadius: "var(--radius)",
               }}

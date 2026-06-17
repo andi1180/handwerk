@@ -7,8 +7,8 @@ import { DEFAULT_LOCALE, t } from "@/lib/i18n";
 import { OrderStatusBadge } from "@/components/order-status-badge";
 import { CUSTOMER_VIEW_QUERY } from "@/lib/booklet/customer-view";
 import { NO_TRACK_QUERY } from "@/lib/booklet/events";
-import { Capture } from "./capture";
-import { MediaList, type MediaWithUrl } from "./media-list";
+import { MediaSection } from "./media-section";
+import type { MediaWithUrl } from "./media-list";
 import {
   CreateBookletButton,
   ReopenButton,
@@ -271,31 +271,23 @@ export default async function OrderDetailPage({
           {t(DEFAULT_LOCALE, "orderDetail.media")}
         </h2>
 
-        {/* Foto-/Video-Capture (Client): zeigt Pending-Items, bis router.refresh()
-            sie in die Medien-Liste überführt. Nur im Editier-Modus (Entwurf). */}
-        {isDraft ? (
-          <Capture
-            businessId={order.business_id}
-            orderId={order.id}
-            maxVideoSeconds={maxVideoSeconds}
-            photoMax={photoMax}
-            videoMax={videoMax}
-            photoCount={photoCount}
-            videoCount={videoCount}
-            hasBefore={hasBefore}
-            hasAfter={hasAfter}
-          />
-        ) : null}
-
-        {/* Mobiler Assembler (6a): Kachel-Raster, Reorder + Löschen. Im
-            Abgeschlossen-Modus read-only (nur Ansehen/Abspielen). */}
-        <div style={{ marginTop: 16 }}>
-          <MediaList
-            orderId={order.id}
-            items={mediaWithUrls}
-            readOnly={!isDraft}
-          />
-        </div>
+        {/* Capture (Client) + MediaList in einem Client-Wrapper, damit nach dem
+            Frame-Upload kein zweiter router.refresh() nötig ist. Stattdessen
+            reicht der Wrapper die frisch signierten Frame-URLs per Callback direkt
+            in den MediaList-State — kein src-Swap an bestehenden Video-Kacheln. */}
+        <MediaSection
+          orderId={order.id}
+          businessId={order.business_id}
+          initialItems={mediaWithUrls}
+          isDraft={isDraft}
+          maxVideoSeconds={maxVideoSeconds}
+          photoMax={photoMax}
+          videoMax={videoMax}
+          photoCount={photoCount}
+          videoCount={videoCount}
+          hasBefore={hasBefore}
+          hasAfter={hasAfter}
+        />
       </section>
 
       {/* ───── Aktionszone (Control Center) am Seitenende ─────

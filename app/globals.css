@@ -702,6 +702,9 @@ body {
   top: 6px;
   right: 6px;
   z-index: 3;
+  /* Eigene GPU-Compositing-Layer → rendert zuverlässig ÜBER dem <video>-Layer
+     auf iOS (verhindert das Verdecken durch den nativen Video-Renderer). */
+  transform: translateZ(0);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -719,6 +722,8 @@ body {
   top: 6px;
   left: 6px;
   z-index: 3;
+  /* Eigene GPU-Compositing-Layer → rendert zuverlässig ÜBER dem <video>-Layer. */
+  transform: translateZ(0);
   display: flex;
   align-items: center;
   justify-content: center;
