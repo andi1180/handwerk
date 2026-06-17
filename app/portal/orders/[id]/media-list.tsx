@@ -838,6 +838,7 @@ function MediaViewer({
               controls
               autoPlay
               playsInline
+              muted
               onClick={(e) => e.stopPropagation()}
               style={{
                 maxWidth: "100%",
@@ -923,6 +924,7 @@ function MediaViewer({
           orderId={orderId}
           media={media}
           onCaptionChange={onCaptionChange}
+          onClose={onClose}
         />
       )}
     </div>
@@ -1026,10 +1028,12 @@ function CaptionEditor({
   orderId,
   media,
   onCaptionChange,
+  onClose,
 }: {
   orderId: string;
   media: MediaWithUrl;
   onCaptionChange: (id: string, caption: string) => void;
+  onClose?: () => void;
 }) {
   // Vorbefüllung: bereits gespeicherte Caption, sonst das bei der Aufnahme
   // getippte Stichwort (`keyword`) als initialer, frei editierbarer Text. So
@@ -1062,6 +1066,7 @@ function CaptionEditor({
         setText(data.caption);
         onCaptionChange(media.id, data.caption);
         setFeedback("saved");
+        onClose?.();
       } catch {
         setFeedback("error");
       } finally {

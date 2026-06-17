@@ -196,6 +196,7 @@ function MediaSection({
             src={`${item.signedUrl}#t=0.1`}
             controls
             playsInline
+            muted
             preload="metadata"
           />
         ) : (

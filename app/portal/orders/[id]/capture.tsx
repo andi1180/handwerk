@@ -595,6 +595,7 @@ export function Capture({
               src={draft.objectUrl}
               controls
               playsInline
+              muted
               preload="metadata"
               style={{
                 width: "100%",
