@@ -170,9 +170,8 @@ export function Capture({
 }) {
   const router = useRouter();
   const supabase = useMemo(() => createClient(), []);
-  const photoInputRef = useRef<HTMLInputElement>(null);
-  const videoInputRef = useRef<HTMLInputElement>(null);
-  // Galerie-/Datei-Auswahl (ohne `capture` → kein Kamera-Zwang) — gleiche Pipeline.
+  // Galerie-/Datei-Auswahl (ohne `capture`) — der native System-Picker deckt
+  // Kamera + Galerie ab; gleiche Pipeline wie die frühere Direkt-Aufnahme.
   const photoUploadInputRef = useRef<HTMLInputElement>(null);
   const videoUploadInputRef = useRef<HTMLInputElement>(null);
 
@@ -342,8 +341,6 @@ export function Capture({
     [supabase, orderId, router, extractAndUploadFrames],
   );
 
-  const openPhoto = () => photoInputRef.current?.click();
-  const openVideo = () => videoInputRef.current?.click();
   const openPhotoUpload = () => photoUploadInputRef.current?.click();
   const openVideoUpload = () => videoUploadInputRef.current?.click();
 
@@ -451,24 +448,8 @@ export function Capture({
 
   return (
     <div style={{ marginBottom: 12 }}>
-      {/* Versteckte Datei-Inputs. Aufnahme: native Kamera (`capture`); Upload:
-          Galerie/Dateiauswahl (ohne `capture`). Beide nutzen dieselben Handler. */}
-      <input
-        ref={photoInputRef}
-        type="file"
-        accept="image/*"
-        capture="environment"
-        style={{ display: "none" }}
-        onChange={handlePhotoFile}
-      />
-      <input
-        ref={videoInputRef}
-        type="file"
-        accept="video/*"
-        capture="environment"
-        style={{ display: "none" }}
-        onChange={(e) => void handleVideoFile(e)}
-      />
+      {/* Versteckte Datei-Inputs (ohne `capture`) — der native System-Picker
+          deckt Kamera + Galerie ab. Beide nutzen dieselben Handler. */}
       <input
         ref={photoUploadInputRef}
         type="file"
@@ -484,47 +465,9 @@ export function Capture({
         onChange={(e) => void handleVideoFile(e)}
       />
 
-      {/* Große, klar tappbare Buttons — Zeile „Aufnehmen" (Kamera) + Zeile
-          „Hochladen" (Galerie/Datei). Beide Quellen, identische Pipeline. */}
+      {/* Große, klar tappbare Buttons — Foto/Video über den nativen Picker
+          (Kamera + Galerie). Identische Pipeline. */}
       <div className="capture-actions">
-        <div className="capture-row">
-          <div
-            role="button"
-            tabIndex={photoLimitReached ? -1 : 0}
-            aria-disabled={photoLimitReached}
-            className="btn-dark capture-btn"
-            style={photoLimitReached ? disabledBtnStyle : undefined}
-            onClick={photoLimitReached ? undefined : openPhoto}
-            onKeyDown={(e) => {
-              if (
-                !photoLimitReached &&
-                (e.key === "Enter" || e.key === " ")
-              )
-                openPhoto();
-            }}
-          >
-            <CameraIcon />
-            {t(DEFAULT_LOCALE, "capture.photo")}
-          </div>
-          <div
-            role="button"
-            tabIndex={videoLimitReached ? -1 : 0}
-            aria-disabled={videoLimitReached}
-            className="btn-outline capture-btn"
-            style={videoLimitReached ? disabledBtnStyle : undefined}
-            onClick={videoLimitReached ? undefined : openVideo}
-            onKeyDown={(e) => {
-              if (
-                !videoLimitReached &&
-                (e.key === "Enter" || e.key === " ")
-              )
-                openVideo();
-            }}
-          >
-            <VideoIcon />
-            {t(DEFAULT_LOCALE, "capture.video")}
-          </div>
-        </div>
         <div className="capture-row">
           <div
             role="button"
@@ -849,26 +792,6 @@ function PendingRow({
   );
 }
 
-/** Schlichtes Inline-SVG-Kamera-Icon für den Aufnahme-Button. Reine Deko. */
-function CameraIcon() {
-  return (
-    <svg
-      width={20}
-      height={20}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={1.8}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden
-    >
-      <path d="M4 8h3l1.5-2h7L17 8h3v11H4z" />
-      <circle cx="12" cy="13.5" r="3.2" />
-    </svg>
-  );
-}
-
 /** Schlichtes Inline-SVG-Upload-Icon für die Hochladen-Buttons. Reine Deko. */
 function UploadIcon() {
   return (
@@ -886,26 +809,6 @@ function UploadIcon() {
       <path d="M12 16V4" />
       <path d="M7 9l5-5 5 5" />
       <path d="M5 20h14" />
-    </svg>
-  );
-}
-
-/** Schlichtes Inline-SVG-Video-Icon für den Video-Button. Reine Deko. */
-function VideoIcon() {
-  return (
-    <svg
-      width={20}
-      height={20}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={1.8}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden
-    >
-      <rect x="3" y="5" width="18" height="14" rx="2" />
-      <path d="M10 9l5 3-5 3z" fill="currentColor" stroke="none" />
     </svg>
   );
 }

@@ -191,8 +191,6 @@ export const de = {
     },
   },
   capture: {
-    photo: "Foto aufnehmen",
-    video: "Video aufnehmen",
     uploadPhoto: "Foto hochladen",
     uploadVideo: "Video hochladen",
     videoTooLong:

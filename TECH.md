@@ -431,6 +431,8 @@ Neben „Foto/Video **aufnehmen**" (native Kamera, `<input … capture="environm
 - **Layout:** Die Buttons sind in zwei Zeilen gruppiert (`.capture-row`: Zeile „Aufnehmen" = Foto/Video, Zeile „Hochladen" = Foto/Video), je zwei gleich breite, große Tap-Targets (`.capture-btn`, mobil `min-height: 64px`).
 - **i18n:** `capture.uploadPhoto`/`capture.uploadVideo` ergänzt.
 
+> **Update (Direkt-Aufnahme-Buttons entfernt):** Die beiden „Foto/Video **aufnehmen**"-Buttons (`<input … capture="environment">`) sind aus [capture.tsx](app/portal/orders/[id]/capture.tsx) **entfernt** — es bleiben nur „Foto/Video **hochladen**" (`<input type="file" accept="image/*|video/*">` **ohne** `capture`). Der native System-Picker dieser Inputs deckt **Kamera + Galerie** ohnehin ab, daher waren die separaten Kamera-Buttons redundant. Mit entfernt: die toten Refs `photoInputRef`/`videoInputRef`, die toten Öffner `openPhoto`/`openVideo`, die Icons `CameraIcon`/`VideoIcon` und die i18n-Keys `capture.photo`/`capture.video`. Die geteilten Handler `handlePhotoFile`/`handleVideoFile` und die gesamte nachgelagerte Pipeline (Kompression/Längen-Check/Upload/Queue/Metadaten-POST) bleiben unverändert — die Upload-Buttons hängen weiter daran.
+
 ---
 
 ## Finalize + Lifecycle (Schritt 6c)
