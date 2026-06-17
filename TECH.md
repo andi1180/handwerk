@@ -2444,6 +2444,15 @@ Jedes **Bild** trägt eine **Kategorie**, die den festen Booklet-Aufbau steuert.
 - **Reorder NUR `process`:** der dnd-kit `SortableContext` enthält nur process-ids. `handleDragEnd` sortiert die process-Teilmenge, schickt aber das **volle** Set in Booklet-Ordnung `[before, …process, after]` an die reorder-Route — die bleibt damit „exakte Medien-Menge"-validiert, und `sort_order` folgt der Render-Reihenfolge.
 - **Geteilter `TileVisual`** (Kachel-Inhalt: Poster, Play-Overlay, Auswahl-/Caption-Indikator, Löschen) wird von der verschiebbaren `SortableTile` **und** dem fixen `BeforeAfterSlot` genutzt (nicht dupliziert). Auswahl, Caption-Bearbeitung und Löschen gelten damit **auch** für before/after.
 
+### Leeren Vorher/Nachher-Slot antippen → Foto-Upload für die Kategorie
+
+Ein **leerer** Vorher-/Nachher-Slot ist im Editier-Modus tappbar und startet den **bestehenden** Foto-Upload, wobei das hochgeladene Foto **direkt** dieser Kategorie zugewiesen wird. Reuse des gemeinsamen `handlePhotoFile`/`runUpload`-Pfades — **keine Duplikation** der Upload-Pipeline; die Kategorie ist nur ein Durchreich-Parameter (sie wandert seit 0010 ohnehin durch `Entwurf.category → POST category → resolveCategory → Insert`).
+
+- **Brücke** ([app/portal/orders/[id]/media-section.tsx](app/portal/orders/[id]/media-section.tsx)): hält `openPhotoControlRef` (`((category) => void) | null`), gibt ihn an `<Capture>` und reicht `onRequestPhotoForSlot(category)` an `<MediaList>` (ruft `openPhotoControlRef.current?.(category)`). Null, solange kein Capture gemountet ist (readOnly).
+- **Capture** ([capture.tsx](app/portal/orders/[id]/capture.tsx)): neuer `pendingPhotoCategoryRef` (Default `process`); `handlePhotoFile` liest ihn als Entwurf-`category` (statt hartkodiert `"process"`) und resettet danach. Die Buttons öffnen via `openPhotoUpload` weiter als `process` (unverändert). Der neue `openPhotoForCategory(category)` (useCallback) setzt den Ref + klickt den vorhandenen versteckten Foto-Input und nutzt **dieselben UX-Guards** wie die Buttons (belegter Slot ⇒ `capture.categoryTakenNotice`, Foto-Limit ⇒ `capture.limitReached`); der harte Riegel bleibt der Server (`category_taken`/`limit_reached`). Ein Effekt registriert diesen Opener im `openPhotoControlRef` (Aufruf erfolgt **synchron** im Box-Klick ⇒ User-Geste bleibt erhalten, der Datei-Picker öffnet zuverlässig).
+- **MediaList** ([media-list.tsx](app/portal/orders/[id]/media-list.tsx)): neuer Prop `onRequestPhotoForSlot`; `BeforeAfterSlot` bekommt `onAddPhoto`. Der **leere** Slot rendert im Editier-Modus als `role="button"` (Enter/Space, `+`-Icon, Hinweis `assembler.slotAddHint`, aria `assembler.slotAdd {category}`). **readOnly oder ohne Handler ⇒ reiner Platzhalter** wie bisher; **gefüllte Slots unverändert**. Der Entwurf-Dialog zeigt die Kategorie **vorbelegt** (z. B. „Vorher") und bleibt frei änderbar.
+- **CSS** `.media-ba-empty--add` (Cursor + Gold-Hover).
+
 ### KI-Captions kategorie-bewusst
 
 [lib/ai/captions.ts](lib/ai/captions.ts): `CaptionInput.category` + `categoryHint` qualifiziert im Haiku-Prompt `before` explizit als **Ausgangszustand/Vorher**, `after` als **Ergebnis/Nachher**; `process` unverändert. [lib/ai/media-caption.ts](lib/ai/media-caption.ts) (`CaptionableMedia.category`) reicht durch; Batch- ([…/captions/route.ts](app/api/portal/orders/[id]/captions/route.ts)) und Regenerate-Route ([…/caption/regenerate/route.ts](app/api/portal/orders/[id]/media/[mediaId]/caption/regenerate/route.ts)) selektieren `category` mit. Das Stichwort fließt wie bisher mit ein — before/after teilen sich den **gleichen** Stichwort-/Caption-Flow wie process-Bilder.
@@ -2454,7 +2463,7 @@ Jedes **Bild** trägt eine **Kategorie**, die den festen Booklet-Aufbau steuert.
 
 ### i18n
 
-`mediaCategory.{before,after,process}` (deutsche Labels zu den englischen DB-Werten), `capture.category`/`capture.categoryTaken`, `assembler.slotEmpty`/`processEmpty`/`categoryLabel`/`categoryError`, `finalize.needProcess`, `generate.needProcess`.
+`mediaCategory.{before,after,process}` (deutsche Labels zu den englischen DB-Werten), `capture.category`/`capture.categoryTaken`/`capture.categoryTakenNotice`, `assembler.slotEmpty`/`slotAdd`/`slotAddHint`/`processEmpty`/`categoryLabel`/`categoryError`, `finalize.needProcess`, `generate.needProcess`.
 
 ---
 

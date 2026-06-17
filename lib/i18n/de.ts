@@ -210,6 +210,7 @@ export const de = {
     // Bild-Kategorie im Aufnahme-Entwurf (0010) — nur Foto. Belegte Slots gesperrt.
     category: "Kategorie",
     categoryTaken: "belegt",
+    categoryTakenNotice: "Für diese Kategorie gibt es bereits ein Bild.",
   },
   // Bild-Kategorien (0010): DB-Werte before/after/process → deutsche Labels.
   mediaCategory: {
@@ -227,6 +228,9 @@ export const de = {
     deleteError: "Löschen fehlgeschlagen. Bitte erneut versuchen.",
     // Vorher/Nachher-Slots + Kategorie-Wechsel (0010).
     slotEmpty: "Noch kein Bild",
+    // Leerer Slot ist im Editier-Modus tappbar → Foto-Upload für diese Kategorie.
+    slotAdd: "{category}-Foto hinzufügen",
+    slotAddHint: "Foto hinzufügen",
     processEmpty: "Noch keine Prozess-Bilder.",
     categoryLabel: "Kategorie",
     categoryError: "Kategorie konnte nicht geändert werden.",

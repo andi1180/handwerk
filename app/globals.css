@@ -792,6 +792,19 @@ body {
   color: var(--text-secondary);
 }
 
+/* Tappbarer leerer Slot (Editier-Modus, 0010): startet den Foto-Upload für diese
+   Kategorie. Gold-Hover signalisiert die Aktion. */
+.media-ba-empty--add {
+  cursor: pointer;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease;
+}
+.media-ba-empty--add:hover {
+  border-color: var(--gold-border);
+  background: var(--surface);
+}
+
 /* Label-Band am unteren Rand des gefüllten Slots (fängt keine Taps ab). */
 .media-ba-label {
   position: absolute;

@@ -71,10 +71,17 @@ export function MediaList({
   orderId,
   items: initialItems,
   readOnly = false,
+  onRequestPhotoForSlot,
 }: {
   orderId: string;
   items: MediaWithUrl[];
   readOnly?: boolean;
+  /**
+   * Leeren Vorher/Nachher-Slot antippen → Foto-Upload für DIESE Kategorie (0010).
+   * Wird vom Wrapper (MediaSection) an Capture verdrahtet; fehlt der Callback oder
+   * ist `readOnly`, bleibt der Slot ein reiner Platzhalter.
+   */
+  onRequestPhotoForSlot?: (category: "before" | "after") => void;
 }) {
   const router = useRouter();
   const [items, setItems] = useState<MediaWithUrl[]>(initialItems);
@@ -412,6 +419,11 @@ export function MediaList({
           onToggleSelect={() => beforeItem && toggleSelect(beforeItem.id)}
           onView={() => beforeItem && setViewingId(beforeItem.id)}
           onDelete={() => beforeItem && handleDelete(beforeItem)}
+          onAddPhoto={
+            onRequestPhotoForSlot
+              ? () => onRequestPhotoForSlot("before")
+              : undefined
+          }
         />
         <BeforeAfterSlot
           category="after"
@@ -421,6 +433,11 @@ export function MediaList({
           onToggleSelect={() => afterItem && toggleSelect(afterItem.id)}
           onView={() => afterItem && setViewingId(afterItem.id)}
           onDelete={() => afterItem && handleDelete(afterItem)}
+          onAddPhoto={
+            onRequestPhotoForSlot
+              ? () => onRequestPhotoForSlot("after")
+              : undefined
+          }
         />
       </div>
 
@@ -698,6 +715,7 @@ function BeforeAfterSlot({
   onToggleSelect,
   onView,
   onDelete,
+  onAddPhoto,
 }: {
   category: "before" | "after";
   media: MediaWithUrl | null;
@@ -706,10 +724,38 @@ function BeforeAfterSlot({
   onToggleSelect: () => void;
   onView: () => void;
   onDelete: () => void;
+  /** Leeren Slot antippen → Foto-Upload für DIESE Kategorie (0010). */
+  onAddPhoto?: () => void;
 }) {
   const label = t(DEFAULT_LOCALE, `mediaCategory.${category}`);
 
   if (!media) {
+    // Editier-Modus: der leere Slot ist tappbar und startet den Foto-Upload für
+    // genau diese Kategorie. Abgeschlossen-Modus (readOnly) bzw. ohne Handler:
+    // reiner Platzhalter wie bisher.
+    if (!readOnly && onAddPhoto) {
+      return (
+        <div
+          className="media-ba-slot media-ba-empty media-ba-empty--add"
+          role="button"
+          tabIndex={0}
+          aria-label={t(DEFAULT_LOCALE, "assembler.slotAdd", { category: label })}
+          onClick={onAddPhoto}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              onAddPhoto();
+            }
+          }}
+        >
+          <span className="media-ba-empty-label">{label}</span>
+          <PlusIcon />
+          <span className="media-ba-empty-hint">
+            {t(DEFAULT_LOCALE, "assembler.slotAddHint")}
+          </span>
+        </div>
+      );
+    }
     return (
       <div className="media-ba-slot media-ba-empty">
         <span className="media-ba-empty-label">{label}</span>
@@ -1291,6 +1337,26 @@ function CheckIcon() {
       aria-hidden
     >
       <path d="M5 12l5 5 9-11" />
+    </svg>
+  );
+}
+
+/** Plus-Icon für den leeren, tappbaren Vorher/Nachher-Slot (0010). Reine Deko. */
+function PlusIcon() {
+  return (
+    <svg
+      width={22}
+      height={22}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.8}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+      style={{ color: "var(--text-secondary)" }}
+    >
+      <path d="M12 5v14M5 12h14" />
     </svg>
   );
 }

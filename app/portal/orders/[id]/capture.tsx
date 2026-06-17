@@ -151,6 +151,7 @@ export function Capture({
   hasBefore,
   hasAfter,
   onFramesUploaded,
+  openPhotoControlRef,
 }: {
   businessId: string;
   orderId: string;
@@ -176,6 +177,14 @@ export function Capture({
    * kein iOS-Compositing-Regressions-Bug).
    */
   onFramesUploaded?: (videoStoragePath: string, frameUrls: string[]) => void;
+  /**
+   * Brücke zur MediaList (0010): Capture registriert hier seinen Foto-Upload-
+   * Opener, damit ein leerer Vorher/Nachher-Slot den Upload für seine Kategorie
+   * starten kann — gemeinsamer Handler/Pipeline, keine Duplikation.
+   */
+  openPhotoControlRef?: React.RefObject<
+    ((category: MediaCategory) => void) | null
+  >;
 }) {
   const router = useRouter();
   const supabase = useMemo(() => createClient(), []);
@@ -183,6 +192,10 @@ export function Capture({
   // Kamera + Galerie ab; gleiche Pipeline wie die frühere Direkt-Aufnahme.
   const photoUploadInputRef = useRef<HTMLInputElement>(null);
   const videoUploadInputRef = useRef<HTMLInputElement>(null);
+  // Vorgemerkte Kategorie für den nächsten Foto-Upload (0010): Buttons setzen
+  // "process", ein leerer Vorher/Nachher-Slot setzt seine Kategorie. handlePhotoFile
+  // liest den Wert beim Erstellen des Entwurfs.
+  const pendingPhotoCategoryRef = useRef<MediaCategory>("process");
 
   const [draft, setDraft] = useState<Draft | null>(null);
   const [items, setItems] = useState<PendingItem[]>([]);
@@ -364,7 +377,13 @@ export function Capture({
     [supabase, orderId, router, extractAndUploadFrames],
   );
 
-  const openPhotoUpload = () => photoUploadInputRef.current?.click();
+  // Foto-Picker über die Buttons öffnen — immer Kategorie 'process'. Die Variante
+  // mit Kategorie-Vorgabe (leerer Slot) ist `openPhotoForCategory` (weiter unten,
+  // mit denselben UX-Guards).
+  const openPhotoUpload = () => {
+    pendingPhotoCategoryRef.current = "process";
+    photoUploadInputRef.current?.click();
+  };
   const openVideoUpload = () => videoUploadInputRef.current?.click();
 
   /** Verwirft einen evtl. offenen Entwurf und setzt den neuen Entwurf. */
@@ -384,8 +403,11 @@ export function Capture({
       mediaType: "photo",
       durationSeconds: null,
       keyword: "",
-      category: "process", // Standard; im Entwurf wählbar (Vorher/Nachher/Prozess)
+      // Vorgemerkte Kategorie (Button ⇒ 'process'; leerer Vorher/Nachher-Slot ⇒
+      // dessen Kategorie). Im Entwurf weiterhin wählbar.
+      category: pendingPhotoCategoryRef.current,
     });
+    pendingPhotoCategoryRef.current = "process"; // für den nächsten Upload zurücksetzen
   };
 
   const handleVideoFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -463,6 +485,47 @@ export function Capture({
     after: afterTaken,
     process: false,
   };
+
+  // Leerer Vorher/Nachher-Slot (MediaList) → Foto-Upload für GENAU diese Kategorie.
+  // Gemeinsamer Handler/Pipeline wie die Buttons; die Kategorie wird über
+  // pendingPhotoCategoryRef an handlePhotoFile durchgereicht. Dieselben UX-Guards
+  // (belegter Slot / Foto-Limit); der harte Riegel bleibt der Server.
+  const openPhotoForCategory = useCallback(
+    (category: MediaCategory) => {
+      if (
+        (category === "before" && beforeTaken) ||
+        (category === "after" && afterTaken)
+      ) {
+        setNotice(t(DEFAULT_LOCALE, "capture.categoryTakenNotice"));
+        return;
+      }
+      if (photoLimitReached) {
+        setNotice(
+          t(DEFAULT_LOCALE, "capture.limitReached", {
+            type: t(DEFAULT_LOCALE, "capture.photosLabel"),
+            max: photoMax,
+          }),
+        );
+        return;
+      }
+      pendingPhotoCategoryRef.current = category;
+      photoUploadInputRef.current?.click();
+    },
+    [beforeTaken, afterTaken, photoLimitReached, photoMax],
+  );
+
+  // Diesen Opener der MediaList bereitstellen (Aufruf erfolgt synchron im Klick
+  // der leeren Box ⇒ User-Geste bleibt erhalten, der Datei-Picker öffnet
+  // zuverlässig). Auf null zurückgesetzt, sobald Capture unmountet (readOnly ⇒
+  // keine Slot-Uploads).
+  useEffect(() => {
+    const ref = openPhotoControlRef;
+    if (!ref) return;
+    ref.current = openPhotoForCategory;
+    return () => {
+      ref.current = null;
+    };
+  }, [openPhotoControlRef, openPhotoForCategory]);
 
   const disabledBtnStyle: React.CSSProperties = {
     opacity: 0.45,

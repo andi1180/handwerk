@@ -3,6 +3,7 @@
 import { useState, useCallback, useMemo, useRef, useEffect } from "react";
 import { Capture } from "./capture";
 import { MediaList, type MediaWithUrl } from "./media-list";
+import type { MediaCategory } from "@/lib/orders/queries";
 
 /**
  * Client-Wrapper um Capture + MediaList.
@@ -100,6 +101,16 @@ export function MediaSection({
     [initialItems, extraFrames],
   );
 
+  // Brücke (0010): ein leerer Vorher/Nachher-Slot der MediaList startet den
+  // Foto-Upload des Capture für seine Kategorie. Capture registriert seinen Opener
+  // in diesem Ref; null, solange kein Capture gemountet ist (readOnly).
+  const openPhotoControlRef = useRef<
+    ((category: MediaCategory) => void) | null
+  >(null);
+  const requestPhotoForSlot = useCallback((category: "before" | "after") => {
+    openPhotoControlRef.current?.(category);
+  }, []);
+
   return (
     <>
       {isDraft ? (
@@ -114,6 +125,7 @@ export function MediaSection({
           hasBefore={hasBefore}
           hasAfter={hasAfter}
           onFramesUploaded={handleFramesUploaded}
+          openPhotoControlRef={openPhotoControlRef}
         />
       ) : null}
       <div style={{ marginTop: 16 }}>
@@ -121,6 +133,7 @@ export function MediaSection({
           orderId={orderId}
           items={mergedItems}
           readOnly={!isDraft}
+          onRequestPhotoForSlot={requestPhotoForSlot}
         />
       </div>
     </>
