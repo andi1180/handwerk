@@ -203,6 +203,8 @@ export const de = {
     uploading: "lädt…",
     error: "Fehler",
     uploadError: "Upload fehlgeschlagen. Bitte erneut.",
+    heicUnsupported:
+      "Dieses Foto-Format (HEIC) kann auf diesem Gerät nicht verarbeitet werden. Tipp: iPhone-Einstellungen → Kamera → Formate → „Maximale Kompatibilität“ wählen, dann werden Fotos als JPEG gespeichert.",
     retry: "Erneut",
     limitReached: "Limit erreicht: max. {max} {type} pro Auftrag.",
     photosLabel: "Fotos",

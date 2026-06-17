@@ -222,7 +222,7 @@ Der Upload ist bewusst zweigeteilt, damit die große Binärdatei **nicht** durch
 ### Client-Kompression ([lib/media/](lib/media/))
 
 - [constants.ts](lib/media/constants.ts): `MAX_IMAGE_DIM = 1500` (längste Kante), `JPEG_QUALITY = 0.8`. Video-Limit + Konfigurierbarkeit später.
-- [compress.ts](lib/media/compress.ts): `compressImage(file)` dekodiert (EXIF-Orientierung via `createImageBitmap({ imageOrientation: "from-image" })`), skaliert seitenverhältnis-treu auf `MAX_IMAGE_DIM`, zeichnet auf ein Canvas und exportiert als JPEG → `{ blob, width, height }`. Spart Upload-Volumen.
+- [compress.ts](lib/media/compress.ts): `compressImage(file)` dekodiert (EXIF-Orientierung via `createImageBitmap({ imageOrientation: "from-image" })`), skaliert seitenverhältnis-treu auf `MAX_IMAGE_DIM`, zeichnet auf ein Canvas und exportiert als JPEG → `{ blob, width, height }`. Spart Upload-Volumen. **HEIC/HEIF-Robustheit (iOS-Kameraroll):** scheitert `createImageBitmap` (manche iOS-Versionen dekodieren HEIC darüber nicht und werfen sofort), greift ein **`<img>`-Element-Fallback** (objectURL → `onload` → Canvas), den iOS Safari für HEIC **nativ** unterstützt (derselbe Decoder wie die Vorschau). Scheitern beide ⇒ `UnsupportedImageError` (älteres iOS < 17) → `capture.tsx` zeigt den konkreten Hinweis `capture.heicUnsupported` (Kamera-Format „Maximale Kompatibilität" = JPEG) statt des generischen Upload-Fehlers. Frische Live-Aufnahmen (`capture="environment"`) sind JPEG und nehmen den schnellen Bitmap-Pfad.
 
 ### Capture-Komponente ([app/portal/orders/[id]/capture.tsx](app/portal/orders/[id]/capture.tsx), Client)
 

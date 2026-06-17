@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { compressImage } from "@/lib/media/compress";
+import { compressImage, UnsupportedImageError } from "@/lib/media/compress";
 import { getVideoDuration } from "@/lib/media/video";
 import { extractVideoFrames } from "@/lib/media/extract-frames";
 import { videoFramePath } from "@/lib/media/video-frames";
@@ -285,6 +285,11 @@ export function Capture({
         }
       } catch (err) {
         console.error(`[capture] Bildaufbereitung fehlgeschlagen (${ctx}):`, err);
+        // HEIC/HEIF konnte mit keinem Browser-Pfad dekodiert werden (älteres iOS):
+        // ehrliche, konkrete Hilfe statt des generischen Upload-Fehlers.
+        if (err instanceof UnsupportedImageError) {
+          setNotice(t(DEFAULT_LOCALE, "capture.heicUnsupported"));
+        }
         markError();
         return;
       }
