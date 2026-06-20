@@ -119,6 +119,11 @@ export function parseRoappOrder(raw: unknown): RoappOrder {
   const status = asRecord(order.status);
   const customFields = asRecord(order.custom_fields);
 
+  // TEMPORÄR (SCHRITT 2/Teil 1): rohes roapp-client-Objekt loggen, um zu
+  // ermitteln, ob die Telefonnummer ein Standardfeld (phone/mobile/…) oder ein
+  // Custom-Field ist. KEIN Feature-Code — nach der Ermittlung wieder entfernen.
+  console.log("roapp client raw", Object.keys(client), client);
+
   const hasClient =
     order.client !== undefined && order.client !== null;
   const hasStatus =
