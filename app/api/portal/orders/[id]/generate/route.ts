@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { getCurrentBusiness } from "@/lib/auth/current-business";
@@ -8,45 +8,62 @@ import { generateReviewDraft } from "@/lib/ai/review";
 import { buildIgCaption } from "@/lib/booklet/ig-caption";
 import { generateAccessToken } from "@/lib/booklet/token";
 import { generateShortCode } from "@/lib/booklet/short-code";
+import { orderBookletMedia } from "@/lib/booklet/media-order";
+import { renderReel, type MediaItem } from "@/lib/reel/render";
+
+/**
+ * Node-Runtime erzwingen + maxDuration anheben (Fluid Compute): die teure Arbeit
+ * (Sonnet-Intro/Review + ffmpeg-Reel) läuft in `after()` NACH der Response —
+ * ohne diese Werte würde Vercel den Hintergrund-Job am Default-Timeout killen.
+ * Identisch zu render-reel/route.ts.
+ */
+export const runtime = "nodejs";
+export const maxDuration = 300;
 
 /** Echte Fehlermeldung für die Server-Logs (Vercel) extrahieren. */
 function errMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/** Externer Link ohne Protokoll/Trailing-Slash (Anzeige-Form fürs Reel-Outro). */
+function displayHost(url: string): string {
+  return url.replace(/^https?:\/\//i, "").replace(/\/+$/, "");
+}
+
 /** Wie oft ein neuer short_code bei (sehr seltener) UNIQUE-Kollision versucht wird. */
 const SHORT_CODE_MAX_ATTEMPTS = 5;
 
 /**
- * POST /api/portal/orders/[id]/generate — erzeugt die Booklet-Daten eines
- * Auftrags in EINEM Schritt: KI-Intro (Sonnet 4.6), Google-Review-Entwurf
- * (Sonnet 4.6, Schritt 9b), IG-Caption (reines Template, 9b), unerratbarer
- * `access_token`, `short_code`, Status → `generated`. Alle KI-Texte werden HIER
- * bei der Generierung erzeugt und gespeichert — die öffentliche Seite bleibt
- * KI-frei.
+ * POST /api/portal/orders/[id]/generate — erstellt das Booklet eines Auftrags.
  *
- * Flow-Vereinfachung: Es gibt KEINEN separaten `finalized`-Zwischenschritt mehr.
- * Der eine Klick „Booklet erstellen" führt direkt `draft → generated` aus.
+ * B1 — SOFORT-202 + Hintergrund-Arbeit (after()):
+ * Der Klick auf „Booklet erstellen" gibt in Millisekunden ein 202 zurück. Synchron
+ * (im Request, vor dem 202) laufen NUR die billigen Guards + DB-Writes:
+ *   1) Guards (fail fast): Auth-User (401), Auth-Betrieb (403), Order (404), Status
+ *      `draft`||`generated` (409), ≥ 1 process-Medium (400 need_process, 0010),
+ *      isAiConfigured (500).
+ *   2) Booklet-Shell schreiben (Insert/Update) mit LEEREM Inhalt
+ *      (intro/review/ig = null), reel_status='rendering', reel_url=null,
+ *      access_token/short_code/language/web_story_ready. Token bei Re-Generate behalten.
+ *   3) Order-Status → `generated` (defensiv `.eq("status", order.status)`).
+ * Schlägt ein Shell-/Status-Write fehl ⇒ 500 (synchron, VOR dem 202) — der Client
+ * sieht einen echten Fehler statt einer falschen „läuft im Hintergrund"-Meldung.
  *
- * Guards (alle vor dem Schreiben):
- *  - AUTHENTICATED Server-Client; kein User ⇒ 401, kein Betrieb ⇒ 403.
- *  - Order über RLS geladen (fremde/fehlende id ⇒ 404).
- *  - Status `draft` ODER `generated` (Re-Generate erlaubt, solange NICHT
- *    `sent`/…) ⇒ sonst 409.
- *  - Mindestens ein `process`-Medium ⇒ sonst 400 `need_process` (0010).
- *  - `isAiConfigured()` ⇒ sonst 500 `ai_not_configured`.
+ * Die TEURE Arbeit folgt in `after()` (server-seitig nach der Response, innerhalb
+ * maxDuration), damit der Nutzer die Seite sofort verlassen kann und alles zu Ende
+ * läuft: KI-Intro (Sonnet) → Review (Sonnet, non-fatal) → IG-Caption (Template) →
+ * Inhalt persistieren → Reel rendern (renderReel). Fehler im Hintergrund landen in
+ * `booklets.reel_status='failed'` (+ reel_error) — der Client erfährt sie über den
+ * Reel-Status-Poll. Bei Intro-Fehler wird KEIN Reel gerendert (reel_error 'intro:').
  *
- * FEHLERSICHERHEIT: Der Order-Status wird ERST GANZ AM ENDE auf `generated`
- * gesetzt (nach allen KI-Calls + dem booklets-Upsert). Scheitert ein Schritt
- * davor (Sonnet-502/Timeout, Insert-Fehler), wird früh zurückgegeben — der
- * Auftrag bleibt sauber in `draft` (kein halber Zwischenzustand), und der Nutzer
- * kann „Booklet erstellen" erneut auslösen.
+ * Flow-Vereinfachung: KEIN separater `finalized`-Zwischenschritt — der eine Klick
+ * führt direkt `draft → generated` aus.
  *
- * ISOLATION (§14.2): Der booklets-Insert/Update läuft über `service_role`
- * (0001-RLS lässt nur serverseitiges Insert/Delete zu). Die `business_id`
- * stammt AUS DER GELADENEN ORDER (über RLS gegen die Session validiert),
- * NIE aus dem Body; jeder `service_role`-Zugriff ist strikt auf diese
- * `business_id` gescoped.
+ * ISOLATION (§14.2): Alle service_role-Writes (booklets + Reel) stammen aus der
+ * GELADENEN ORDER (über RLS gegen die Session validiert), NIE aus dem Body; jeder
+ * Zugriff ist strikt auf diese `business_id` gescoped. In `after()` (nach der
+ * Response) laufen Reads/Writes über `service_role` — der request-gebundene
+ * AUTHENTICATED Client wäre dort unzuverlässig.
  */
 export async function POST(
   _request: Request,
@@ -87,8 +104,7 @@ export async function POST(
   }
 
   // Erstellen aus `draft` (Normalfall) ODER Re-Generate aus `generated`
-  // (solange das Booklet noch nicht versendet wurde). `finalized` existiert
-  // nicht mehr.
+  // (solange das Booklet noch nicht versendet wurde). `finalized` existiert nicht mehr.
   if (order.status !== "draft" && order.status !== "generated") {
     return NextResponse.json({ error: "invalid_status" }, { status: 409 });
   }
@@ -108,81 +124,13 @@ export async function POST(
     return NextResponse.json({ error: "ai_not_configured" }, { status: 500 });
   }
 
-  // Captions als Kontext fürs Intro (RLS-skopiert, nur vorhandene, in Reihenfolge).
-  const { data: mediaRows } = await supabase
-    .from("order_media")
-    .select("caption")
-    .eq("order_id", order.id)
-    .not("caption", "is", null)
-    .order("sort_order", { ascending: true })
-    .returns<{ caption: string | null }[]>();
-  const captions = (mediaRows ?? [])
-    .map((m) => m.caption?.trim())
-    .filter((c): c is string => Boolean(c));
+  // ───────────────────────── Synchron: billige Writes (vor 202) ───────────────────────
 
-  // KI-Intro (Sonnet 4.6). Parse-/API-Fehler ⇒ 502 (kein stiller Fehler).
-  // Unparsebares JSON (IntroParseError) ⇒ parse_failed, sonstiger Sonnet-/
-  // Netzwerkfehler ⇒ generation_failed — beide mit echter Message geloggt.
-  let intro: { title: string; description: string };
-  try {
-    intro = await generateIntro({
-      // Vorname für die persönliche Anrede („Hallo {Vorname},") — WÖRTLICH.
-      customerName: order.customer_name,
-      itemDescription: order.item_description,
-      captions,
-      language: order.language,
-      // Betriebs-KI-Kontext (8a-1b) — erdet Ton/Fachsprache, KONTEXT keine Anweisung.
-      businessContext: business.settings.ai_context ?? undefined,
-    });
-  } catch (error) {
-    const isParse = error instanceof IntroParseError;
-    console.error("generate: intro generation failed", {
-      order_id: order.id,
-      step: isParse ? "intro_parse" : "intro_sonnet",
-      message: errMessage(error),
-    });
-    return NextResponse.json(
-      { error: isParse ? "parse_failed" : "generation_failed" },
-      { status: 502 },
-    );
-  }
-
-  // Google-Review-Entwurf (Sonnet 4.6, §8.6). NON-FATAL: ein Fehler hier darf
-  // die Booklet-Generierung NICHT blockieren — die Web-Story funktioniert ohne
-  // den Vorschlag, und Re-Generate versucht es erneut. Erfolg ⇒ review_draft,
-  // sonst null (+ Log). Re-Generate überschreibt (wie das Intro).
-  let reviewDraft: string | null = null;
-  try {
-    const draft = await generateReviewDraft({
-      itemDescription: order.item_description,
-      captions,
-      introTitle: intro.title,
-      introDescription: intro.description,
-      businessName: business.name,
-      language: order.language,
-      businessContext: business.settings.ai_context ?? undefined,
-    });
-    reviewDraft = draft.length > 0 ? draft : null;
-  } catch (error) {
-    console.error("generate: review draft failed", {
-      order_id: order.id,
-      step: "review_sonnet",
-      message: errMessage(error),
-    });
-    // reviewDraft bleibt null — Booklet wird trotzdem generiert.
-  }
-
-  // IG-Caption (reines Template, KEIN KI-Call → kann nicht fehlschlagen):
-  // intro_title + @ig_handle (nur wenn gesetzt) + kuratierte Hashtags. Der
-  // @-Handle ist der Tagging-Multiplikator (§9).
-  const igCaption = buildIgCaption({
-    introTitle: intro.title,
-    igHandle: business.settings.ig_handle,
-  });
-
-  // booklets UPSERT by order_id (unique) über service_role, strikt auf die
-  // Order-business_id gescoped. Bestehenden access_token BEI Re-Generate
-  // behalten — geteilte Links dürfen nicht brechen.
+  // booklets-Shell über service_role (0001-RLS), strikt auf die Order-business_id
+  // gescoped. Bestehenden access_token BEI Re-Generate behalten — geteilte Links
+  // dürfen nicht brechen. Der INHALT (intro/review/ig) bleibt hier LEER und wird
+  // erst in after() erzeugt; reel_status='rendering' signalisiert sofort, dass der
+  // Hintergrund-Job läuft (das UI nimmt den Poll auf).
   const service = createServiceClient();
   const { data: existing, error: loadError } = await service
     .from("booklets")
@@ -201,31 +149,22 @@ export async function POST(
 
   const token = existing?.access_token ?? generateAccessToken();
 
+  let bookletId: string;
   if (existing) {
-    // web_story_ready = true: der öffentliche Render /b/[token] existiert (8a-2),
-    // jedes generierte Booklet ist damit renderbar (Voraussetzung fürs Senden, Step 9).
-    //
-    // STALE-REEL (Layout-Umbau, „einfacher Ansatz" ohne Zeitstempel/Migration):
-    // Beim RE-Generate (dieser Update-Zweig, nur über „Bearbeiten" → erneut
-    // „Booklet erstellen" erreichbar) ändern sich die Intro-Texte. Ein bereits
-    // gerendertes Reel hat den ALTEN Titel/Anrede eingebrannt und ist damit
-    // veraltet ⇒ reel_status auf `pending` zurücksetzen + reel_url leeren. Folge
-    // im UI: der „Reel erstellen"-Button (grau, „✓ Reel erstellt") wird wieder
-    // aktiv, das veraltete Reel wird auf der öffentlichen Seite nicht mehr
-    // gezeigt (sie zeigt nur reel_status='ready'). Beim nächsten Render
-    // überschreibt der Job dieselbe Storage-Datei (upsert) — kein Orphan. Eine
-    // echte „vor/nach"-Erkennung bräuchte einen Render-Zeitstempel (Migration);
-    // das ist bewusst NICHT Teil dieses reinen Layout-/UX-Umbaus.
+    // Re-Generate (nur über „Bearbeiten" → erneut „Booklet erstellen" erreichbar):
+    // Inhalt auf null zurücksetzen, reel_status='rendering' + reel_url=null (das auf
+    // dem alten Booklet-Stand basierende Reel ist veraltet und wird neu gerendert).
+    // Token NICHT anfassen.
     const { error: updateError } = await service
       .from("booklets")
       .update({
-        intro_title: intro.title,
-        intro_description: intro.description,
-        review_draft: reviewDraft,
-        ig_caption: igCaption,
+        intro_title: null,
+        intro_description: null,
+        review_draft: null,
+        ig_caption: null,
         language: order.language,
         web_story_ready: true,
-        reel_status: "pending",
+        reel_status: "rendering",
         reel_url: null,
       })
       .eq("id", existing.id)
@@ -238,42 +177,45 @@ export async function POST(
       });
       return NextResponse.json({ error: "upsert_failed" }, { status: 500 });
     }
+    bookletId = existing.id;
   } else {
-    // reel_url/image_urls/expires_at bleiben null (8b/9). review_draft/ig_caption
-    // werden jetzt mitgeschrieben (9b). web_story_ready = true: renderbar (8a-2).
-    // short_code (Block C): kurzer Kurzlink-Code, kollisions-sicher. order_id-
-    // Kollision ist oben (existing-Check) ausgeschlossen, access_token-Kollision
-    // bei 24 Byte praktisch unmöglich → ein 23505 hier betrifft den short_code:
-    // neuen Code generieren + erneut versuchen (jeder andere Fehler bricht ab).
+    // Neues Booklet: leere Inhalts-Shell, web_story_ready=true (renderbar, 8a-2),
+    // reel_status='rendering'. short_code (Block C) kollisions-sicher: ein 23505
+    // hier betrifft den short_code (order_id-Kollision ist oben ausgeschlossen,
+    // access_token-Kollision bei 24 Byte praktisch unmöglich) → neuer Code + Retry.
     const bookletRow = {
       order_id: order.id,
       business_id: order.business_id,
       access_token: token,
-      intro_title: intro.title,
-      intro_description: intro.description,
-      review_draft: reviewDraft,
-      ig_caption: igCaption,
+      intro_title: null,
+      intro_description: null,
+      review_draft: null,
+      ig_caption: null,
       language: order.language,
       web_story_ready: true,
+      reel_status: "rendering",
+      reel_url: null,
     };
 
-    let saved = false;
+    let insertedId: string | null = null;
     let lastMessage = "unknown";
     for (let attempt = 0; attempt < SHORT_CODE_MAX_ATTEMPTS; attempt++) {
-      const { error } = await service
+      const { data: inserted, error } = await service
         .from("booklets")
-        .insert({ ...bookletRow, short_code: generateShortCode() });
-      if (!error) {
-        saved = true;
+        .insert({ ...bookletRow, short_code: generateShortCode() })
+        .select("id")
+        .maybeSingle<{ id: string }>();
+      if (!error && inserted) {
+        insertedId = inserted.id;
         break;
       }
-      lastMessage = error.message;
+      lastMessage = error?.message ?? "no row";
       const shortCodeCollision =
-        error.code === "23505" &&
+        error?.code === "23505" &&
         `${error.message} ${error.details ?? ""}`.includes("short_code");
       if (!shortCodeCollision) break; // anderer Fehler → nicht weiter versuchen
     }
-    if (!saved) {
+    if (!insertedId) {
       console.error("generate: booklet insert failed", {
         order_id: order.id,
         step: "booklet_insert",
@@ -281,13 +223,13 @@ export async function POST(
       });
       return NextResponse.json({ error: "upsert_failed" }, { status: 500 });
     }
+    bookletId = insertedId;
   }
 
-  // Order-Status → generated, defensiv auf den GELADENEN Ausgangsstatus
-  // gefiltert (kein Doppelübergang bei Races). Beim Erstellen ist das `draft`
-  // (draft → generated), beim Re-Generate `generated` (No-op-Treffer). Dieser
-  // Schritt läuft bewusst ZULETZT — schlägt oben etwas fehl, bleibt der Auftrag
-  // in `draft` (Fehlersicherheit, s. Header).
+  // Order-Status → generated, defensiv auf den GELADENEN Ausgangsstatus gefiltert
+  // (kein Doppelübergang bei Races). draft → generated bzw. generated → generated
+  // (No-op-Treffer beim Re-Generate). Scheitert dies, bleibt der Auftrag in seinem
+  // bisherigen Status — und der Nutzer sieht einen echten Fehler (kein 202).
   const { error: statusError } = await supabase
     .from("orders")
     .update({ status: "generated" })
@@ -302,5 +244,172 @@ export async function POST(
     return NextResponse.json({ error: "status_failed" }, { status: 500 });
   }
 
-  return NextResponse.json({ ok: true, token }, { status: 200 });
+  // ───────────────────── Hintergrund: teure Arbeit nach der Response ──────────────────
+  // Reads/Writes über service_role (request-unabhängig, strikt auf order/business
+  // gescoped). Fehler ⇒ reel_status='failed' (+ reel_error), nie hängendes 'rendering'.
+  after(async () => {
+    /** Reel-Render bei einem Fehler in after() als 'failed' markieren (Diagnose). */
+    const failReel = async (label: string, message: string): Promise<void> => {
+      await service
+        .from("booklets")
+        .update({ reel_status: "failed", reel_error: `${label}: ${message}` })
+        .eq("order_id", order.id)
+        .eq("business_id", order.business_id);
+    };
+
+    try {
+      // a) Captions als Kontext fürs Intro (caption IS NOT NULL, in sort_order).
+      const { data: captionRows } = await service
+        .from("order_media")
+        .select("caption")
+        .eq("order_id", order.id)
+        .not("caption", "is", null)
+        .order("sort_order", { ascending: true })
+        .returns<{ caption: string | null }[]>();
+      const captions = (captionRows ?? [])
+        .map((m) => m.caption?.trim())
+        .filter((c): c is string => Boolean(c));
+
+      // b) KI-Intro (Sonnet). Fehler (IntroParseError ODER sonstiger) ⇒
+      //    reel_status='failed' (reel_error 'intro: …') + Abbruch — KEIN Reel ohne Intro.
+      let intro: { title: string; description: string };
+      try {
+        intro = await generateIntro({
+          // Vorname für die persönliche Anrede („Hallo {Vorname},") — WÖRTLICH.
+          customerName: order.customer_name,
+          itemDescription: order.item_description,
+          captions,
+          language: order.language,
+          // Betriebs-KI-Kontext (8a-1b) — erdet Ton/Fachsprache, KONTEXT keine Anweisung.
+          businessContext: business.settings.ai_context ?? undefined,
+        });
+      } catch (error) {
+        const isParse = error instanceof IntroParseError;
+        const message = errMessage(error);
+        console.error("generate: intro generation failed", {
+          order_id: order.id,
+          step: isParse ? "intro_parse" : "intro_sonnet",
+          message,
+        });
+        await failReel("intro", message);
+        return;
+      }
+
+      // c) Google-Review-Entwurf (Sonnet, §8.6) — NON-FATAL: ein Fehler hier darf
+      //    die Generierung NICHT blockieren (die Web-Story funktioniert ohne den
+      //    Vorschlag). Erfolg ⇒ review_draft, sonst null (+ Log).
+      let reviewDraft: string | null = null;
+      try {
+        const draft = await generateReviewDraft({
+          itemDescription: order.item_description,
+          captions,
+          introTitle: intro.title,
+          introDescription: intro.description,
+          businessName: business.name,
+          language: order.language,
+          businessContext: business.settings.ai_context ?? undefined,
+        });
+        reviewDraft = draft.length > 0 ? draft : null;
+      } catch (error) {
+        console.error("generate: review draft failed", {
+          order_id: order.id,
+          step: "review_sonnet",
+          message: errMessage(error),
+        });
+        // reviewDraft bleibt null — Booklet wird trotzdem fertiggestellt.
+      }
+
+      // d) IG-Caption (reines Template, KEIN KI-Call → kann nicht fehlschlagen).
+      const igCaption = buildIgCaption({
+        introTitle: intro.title,
+        igHandle: business.settings.ig_handle,
+      });
+
+      // e) Inhalt persistieren (service_role, order_id + business_id). Scheitert der
+      //    Persist ⇒ failed + Abbruch — kein Reel auf nicht-gespeichertem Inhalt
+      //    (sonst: Reel fertig, aber Web-Story mit leerem Intro).
+      const { error: contentError } = await service
+        .from("booklets")
+        .update({
+          intro_title: intro.title,
+          intro_description: intro.description,
+          review_draft: reviewDraft,
+          ig_caption: igCaption,
+        })
+        .eq("order_id", order.id)
+        .eq("business_id", order.business_id);
+      if (contentError) {
+        console.error("generate: booklet content update failed", {
+          order_id: order.id,
+          step: "booklet_content",
+          message: contentError.message,
+        });
+        await failReel("save", contentError.message);
+        return;
+      }
+
+      // f) Reel rendern (gleiche Argument-Form wie render-reel/route.ts in after()).
+      //    Medien in Booklet-Ordnung laden: before → process (sort_order) → after
+      //    (0010), inkl. caption/keyword/category für die Overlays. renderReel setzt
+      //    reel_status selbst auf 'ready'/'failed' (+ reel_error) — KEIN finaler
+      //    Status-Write hier.
+      const { data: mediaRows } = await service
+        .from("order_media")
+        .select("storage_path, media_type, caption, keyword, category")
+        .eq("order_id", order.id)
+        .order("sort_order", { ascending: true })
+        .returns<MediaItem[]>();
+      const media = orderBookletMedia(mediaRows ?? []);
+
+      // Outro-Kontaktzeilen (nur Telefon/Website, soweit gesetzt) — KEINE Share-/
+      // Review-Elemente (Step 9). E-Mail/IG/Review bleiben der Web-Story.
+      const contactLines: string[] = [];
+      if (business.settings.contact_phone) {
+        contactLines.push(business.settings.contact_phone);
+      }
+      if (business.settings.website_url) {
+        contactLines.push(displayHost(business.settings.website_url));
+      }
+
+      await renderReel({
+        orderId: order.id,
+        businessId: order.business_id,
+        bookletId,
+        media,
+        // Intro: KI-Titel (Fallback Betriebsname, wie die Web-Story) + die
+        // persönliche Ich-Beschreibung (FIX 8b-1c) + Tagline.
+        introTitle: intro.title.trim() || business.name,
+        introDescription: intro.description.trim() || null,
+        introTagline: business.settings.intro_tagline,
+        // Outro: Betriebsname + Nachricht + Kontakt.
+        businessName: business.name,
+        outroMessage: business.settings.outro_message,
+        contactLines,
+        // Branding: Farben (Verlauf-Fallback + Akzente) und Storage-Pfade der Bilder.
+        primaryColor: business.branding.primary_color,
+        secondaryColor: business.branding.secondary_color,
+        logoPerPage: business.branding.logo_per_page,
+        logoPath: business.branding.logo_url,
+        introBgPath: business.branding.intro_bg_url,
+        outroBgPath: business.branding.outro_bg_url,
+      });
+    } catch (error) {
+      // Sicherheitsnetz: ein unerwarteter Fehler darf reel_status nicht für immer
+      // auf 'rendering' hängen lassen.
+      console.error("generate: after() unexpected error", {
+        order_id: order.id,
+        message: errMessage(error),
+      });
+      try {
+        await failReel("after", errMessage(error));
+      } catch {
+        // ignorieren — DB nicht erreichbar; nichts mehr zu tun.
+      }
+    }
+  });
+
+  return NextResponse.json(
+    { ok: true, token, status: "rendering" },
+    { status: 202 },
+  );
 }

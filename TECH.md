@@ -2861,6 +2861,37 @@ Der **Webhook-Auto-Pfad** ([webhook/[secret]/route.ts](app/api/webhook/[secret]/
 
 ---
 
+## B1 — generate-Route auf Sofort-202 + Intro/Reel in after()
+
+Der **Live-Geld-Pfad** „Booklet erstellen" ([generate/route.ts](app/api/portal/orders/[id]/generate/route.ts)) gibt jetzt in **Millisekunden** ein **202** zurück (nur billige DB-Writes synchron) und erledigt die teure Arbeit (Sonnet-Intro + Review + IG-Caption + ffmpeg-**Reel-Render**) server-seitig in **`after()`** — der Nutzer kann die Seite sofort verlassen, alles läuft zu Ende. Spiegelt das `after()`-Muster aus [render-reel/route.ts](app/api/portal/orders/[id]/render-reel/route.ts). **NUR** [generate/route.ts](app/api/portal/orders/[id]/generate/route.ts) + [page.tsx](app/portal/orders/[id]/page.tsx) geändert; **keine Migration**, kein `any`, kein `<form>`, `business_id` nur aus der RLS-geladenen Order (§14.2), service_role nur server-seitig.
+
+**Runtime:** `export const runtime = "nodejs"; export const maxDuration = 300;` (sonst killt Vercel die after()-Arbeit am Default-Timeout — identisch zu render-reel).
+
+**Synchron im Body (vor 202), in dieser Reihenfolge:**
+1. **Guards (fail fast, unverändert):** params → AUTHENTICATED `createClient` → Auth-User (401) → Auth-Betrieb (403) → Order-Load (404, lädt zusätzlich `language`/`item_description`/`customer_name` für das Intro in after()) → Status `draft`||`generated` (409 `invalid_status`) → ≥ 1 process-Medium (400 `need_process`, 0010) → `isAiConfigured()` (500 `ai_not_configured`).
+2. **Booklet-Shell** über `service_role` (Insert- vs. Update-Zweig wie bisher) mit **LEEREM Inhalt** (`intro_title`/`intro_description`/`review_draft`/`ig_caption` = `null` — alle vier Spalten sind 0001-nullable), **`reel_status='rendering'`** (NICHT `'pending'` — in **beiden** Zweigen; Insert setzte es früher gar nicht, Update setzte `'pending'`) und `reel_url=null`; `access_token` (Insert: neuer/bestehender Token; Update: **nicht angefasst** → geteilte Links bleiben), `short_code` (kollisions-sicher mit Retry, Insert-Zweig), `language`, `web_story_ready=true`. Insert-Zweig holt die neue `id` per `.select("id").maybeSingle()` (für `renderReel.bookletId`); Update-Zweig nimmt `existing.id`. Fehler ⇒ **500 `upsert_failed`** (synchron, VOR 202).
+3. **Order-Status → `generated`** (AUTHENTICATED, defensiv `.eq("id").eq("status", order.status)` wie bisher). Fehler ⇒ **500 `status_failed`** (synchron, VOR 202).
+4. `return NextResponse.json({ ok: true, token, status: "rendering" }, { status: 202 })`.
+
+Die synchronen 500-Pfade liegen bewusst **vor** dem 202, damit der Client einen echten Fehler sieht statt einer falschen „läuft im Hintergrund"-Meldung. Der bestehende `CreateBookletButton` prüft nur `res.ok` (202 = ok) und macht `router.refresh()` — die neu gerenderte Seite sieht `status='generated'` + `reel_status='rendering'`, und `ReelCreateButton` (`initialStatus='rendering'`) nimmt automatisch den Poll auf. **Keine UI-Änderung an generate-controls.tsx nötig.**
+
+**In `after()` (server-seitig nach der Response), Reads/Writes über `service_role`** (request-unabhängig — der AUTHENTICATED Client wäre nach der Response unzuverlässig), strikt auf `order.id`/`order.business_id` gescoped:
+- **a)** Captions laden (`caption IS NOT NULL`, in `sort_order`) als Intro-Kontext.
+- **b)** `generateIntro(...)` (Sonnet) in try/catch. **Fehler** (IntroParseError ODER sonstiger, Message wie bei den früheren 502-Pfaden) ⇒ `booklets.update({ reel_status:'failed', reel_error: 'intro: {message}' })` (order_id + business_id) + **RETURN** — **KEIN Reel ohne Intro**. (Die früheren synchronen **502** `parse_failed`/`generation_failed` entfallen — sie werden zu diesem `reel_status='failed'`-Pfad.)
+- **c)** `generateReviewDraft(...)` **NON-FATAL** (Fehler ⇒ `reviewDraft = null` + Log; Web-Story funktioniert ohne Vorschlag).
+- **d)** `buildIgCaption(...)` (Template, kann nicht fehlschlagen).
+- **e)** Inhalt persistieren: `booklets.update({ intro_title, intro_description, review_draft, ig_caption })` (order_id + business_id). Persist-Fehler ⇒ `reel_status='failed'` (`reel_error: 'save: …'`) + RETURN (kein Reel auf nicht-gespeichertem Inhalt).
+- **f)** Medien laden (`storage_path, media_type, caption, keyword, category`, `sort_order` ASC) → `orderBookletMedia` (before → process → after, 0010) → **`renderReel({...})`** mit **EXAKT derselben Argument-Form** wie der `after()`-Aufruf in render-reel/route.ts (introTitle = `intro.title.trim() || business.name`, introDescription = `intro.description.trim() || null`, contactLines aus Telefon/Website via lokalem `displayHost`, Branding/Settings aus `getCurrentBusiness`). `renderReel` setzt `reel_status` selbst auf `'ready'`/`'failed'` — **kein** finaler Status-Write hier.
+- **Sicherheitsnetz:** das gesamte after()-Body ist in try/catch — ein unerwarteter Fehler setzt `reel_status='failed'` (`reel_error: 'after: …'`), nie ein hängendes `'rendering'`.
+
+**Reihenfolge `reel_status` in after():** beim Eintritt bereits `'rendering'` (synchron gesetzt); bei Intro-Erfolg bleibt `'rendering'`, bis `renderReel` am Ende `'ready'` (bzw. bei Render-Fehler `'failed'`) setzt; bei Intro-/Persist-Fehler setzt after() selbst `'failed'` und bricht ab.
+
+**Deliver-Gate** ([page.tsx](app/portal/orders/[id]/page.tsx)): `<DeliverButton>` wird jetzt nur noch bei **`isGenerated && reelStatus === 'ready'`** gerendert (vorher: bei `isGenerated`). In der Phase `generated` + `reel_status='rendering'` hat das Booklet noch leeres Intro + kein Reel — Versenden würde ein halbfertiges Booklet senden. `<ReopenButton>` bleibt durchgehend verfügbar (auch während `rendering`); sonst NICHTS an page.tsx geändert. (Folge: ältere `generated`-Aufträge mit `reel_status='pending'` aus der Zeit vor B1 zeigen den „Ausliefern"-Button erst nach einem Reel-Render — über „Reel erstellen" erreichbar.)
+
+`pnpm typecheck` + `pnpm build` grün.
+
+---
+
 ## Launch-Fahrplan & deferierte Härtung
 
 Detail-Referenz für die Risikobewertung: [SECURITY_REVIEW.md](SECURITY_REVIEW.md) (bleibt im Repo). Dieser Abschnitt fasst die **Reihenfolge** des Live-Gangs und die **vor Kunde #2 verpflichtende** Härtung zusammen.

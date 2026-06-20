@@ -333,19 +333,27 @@ export default async function OrderDetailPage({
 
           {/* 3) nur generated: „Bearbeiten" (Reopen) | „Ausliefern" (deliver,
               unveränderte Logik inkl. Safe-Mode/Connector/Doppelversand-Guard).
-              Versendet lässt sich weder zurückdrehen noch erneut ausliefern. */}
+              Versendet lässt sich weder zurückdrehen noch erneut ausliefern.
+
+              B1-Gate: Solange das Reel rendert (reel_status='rendering', direkt nach
+              „Booklet erstellen"), hat das Booklet noch leeres Intro + kein Reel —
+              Ausliefern würde ein halbfertiges Booklet senden. Der „Ausliefern"-Button
+              erscheint daher erst bei reel_status='ready'. „Bearbeiten" bleibt
+              durchgehend verfügbar. */}
           {isGenerated ? (
             <div className="booklet-actions-row">
               <ReopenButton orderId={order.id} />
-              <DeliverButton
-                orderId={order.id}
-                hasEmail={Boolean(order.customer_email)}
-                hasPhone={Boolean(order.customer_phone)}
-                reelReady={reelStatus === "ready"}
-                connectorEnabled={
-                  business?.settings.connector_roapp_enabled ?? true
-                }
-              />
+              {reelStatus === "ready" ? (
+                <DeliverButton
+                  orderId={order.id}
+                  hasEmail={Boolean(order.customer_email)}
+                  hasPhone={Boolean(order.customer_phone)}
+                  reelReady={reelStatus === "ready"}
+                  connectorEnabled={
+                    business?.settings.connector_roapp_enabled ?? true
+                  }
+                />
+              ) : null}
             </div>
           ) : null}
 
