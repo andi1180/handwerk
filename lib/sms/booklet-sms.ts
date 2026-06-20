@@ -7,8 +7,8 @@ import { sendSms, type SmsSendResult } from "./bulksms";
  * Booklet-Auslieferungs-SMS (Feature 3a). Baut den Nachrichtentext und versendet
  * ihn über BulkSMS an den Kunden.
  *
- *  - Empfänger = normalisierte `order.customer_phone` (E.164). Lässt sich die
- *    Nummer nicht normalisieren ⇒ kein Versand (`{ ok: false, error }`).
+ *  - Empfänger = normalisierte `order.customer_phone` (MSISDN, ohne „+“). Lässt
+ *    sich die Nummer nicht normalisieren ⇒ kein Versand (`{ ok: false, error }`).
  *  - Absender  = normalisierte `business.settings.contact_phone` (best effort:
  *    normalisiert sie nicht, wird ohne expliziten Absender gesendet — BulkSMS
  *    nutzt dann den Account-Standard).
@@ -49,8 +49,8 @@ export async function sendBookletSms(
   ].join("\n");
 
   return sendSms({
-    to: recipient.e164,
+    to: recipient.msisdn,
     body,
-    from: sender.ok ? sender.e164 : undefined,
+    from: sender.ok ? sender.msisdn : undefined,
   });
 }

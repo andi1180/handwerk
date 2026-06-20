@@ -2796,7 +2796,7 @@ Der manuelle Auslieferungs-Pfad (9c-1) bekommt einen **SMS-Fallback**: hat ein K
 
 ### Telefon-Normalisierung ([lib/sms/phone.ts](lib/sms/phone.ts), plain)
 
-`normalizePhone(raw)` → E.164, **Default-Land AT (+43)**. Whitespace/Bindestriche/Klammern/Punkte raus; nach dem Säubern nur noch `+?\d+` erlaubt (sonst Buchstaben-/Sonderzeichen-Müll ⇒ Fehler); `+…` bleibt, `00…` → `+…`, führende `0…` → `+43…`; **alles andere (reine Ziffern ohne `+`/`00`/führende `0`) ⇒ Fehler** (keine Müll-Nummer senden). Finale Validierung `+\d{8,15}`. Gibt `{ ok, e164 }` bzw. `{ ok: false, error }`.
+`normalizePhone(raw)` → **BulkSMS-MSISDN** (reine Ziffern, beginnend mit Ländervorwahl, **OHNE `+`/`00`/führende `0`**, z. B. `436645785569` / `491721627058`), **Default-Land AT (43)**. Whitespace/Bindestriche/Klammern/Punkte **und ein evtl. führendes `+`** raus; nach dem Säubern nur noch reine Ziffern erlaubt (sonst Buchstaben-/Sonderzeichen-Müll ⇒ Fehler); dann `00…` → `00` abschneiden, führende `0…` → `0` durch `43` ersetzen, Ziffer 1–9 vorn → bereits MSISDN (unverändert); **alles andere ⇒ Fehler** (keine Müll-Nummer senden). Finale Validierung `\d{8,15}`. Gibt `{ ok, msisdn }` bzw. `{ ok: false, error }`. Testfälle im Code verankert: `"0664 578 5569"`→`436645785569`, `"+43 664 5785569"`→`436645785569`, `"00436645785569"`→`436645785569`, `"436645785569"`/`"491721627058"` unverändert, `"abc"`/`""`→Fehler. Der Absender (`settings.contact_phone`) nutzt dieselbe Funktion → ebenfalls ohne `+`.
 
 ### Booklet-SMS ([lib/sms/booklet-sms.ts](lib/sms/booklet-sms.ts), server-only)
 

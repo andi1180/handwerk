@@ -33,8 +33,8 @@ export function isSmsConfigured(): boolean {
 
 /**
  * Versendet eine einzelne SMS. `to` (Empfänger) und optional `from` (Absender)
- * müssen bereits normalisiert sein (E.164, s. `lib/sms/phone.ts`). Gibt
- * `{ ok }` bzw. `{ ok: false, error }` zurück — wirft nie.
+ * müssen bereits normalisiert sein (BulkSMS-MSISDN, ohne „+“, s.
+ * `lib/sms/phone.ts`). Gibt `{ ok }` bzw. `{ ok: false, error }` zurück — wirft nie.
  */
 export async function sendSms({
   to,
