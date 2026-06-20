@@ -1210,7 +1210,7 @@ function CaptionEditor({
           setFeedback(null);
         }}
         maxLength={CAPTION_MAX_LENGTH}
-        rows={2}
+        rows={4}
         placeholder={t(DEFAULT_LOCALE, "captions.empty")}
         disabled={busy}
         style={{ resize: "none", opacity: busy ? 0.6 : 1 }}
