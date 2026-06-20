@@ -323,14 +323,20 @@ export const de = {
     delivering: "Liefere aus…",
     confirm: "Booklet jetzt ausliefern?",
     confirmText: "Der Kunde erhält den Link zum Booklet per E-Mail.",
+    confirmTextSms: "Der Kunde erhält den Link zum Booklet per SMS.",
     connectorActive:
       "Der roapp-Connector ist aktiv — die Auslieferung erfolgt normalerweise automatisch, sobald der Auftrag in roapp als „Abgeholt“ markiert wird. Trotzdem jetzt manuell senden?",
     reelNotReady: "Das Reel ist noch nicht fertig. Trotzdem ausliefern?",
-    noEmail: "Keine E-Mail hinterlegt — Auslieferung per QR (folgt).",
+    noContact:
+      "Weder E-Mail noch Telefonnummer hinterlegt — der Kunde erhält keinen Link. Drucke den QR-Code, um das Booklet zu übergeben.",
     delivered: "Ausgeliefert am {date}",
     deliveredNoDate: "Ausgeliefert",
-    emailFailed:
-      "Die E-Mail konnte nicht gesendet werden. Der Auftrag gilt trotzdem als ausgeliefert.",
+    sentEmail: "Booklet per E-Mail an den Kunden gesendet.",
+    sentSms: "Booklet per SMS an den Kunden gesendet.",
+    noContactSent:
+      "Der Auftrag ist als ausgeliefert markiert, aber es ist weder E-Mail noch Telefonnummer hinterlegt. Bitte den QR-Code drucken und dem Kunden geben.",
+    sendFailed:
+      "Versand fehlgeschlagen: {reason}. Der Auftrag gilt trotzdem als ausgeliefert.",
     timeout: "Zeitüberschreitung. Bitte erneut versuchen.",
     error: "Auslieferung fehlgeschlagen. Bitte erneut versuchen.",
   },

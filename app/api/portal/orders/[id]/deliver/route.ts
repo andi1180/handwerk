@@ -3,12 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { getCurrentBusiness } from "@/lib/auth/current-business";
 import { bookletShareLink } from "@/lib/booklet/share-link";
-import { sendBookletEmail } from "@/lib/email/booklet-email";
-
-/** Echte Fehlermeldung für die Server-Logs (Vercel) extrahieren. */
-function errMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
+import { deliverBooklet } from "@/lib/delivery/deliver-booklet";
 
 /**
  * Öffentliche Booklet-Basis-URL für den E-Mail-Link. Bevorzugt die explizite
@@ -25,8 +20,10 @@ function bookletBaseUrl(request: Request): string {
 
 /**
  * POST /api/portal/orders/[id]/deliver — der manuelle Auslieferungs-Pfad
- * (Schritt 9c-1): Auftrag → `sent`, Billing-Event, E-Mail an den Kunden mit dem
- * Booklet-Link. Keine Migration (Spalten/Tabellen aus 0001).
+ * (Schritt 9c-1, Kanal-Logik Feature 3a): Auftrag → `sent`, Billing-Event,
+ * Versand des Booklet-Links an den Kunden über den passenden Kanal — E-Mail
+ * bevorzugt, sonst SMS (BulkSMS), sonst kein Kontakt (QR-Fallback). Keine
+ * Migration (Spalten/Tabellen aus 0001).
  *
  * Guards (alle vor dem Schreiben):
  *  - AUTHENTICATED Server-Client; kein User ⇒ 401, kein Betrieb ⇒ 403.
@@ -41,8 +38,10 @@ function bookletBaseUrl(request: Request): string {
  * `authenticated` KEIN INSERT-Grant hat (0001: nur SELECT; Schreiben serverseitig)
  * — strikt auf die Order-`business_id` gescoped.
  *
- * E-Mail ist NICHT-BLOCKIEREND: ein Fehlschlag setzt `emailFailed:true`, der
- * Auftrag gilt trotzdem als ausgeliefert (`sent` steht).
+ * Der Versand (E-Mail/SMS) ist NICHT-BLOCKIEREND: ein Fehlschlag landet als
+ * `{ delivery: { channel, ok:false, error } }` in der Antwort, der Auftrag gilt
+ * trotzdem als ausgeliefert (`sent` steht). Die Kanal-Wahl liegt in der
+ * geteilten `deliverBooklet`-Logik. Der Webhook-Auto-Pfad (3b) bleibt unberührt.
  */
 export async function POST(
   request: Request,
@@ -68,7 +67,9 @@ export async function POST(
   // vertrauenswürdig (Session-Betrieb), Quelle für den service_role-Write.
   const { data: order } = await supabase
     .from("orders")
-    .select("id, business_id, status, customer_name, customer_email, language")
+    .select(
+      "id, business_id, status, customer_name, customer_email, customer_phone, external_ref, language",
+    )
     .eq("id", orderId)
     .maybeSingle<{
       id: string;
@@ -76,6 +77,8 @@ export async function POST(
       status: string;
       customer_name: string;
       customer_email: string | null;
+      customer_phone: string | null;
+      external_ref: string | null;
       language: string;
     }>();
   if (!order) {
@@ -168,42 +171,39 @@ export async function POST(
     });
   }
 
-  // 4. E-Mail (nur wenn customer_email vorhanden). NICHT-BLOCKIEREND: ein
-  //    Fehlschlag ⇒ emailFailed:true, sent steht trotzdem. QR-Pfad folgt (9c-2).
-  let emailSent = false;
-  let emailFailed = false;
-  if (order.customer_email) {
-    try {
-      const base = bookletBaseUrl(request);
-      // Block C: kurzer Kurzlink (Fallback auf den langen /b/-Link für alte
-      // Booklets ohne Code). customerView=true → ?c=1 (volle Kunden-Sicht).
-      const bookletUrl = bookletShareLink({
-        base,
-        accessToken: booklet.access_token,
-        shortCode: booklet.short_code,
-        customerView: true,
-      });
-      await sendBookletEmail({
-        to: order.customer_email,
-        customerName: order.customer_name,
-        businessName: business.name,
-        bookletUrl,
-        replyTo: business.settings.contact_email ?? undefined,
-        websiteUrl: business.settings.website_url ?? undefined,
-      });
-      emailSent = true;
-    } catch (error) {
-      emailFailed = true;
-      console.error("deliver: email send failed", {
-        order_id: order.id,
-        step: "email",
-        message: errMessage(error),
-      });
-    }
+  // 4. Versand über den passenden Kanal (Feature 3a): E-Mail bevorzugt, sonst
+  //    SMS (BulkSMS), sonst kein Kontakt. NICHT-BLOCKIEREND — der Auftrag gilt
+  //    bereits als ausgeliefert (`sent` steht); das Ergebnis (Kanal + ggf.
+  //    Fehlergrund) wandert in die Antwort, damit der Operator sieht, was passiert
+  //    ist. QR-Pfad (9c-2) bleibt der Fallback ohne Kontakt.
+  const base = bookletBaseUrl(request);
+  // Block C: kurzer Kurzlink (Fallback auf den langen /b/-Link für alte
+  // Booklets ohne Code). customerView=true → ?c=1 (volle Kunden-Sicht).
+  const bookletUrl = bookletShareLink({
+    base,
+    accessToken: booklet.access_token,
+    shortCode: booklet.short_code,
+    customerView: true,
+  });
+  const delivery = await deliverBooklet(order, business, bookletUrl, supabase);
+  if (!delivery.ok && delivery.channel !== "none") {
+    console.error("deliver: send failed", {
+      order_id: order.id,
+      step: "send",
+      channel: delivery.channel,
+      message: delivery.error ?? "unknown",
+    });
   }
 
   return NextResponse.json(
-    { sent: true, emailSent, ...(emailFailed ? { emailFailed: true } : {}) },
+    {
+      sent: true,
+      delivery: {
+        channel: delivery.channel,
+        ok: delivery.ok,
+        ...(delivery.error ? { error: delivery.error } : {}),
+      },
+    },
     { status: 200 },
   );
 }

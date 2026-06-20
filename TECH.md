@@ -2786,6 +2786,49 @@ Die beiden read-only `MetaRow`s für E-Mail/Telefon im Stammdaten-Block sind dur
 
 ---
 
+## Feature 3a — BulkSMS-Versand + Kanal-Logik (NUR manueller Auslieferungs-Pfad)
+
+Der manuelle Auslieferungs-Pfad (9c-1) bekommt einen **SMS-Fallback**: hat ein Kunde **keine E-Mail**, aber eine **Telefonnummer**, geht der Booklet-Link per **BulkSMS** raus. **Der Webhook-Auto-Pfad (3b) ist NICHT Teil dieses Tickets und bleibt unangetastet** ([webhook/[secret]/route.ts](app/api/webhook/[secret]/route.ts) ruft weiter direkt `sendBookletEmail`). **Keine Migration** (`customer_phone`/`external_ref` aus 0001, `settings.contact_phone` aus dem `settings`-jsonb). Kein `<form>`, kein `any`, AUTHENTICATED + RLS; `service_role` nur für den unveränderten Billing-Insert.
+
+### BulkSMS-Client ([lib/sms/bulksms.ts](lib/sms/bulksms.ts), server-only)
+
+`POST https://api.bulksms.com/v1/messages`, **HTTP Basic Auth** = base64(`BULKSMS_TOKEN_ID:BULKSMS_TOKEN_SECRET`) — beide **server-only Envs** (NIE `NEXT_PUBLIC`, nie im Client; Muster wie [resend.ts](lib/email/resend.ts)). Body `{ to, body, from? }`. Guard `isSmsConfigured()`. AbortController-Timeout 10 s. **Fehlerverhalten bewusst:** AUTH-/401-Fehler (falsches ID/Secret-Paar) werden **KLAR geloggt UND zurückgegeben** (`{ ok: false, error }`), **NICHT geschluckt** — eine kaputte Konfiguration muss sofort sichtbar sein. `sendSms` wirft nie (gibt `SmsSendResult` zurück).
+
+### Telefon-Normalisierung ([lib/sms/phone.ts](lib/sms/phone.ts), plain)
+
+`normalizePhone(raw)` → E.164, **Default-Land AT (+43)**. Whitespace/Bindestriche/Klammern/Punkte raus; nach dem Säubern nur noch `+?\d+` erlaubt (sonst Buchstaben-/Sonderzeichen-Müll ⇒ Fehler); `+…` bleibt, `00…` → `+…`, führende `0…` → `+43…`; **alles andere (reine Ziffern ohne `+`/`00`/führende `0`) ⇒ Fehler** (keine Müll-Nummer senden). Finale Validierung `+\d{8,15}`. Gibt `{ ok, e164 }` bzw. `{ ok: false, error }`.
+
+### Booklet-SMS ([lib/sms/booklet-sms.ts](lib/sms/booklet-sms.ts), server-only)
+
+`sendBookletSms(order, business, link)` — Empfänger = normalisierte `order.customer_phone` (scheitert die Normalisierung ⇒ kein Versand), Absender = normalisierte `settings.contact_phone` (best effort: normalisiert sie nicht, wird **ohne** expliziten Absender gesendet → BulkSMS-Account-Standard). Text mit **EXAKTEN Zeilenumbrüchen** (6 Zeilen, Z. 2 + Z. 5 leer) und Schreibweise „Spass"/„Grüsse":
+
+```
+{BETRIEBSNAME GROSSBUCHSTABEN}
+
+Wir haben für Sie ein Booklet Ihrer Änderung {external_ref} angefertigt. Viel Spass beim Ansehen!
+{link}
+
+Liebe Grüsse!
+```
+
+`business.name.toUpperCase()`, `external_ref` aus der Order (für roapp immer gesetzt; null ⇒ leer), `link` = `bookletShareLink`.
+
+### Geteilte Kanal-Logik ([lib/delivery/deliver-booklet.ts](lib/delivery/deliver-booklet.ts), server-only)
+
+`deliverBooklet(order, business, link, supabase)` → `{ channel, ok, error? }`: **E-Mail bevorzugt** (`customer_email` gesetzt → `sendBookletEmail`, bestehend) → **sonst SMS** (`customer_phone` gesetzt → `sendBookletSms`) → **sonst `{ channel: 'none', ok: false }`** (kein Kontakt, nichts senden). `supabase` ist Teil der einheitlichen Auslieferungs-Signatur (spätere Versand-Persistenz) — **aktuell ungenutzt**; Status/Billing/`sent_at` bleiben bewusst im Route Handler.
+
+### Manueller Pfad ([deliver/route.ts](app/api/portal/orders/[id]/deliver/route.ts))
+
+Der frühere E-Mail-Block (Schritt 4) ist durch **einen** `deliverBooklet`-Aufruf ersetzt. **Status-/Billing-/`sent_at`-Sequenz UNVERÄNDERT** (bleibt repliziert; `business_id` weiter NUR aus der RLS-geladenen Order, §14.2). Die Order-Query lädt zusätzlich `customer_phone`+`external_ref`. Versand weiter **NICHT-BLOCKIEREND** (`sent` steht in jedem Fall), das **Ergebnis** (`{ delivery: { channel, ok, error? } }`) wandert in die Antwort, damit der Operator den Kanal bzw. Fehlergrund sieht.
+
+### UI ([deliver-controls.tsx](app/portal/orders/[id]/deliver-controls.tsx) + [page.tsx](app/portal/orders/[id]/page.tsx))
+
+`<DeliverButton>` bekommt Prop `hasPhone`; **„kann zustellen?" = `hasEmail || hasPhone`**. Bestätigungsdialog: `confirmText` (E-Mail) bzw. `confirmTextSms` (SMS), Reel-Warnung unverändert, ohne beide Kontaktwege `noContact` (QR-Pfad). Nach erfolgreichem `POST` einmaliger `window.alert` je nach Ergebnis: `sentEmail`/`sentSms` (Erfolg), `noContactSent` (kein Kontakt, als ausgeliefert markiert → QR), `sendFailed {reason}` (Fehler — Auftrag gilt trotzdem als ausgeliefert), dann `router.refresh()`. i18n `deliver.confirmTextSms`/`noContact`/`sentEmail`/`sentSms`/`noContactSent`/`sendFailed` (ersetzt `noEmail`/`emailFailed`).
+
+**Env:** `BULKSMS_TOKEN_ID`/`BULKSMS_TOKEN_SECRET` ([.env.example](.env.example)). `pnpm typecheck` + `pnpm build` grün.
+
+---
+
 ## Launch-Fahrplan & deferierte Härtung
 
 Detail-Referenz für die Risikobewertung: [SECURITY_REVIEW.md](SECURITY_REVIEW.md) (bleibt im Repo). Dieser Abschnitt fasst die **Reihenfolge** des Live-Gangs und die **vor Kunde #2 verpflichtende** Härtung zusammen.

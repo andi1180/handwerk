@@ -10,8 +10,9 @@ import { DEFAULT_LOCALE, t } from "@/lib/i18n";
  *
  *  - `<DeliverButton>` (Status `generated`): prominenter „Booklet ausliefern"-
  *    Button am Seitenende. Bestätigungsdialog mit bewussten Warnungen (Reel noch
- *    nicht fertig / keine E-Mail — KEIN harter Block), dann `POST deliver` →
- *    `router.refresh()`. `emailFailed` ⇒ Hinweis, der Auftrag gilt trotzdem als
+ *    nicht fertig / kein Kontakt — KEIN harter Block), dann `POST deliver` →
+ *    `router.refresh()`. Das Sende-Ergebnis (Kanal E-Mail/SMS bzw. Fehlergrund,
+ *    Feature 3a) wird einmalig gemeldet; der Auftrag gilt in jedem Fall als
  *    ausgeliefert.
  *
  * Die Ausgeliefert-Info + der „Booklet ansehen"-Link leben seit dem Layout-Umbau
@@ -70,11 +71,13 @@ function NoticeBox({ text }: { text: string }) {
 export function DeliverButton({
   orderId,
   hasEmail,
+  hasPhone,
   reelReady,
   connectorEnabled,
 }: {
   orderId: string;
   hasEmail: boolean;
+  hasPhone: boolean;
   reelReady: boolean;
   connectorEnabled: boolean;
 }) {
@@ -83,6 +86,9 @@ export function DeliverButton({
   const [notice, setNotice] = useState<string | null>(null);
 
   const handleDeliver = useCallback(() => {
+    // Feature 3a: zustellbar, sobald E-Mail ODER Telefonnummer hinterlegt ist
+    // (E-Mail bevorzugt, sonst SMS). Ohne beides bleibt nur der QR-Pfad.
+    const canDeliver = hasEmail || hasPhone;
     // Bestätigungsdialog. Bei aktivem Connector führt die Safe-Mode-Rückfrage,
     // sonst die normale Bestätigung; darunter die bewussten Warnungen.
     const lines: string[] = [
@@ -91,8 +97,9 @@ export function DeliverButton({
         : t(DEFAULT_LOCALE, "deliver.confirm"),
     ];
     if (hasEmail) lines.push(t(DEFAULT_LOCALE, "deliver.confirmText"));
+    else if (hasPhone) lines.push(t(DEFAULT_LOCALE, "deliver.confirmTextSms"));
     if (!reelReady) lines.push(t(DEFAULT_LOCALE, "deliver.reelNotReady"));
-    if (!hasEmail) lines.push(t(DEFAULT_LOCALE, "deliver.noEmail"));
+    if (!canDeliver) lines.push(t(DEFAULT_LOCALE, "deliver.noContact"));
     if (!window.confirm(lines.join("\n\n"))) return;
 
     setBusy(true);
@@ -113,11 +120,23 @@ export function DeliverButton({
           setBusy(false);
           return;
         }
-        // E-Mail fehlgeschlagen? Einmalig melden (nach dem Refresh ist der
-        // Button weg — die Auslieferung gilt trotzdem als erfolgt).
-        const body = (await res.json()) as { emailFailed?: unknown };
-        if (body.emailFailed === true) {
-          window.alert(t(DEFAULT_LOCALE, "deliver.emailFailed"));
+        // Sende-Ergebnis einmalig melden (nach dem Refresh ist der Button weg —
+        // die Auslieferung gilt in jedem Fall als erfolgt). Der Operator sieht
+        // den Kanal (E-Mail/SMS) bzw. den Fehlergrund.
+        const body = (await res.json()) as {
+          delivery?: { channel?: string; ok?: boolean; error?: string };
+        };
+        const d = body.delivery;
+        if (d?.ok && d.channel === "email") {
+          window.alert(t(DEFAULT_LOCALE, "deliver.sentEmail"));
+        } else if (d?.ok && d.channel === "sms") {
+          window.alert(t(DEFAULT_LOCALE, "deliver.sentSms"));
+        } else if (d?.channel === "none") {
+          window.alert(t(DEFAULT_LOCALE, "deliver.noContactSent"));
+        } else if (d) {
+          window.alert(
+            t(DEFAULT_LOCALE, "deliver.sendFailed", { reason: d.error ?? "" }),
+          );
         }
         router.refresh(); // Server rendert die Seite im Ausgeliefert-Modus neu
       } catch (error) {
@@ -130,7 +149,7 @@ export function DeliverButton({
         setBusy(false);
       }
     })();
-  }, [hasEmail, reelReady, connectorEnabled, orderId, router]);
+  }, [hasEmail, hasPhone, reelReady, connectorEnabled, orderId, router]);
 
   return (
     // Grid-Zelle der Aktionszone (rechts unten bei `generated`, neben

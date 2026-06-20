@@ -340,6 +340,7 @@ export default async function OrderDetailPage({
               <DeliverButton
                 orderId={order.id}
                 hasEmail={Boolean(order.customer_email)}
+                hasPhone={Boolean(order.customer_phone)}
                 reelReady={reelStatus === "ready"}
                 connectorEnabled={
                   business?.settings.connector_roapp_enabled ?? true
