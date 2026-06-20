@@ -2047,14 +2047,15 @@ Neue Blöcke in [lib/i18n/de.ts](lib/i18n/de.ts): `register.*` (`title`/`intro`/
 
 ### roapp-Anreicherung ([lib/roapp/client.ts](lib/roapp/client.ts), server-only)
 
-- `getRoappOrder(objectId)`: **EIN** Call `GET https://api.roapp.io/orders/{object_id}` mit `Authorization: Bearer ${ROAPP_API_KEY}` (AbortController-Timeout 10 s). Die Antwort enthält das **eingebettete `client`-Objekt** (`email`/`first_name`/`last_name`/`name`), **`status.name`** im Klartext und **`id_label`** (= unser `external_ref`) — **kein** zweiter Contact-Call. **Wirft** bei fehlendem Key / Nicht-2xx / Timeout / ungültigem JSON (Endpoint fängt ⇒ 200 `enrich_failed`).
-- `parseRoappOrder(raw)` extrahiert defensiv/typsicher (`RoappOrder`), entpackt eine optionale `{ data: … }`-Hülle.
+- `getRoappOrder(objectId)`: **EIN** Call `GET https://api.roapp.io/orders/{object_id}` mit `Authorization: Bearer ${ROAPP_API_KEY}` (AbortController-Timeout 10 s). Die Antwort enthält das **eingebettete `client`-Objekt** (`email`/`first_name`/`last_name`/`name`/`phone`), **`status.name`** im Klartext und **`id_label`** (= unser `external_ref`) — **kein** zweiter Contact-Call. **Wirft** bei fehlendem Key / Nicht-2xx / Timeout / ungültigem JSON (Endpoint fängt ⇒ 200 `enrich_failed`).
+- `parseRoappOrder(raw)` extrahiert defensiv/typsicher (`RoappOrder`), entpackt eine optionale `{ data: … }`-Hülle. Leere Strings werden via `asString` zu `null` normalisiert (relevant: `client.email = ''` ⇒ `null`, damit nicht fälschlich der E-Mail-Kanal greift).
+- **Telefon (roapp-Standardfeld `phone`, ein ARRAY):** `client.phone: string[]` defensiv geparst (`asStringArray` — Nicht-Array ⇒ `[]`, Nicht-Strings raus). Der exportierte Helfer `firstClientPhone(client)` liefert die **erste nicht-leere** (getrimmte) Nummer, sonst `null` — **ROH** (keine Ländervorwahl-/MSISDN-Normalisierung; die passiert erst beim SMS-Versand, `lib/sms/phone.ts`).
 - `ROAPP_PICKED_UP_STATUS_NAME` = `process.env.ROAPP_PICKED_UP_STATUS_NAME` ?? `"Abgeholt"`.
 
 ### Branch `order.created` (Auftrag anlegen)
 
 Wie die Portal-Order-Route ([app/api/portal/orders/route.ts](app/api/portal/orders/route.ts)), aber via `service_role`:
-- `customer_name` = `first+last` → sonst `client.name` → sonst `external_ref` → sonst `"Kunde"` (Spalte NOT NULL); `customer_email` = `client.email`; `external_ref` = `id_label`; `language` = `business.default_language`; `status='draft'`.
+- `customer_name` = `first+last` → sonst `client.name` → sonst `external_ref` → sonst `"Kunde"` (Spalte NOT NULL); `customer_email` = `client.email` (leer/`''` ⇒ `null`, s. `parseRoappOrder`); `customer_phone` = `firstClientPhone(client)` (erste nicht-leere roapp-`phone`-Nummer, ROH; sonst `null`); `external_ref` = `id_label`; `language` = `business.default_language`; `status='draft'`.
 - **§13.5:** `consent_given` **IMMER `false`**, `consent_at` **`null`** — Consent gehört an den Tresen, kann per Webhook nicht erteilt werden.
 - `item_description` = `null` — roapp-Custom-Field-IDs sind pro Betrieb verschieden ⇒ kein zuverlässiges Mapping.
 - **IDEMPOTENT:** existiert schon eine Order mit `external_ref` für den Betrieb ⇒ kein zweiter Insert, `already_exists` (Dedup nur, wenn `external_ref` vorhanden).
@@ -2816,6 +2817,8 @@ Liebe Grüsse!
 ### Geteilte Kanal-Logik ([lib/delivery/deliver-booklet.ts](lib/delivery/deliver-booklet.ts), server-only)
 
 `deliverBooklet(order, business, link, supabase)` → `{ channel, ok, error? }`: **E-Mail bevorzugt** (`customer_email` gesetzt → `sendBookletEmail`, bestehend) → **sonst SMS** (`customer_phone` gesetzt → `sendBookletSms`) → **sonst `{ channel: 'none', ok: false }`** (kein Kontakt, nichts senden). `supabase` ist Teil der einheitlichen Auslieferungs-Signatur (spätere Versand-Persistenz) — **aktuell ungenutzt**; Status/Billing/`sent_at` bleiben bewusst im Route Handler.
+
+> **„E-Mail gesetzt?"-Prüfung = truthy/non-empty** (`if (order.customer_email)`), nicht null-basiert: ein **leerer String `''` zählt korrekt als „keine E-Mail"** und fällt auf SMS durch. In Kombination mit der `parseRoappOrder`-Normalisierung (`''` ⇒ `null` schon beim Speichern) ist der E-Mail-Kanal doppelt abgesichert — eine leere roapp-E-Mail triggert nie fälschlich den E-Mail-Pfad. (`customer_phone` analog truthy-geprüft.)
 
 ### Manueller Pfad ([deliver/route.ts](app/api/portal/orders/[id]/deliver/route.ts))
 

@@ -6,6 +6,7 @@ import { deliverBooklet } from "@/lib/delivery/deliver-booklet";
 import { generateShortSummary } from "@/lib/ai/short-summary";
 import { classifyEvent, parseWebhookBody } from "@/lib/roapp/events";
 import {
+  firstClientPhone,
   getRoappOrder,
   ROAPP_PICKED_UP_STATUS_NAME,
   type RoappOrder,
@@ -186,8 +187,13 @@ async function handleOrderCreated(
     .insert({
       business_id: business.id,
       customer_name: buildCustomerName(roappOrder, externalRef),
+      // E-Mail leer/'' → null: parseRoappOrder normalisiert leere Strings via
+      // asString bereits zu null, der ?? schützt zusätzlich. Wichtig, damit nicht
+      // fälschlich der E-Mail-Kanal greift, wo nur eine Telefonnummer existiert.
       customer_email: roappOrder.client?.email ?? null,
-      customer_phone: null,
+      // Telefon ROH aus dem roapp-Standardfeld `phone` (Array) — erste nicht-leere
+      // Nummer; Normalisierung erst beim SMS-Versand (lib/sms/phone.ts).
+      customer_phone: firstClientPhone(roappOrder.client),
       external_ref: externalRef,
       // Roh-Beschreibungstext aus dem betriebs-spezifischen roapp-Custom-Field
       // (parser-getrimmt, sonst null). BEWUSST unverändert übernommen — die KI

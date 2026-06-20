@@ -13,6 +13,12 @@ export type RoappOrderClient = {
   last_name: string | null;
   /** Anzeigename (Fallback, falls first/last fehlen). */
   name: string | null;
+  /**
+   * Telefonnummern aus dem roapp-Standardfeld `phone` — ein ARRAY (mehrere
+   * Nummern möglich), Einträge ROH (keine Normalisierung). Defensiv geparst:
+   * Nicht-String-Einträge werden verworfen, fehlend/kein Array ⇒ `[]`.
+   */
+  phone: string[];
 };
 
 /** roapp-Status der Order. */
@@ -86,6 +92,27 @@ function asIdString(value: unknown): string | null {
   return asString(value);
 }
 
+/** Defensive String-Array-Extraktion: Nicht-Array ⇒ `[]`, Nicht-Strings raus. */
+function asStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((entry): entry is string => typeof entry === "string");
+}
+
+/**
+ * Erste nicht-leere Telefonnummer (getrimmt) aus dem roapp-client — sonst null.
+ * Leeres Array / nur leere Strings / kein client ⇒ null. ROH (nur getrimmt) —
+ * die eigentliche Normalisierung (Ländervorwahl/MSISDN) passiert erst beim
+ * SMS-Versand (`lib/sms/phone.ts`).
+ */
+export function firstClientPhone(client: RoappOrderClient | null): string | null {
+  if (!client) return null;
+  for (const entry of client.phone) {
+    const trimmed = entry.trim();
+    if (trimmed.length > 0) return trimmed;
+  }
+  return null;
+}
+
 /**
  * Wählt das eigentliche Order-Objekt: manche APIs hüllen die Ressource in
  * `{ data: {...} }`. Wir nehmen den verschachtelten Block nur, wenn er die
@@ -119,11 +146,6 @@ export function parseRoappOrder(raw: unknown): RoappOrder {
   const status = asRecord(order.status);
   const customFields = asRecord(order.custom_fields);
 
-  // TEMPORÄR (SCHRITT 2/Teil 1): rohes roapp-client-Objekt loggen, um zu
-  // ermitteln, ob die Telefonnummer ein Standardfeld (phone/mobile/…) oder ein
-  // Custom-Field ist. KEIN Feature-Code — nach der Ermittlung wieder entfernen.
-  console.log("roapp client raw", Object.keys(client), client);
-
   const hasClient =
     order.client !== undefined && order.client !== null;
   const hasStatus =
@@ -141,6 +163,7 @@ export function parseRoappOrder(raw: unknown): RoappOrder {
           first_name: asString(client.first_name),
           last_name: asString(client.last_name),
           name: asString(client.name),
+          phone: asStringArray(client.phone),
         }
       : null,
     raw_description: readCustomField(customFields, ROAPP_DESCRIPTION_FIELD_ID),
