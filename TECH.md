@@ -2770,6 +2770,22 @@ Leer/`undefined` ⇒ **kein** Block angehängt (leerer String), Verhalten exakt 
 
 ---
 
+## Kunden-Kontakt (E-Mail + Telefon) auf der Detailseite editierbar
+
+E-Mail/Telefon eines Auftrags lassen sich auf der Auftrags-Detailseite inline bearbeiten — **neu setzen, ändern und entfernen** (`customer_email`/`customer_phone` existieren seit 0001, waren bisher nur read-only sichtbar; `customer_phone` war nach der Anlage nirgends editierbar). **Keine Migration.**
+
+### Neue Route ([app/api/portal/orders/[id]/route.ts](app/api/portal/orders/[id]/route.ts), `PATCH`)
+
+Erste **Order-PATCH-Route** (alle anderen `[id]`-PATCH-Routen sind media-only). Keine statische/dynamische Kollision — `[id]` ist ein bestehendes dynamisches Segment, `route.ts` direkt darin ist der Standard-Handler für `/api/portal/orders/[id]`. **ISOLATION:** AUTHENTICATED Server-Client (kein `service_role`), 401/403 ohne User/Betrieb; Order über RLS geladen (fremde/fehlende id ⇒ 404), `business_id` aus der geladenen Order — **nie** aus dem Body; Update defensiv auf `id` + `business_id` gefiltert. **Partielles PATCH:** nur die im Body enthaltenen Felder werden geschrieben (`"customer_email" in payload` / `"customer_phone" in payload`); keines vorhanden ⇒ 400 `no_fields`. **E-Mail:** getrimmt, leer ⇒ `null` (entfernen erlaubt), gesetzt ⇒ Format via `isEmailFormat` (sonst 400 `invalid_email`). **Telefon:** Freitext, getrimmt, leer ⇒ `null`, **KEINE Normalisierung** (erst beim SMS-Versand). Antwort `{ customer_email, customer_phone }` (200).
+
+### UI ([app/portal/orders/[id]/contact-editor.tsx](app/portal/orders/[id]/contact-editor.tsx) + [page.tsx](app/portal/orders/[id]/page.tsx))
+
+Die beiden read-only `MetaRow`s für E-Mail/Telefon im Stammdaten-Block sind durch die Client-Komponente `<ContactEditor>` ersetzt (`div + onClick`/`<button>`, **kein `<form>`**). **Anzeige-Modus:** belegte Felder als Zeilen (leer ⇒ Zeile nicht zeigen, wie bisher), darunter ein dezenter „Kontakt bearbeiten"-Button — **immer sichtbar**, auch wenn beide Felder leer sind, damit eine fehlende Nummer/Mail **nachgetragen** werden kann. **Editier-Modus:** editierbare E-Mail-/Telefon-Felder (`form-input`, auch wenn leer) + Speichern/Abbrechen; Client-Validierung der E-Mail = Server (`isEmailFormat` aus [lib/settings/options.ts](lib/settings/options.ts), bereits client-importierbar). Speichern ⇒ `PATCH /api/portal/orders/[id]` ⇒ lokale Anzeige aktualisiert + `router.refresh()`, damit der server-gerenderte Rest (z. B. die `hasEmail`-Warnung des Ausliefern-Buttons) konsistent bleibt. i18n-Block `contact.*`.
+
+**Konventionen:** keine Migration; AUTHENTICATED + RLS, kein `service_role`; kein `<form>`, kein `any`. `pnpm typecheck` + `pnpm build` grün.
+
+---
+
 ## Launch-Fahrplan & deferierte Härtung
 
 Detail-Referenz für die Risikobewertung: [SECURITY_REVIEW.md](SECURITY_REVIEW.md) (bleibt im Repo). Dieser Abschnitt fasst die **Reihenfolge** des Live-Gangs und die **vor Kunde #2 verpflichtende** Härtung zusammen.

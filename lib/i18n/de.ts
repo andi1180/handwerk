@@ -103,6 +103,14 @@ export const de = {
     media: "Medien",
     noMedia: "Noch keine Medien zu diesem Auftrag.",
   },
+  contact: {
+    edit: "Kontakt bearbeiten",
+    save: "Speichern",
+    saving: "Speichern …",
+    cancel: "Abbrechen",
+    invalidEmail: "Bitte eine gültige E-Mail-Adresse angeben.",
+    saveError: "Speichern fehlgeschlagen. Bitte erneut versuchen.",
+  },
   settings: {
     title: "Einstellungen",
     groupBusiness: "Betrieb",

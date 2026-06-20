@@ -8,6 +8,7 @@ import { OrderStatusBadge } from "@/components/order-status-badge";
 import { CUSTOMER_VIEW_QUERY } from "@/lib/booklet/customer-view";
 import { NO_TRACK_QUERY } from "@/lib/booklet/events";
 import { MediaSection } from "./media-section";
+import { ContactEditor } from "./contact-editor";
 import type { MediaWithUrl } from "./media-list";
 import {
   CreateBookletButton,
@@ -242,18 +243,14 @@ export default async function OrderDetailPage({
             value={order.external_ref}
           />
         ) : null}
-        {order.customer_email ? (
-          <MetaRow
-            label={t(DEFAULT_LOCALE, "orders.email")}
-            value={order.customer_email}
-          />
-        ) : null}
-        {order.customer_phone ? (
-          <MetaRow
-            label={t(DEFAULT_LOCALE, "orders.phone")}
-            value={order.customer_phone}
-          />
-        ) : null}
+        {/* Kontakt (E-Mail + Telefon) inline editierbar — auch zum Nachtragen
+            einer fehlenden Adresse/Nummer. Client-Komponente; das Update läuft
+            über PATCH /api/portal/orders/[id] (AUTHENTICATED, RLS). */}
+        <ContactEditor
+          orderId={order.id}
+          initialEmail={order.customer_email}
+          initialPhone={order.customer_phone}
+        />
         {order.item_description ? (
           <MetaRow
             label={t(DEFAULT_LOCALE, "orders.itemDescription")}
