@@ -5,7 +5,6 @@ import { getCurrentBusiness } from "@/lib/auth/current-business";
 import { DEFAULT_LOCALE, t } from "@/lib/i18n";
 import {
   OrderStatusBadge,
-  isOrderStatus,
   type OrderStatus,
 } from "@/components/order-status-badge";
 import { OrderStatusFilter } from "@/components/order-status-filter";
@@ -28,6 +27,7 @@ import {
   type QuickFilter,
   type StatusFilter,
 } from "@/lib/orders/filters";
+import { buildFilteredOrdersQuery } from "@/lib/orders/orders-query";
 
 /** Eine Zeile der Auftragsliste — nur die für die Übersicht benötigten Felder. */
 type OrderListRow = {
@@ -116,42 +116,21 @@ export default async function OrdersPage({
   ).returns<{ id: string }[]>();
   const draftWithMedia = new Set((draftMediaRows ?? []).map((r) => r.id));
 
-  // „In Arbeit" = Entwurf MIT Medium ⇒ order_media!inner direkt in der Hauptquery.
-  const mediaJoin = activeStatusFilter === "in_progress";
-  const selectCols =
-    "id, customer_name, external_ref, short_summary, status, picked_up_at, created_at, archived_at" +
-    (mediaJoin ? ", order_media!inner(id)" : "");
-
-  let query = supabase
-    .from("orders")
-    .select(selectCols, { count: "exact" })
-    .eq("business_id", business.id);
-
-  // Archiv-Scope: zeigt nur archivierte Aufträge; Hauptliste nur aktive.
-  if (isArchiveView) {
-    query = query.not("archived_at", "is", null);
-  } else {
-    query = query.is("archived_at", null);
-  }
-
-  // Filter-Übersetzung server-seitig (IN die Query, damit Pagination heil bleibt).
-  if (activeQuick === "flagged") {
-    query = query
-      .not("picked_up_at", "is", null)
-      .in("status", ["draft", "generated"]);
-  } else if (activeStatusFilter === "new") {
-    query = query.eq("status", "draft");
-    if (draftWithMedia.size > 0) {
-      query = query.not("id", "in", `(${[...draftWithMedia].join(",")})`);
-    }
-  } else if (activeStatusFilter === "in_progress") {
-    query = query.eq("status", "draft");
-  } else if (isOrderStatus(activeStatusFilter)) {
-    query = query.eq("status", activeStatusFilter);
-  }
-
+  // Gefilterte (un-ge-`order`-te, un-ge-`range`-te) Query über den geteilten
+  // Builder — dieselbe Filter-Verzweigung speist später den by-filter-Bulk.
+  // `.order()`/`.range()` hängt die Liste selbst an. `draftWithMedia` (oben für
+  // das Badge berechnet) trägt das NOT-IN von `status='new'`.
   const from = (page - 1) * ORDERS_PAGE_SIZE;
-  const { data, count } = await query
+  const { data, count } = await buildFilteredOrdersQuery(supabase, {
+    businessId: business.id,
+    status: activeStatusFilter,
+    quick: activeQuick,
+    archived: isArchiveView,
+    draftWithMediaIds: draftWithMedia,
+    selectCols:
+      "id, customer_name, external_ref, short_summary, status, picked_up_at, created_at, archived_at",
+    count: "exact",
+  })
     .order("created_at", { ascending: false })
     .range(from, from + ORDERS_PAGE_SIZE - 1)
     .returns<OrderListRow[]>();
