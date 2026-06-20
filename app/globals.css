@@ -445,11 +445,13 @@ body {
   margin: 0;
 }
 
-/* Titelzeile: „Aufträge"-Überschrift links, Refresh-Button rechts (Punkt 4). */
+/* Titelzeile: „Aufträge"-Überschrift links, Refresh/Auswählen/Archiv rechts.
+   `flex-wrap` fängt enge Mobile-Viewports ab (mehrere Pillen + Titel). */
 .orders-title-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 12px;
   width: 100%;
 }
@@ -546,6 +548,103 @@ body {
 .archive-toggle:disabled {
   opacity: 0.5;
   cursor: default;
+}
+
+/* --- Mehrfach-Auswahl + Bulk-Archivieren (Schritt 3a) --- */
+
+/* Auswahl-Checkbox auf der Kachel (ersetzt im Select-Mode das Einzel-Archiv-Icon). */
+.order-select-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 6px;
+  border: 1.8px solid var(--border);
+  background: var(--bg);
+  color: #fff;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.order-select-check:hover {
+  border-color: var(--gold-border);
+}
+.order-select-check[data-selected="true"] {
+  background: var(--gold);
+  border-color: var(--gold);
+}
+
+/* Fixierte Aktions-Bar (sichtbar ab ≥1 Auswahl). Auf Mobile über der Bottom-Nav. */
+.bulk-bar {
+  position: fixed;
+  left: 50%;
+  bottom: 20px;
+  transform: translateX(-50%);
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  max-width: calc(100vw - 24px);
+  padding: 10px 12px 10px 18px;
+  border-radius: 999px;
+  background: var(--text-primary);
+  color: #fff;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.28);
+}
+
+.bulk-bar-label {
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.bulk-bar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.bulk-bar-btn {
+  font-size: 13px;
+  font-weight: 600;
+  padding: 7px 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  background: transparent;
+  color: #fff;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.bulk-bar-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+.bulk-bar-btn--primary {
+  background: var(--gold);
+  border-color: var(--gold);
+  color: #fff;
+}
+.bulk-bar-btn--primary:hover {
+  background: #b89a48;
+}
+.bulk-bar-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+@media (max-width: 768px) {
+  .bulk-bar {
+    left: 12px;
+    right: 12px;
+    transform: none;
+    bottom: calc(var(--portal-tabnav-h) + env(safe-area-inset-bottom, 0px) + 12px);
+    justify-content: space-between;
+    border-radius: 14px;
+  }
 }
 
 /* --- Quick-Filter: dezente, gold-umrahmte Chips (Block C / Schritt 3) --- */

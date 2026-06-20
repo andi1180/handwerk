@@ -14,7 +14,11 @@ import { OrdersPagination } from "@/components/orders-pagination";
 import { OrdersRefreshButton } from "@/components/orders-refresh-button";
 import type { ReelStatus } from "@/app/portal/orders/[id]/generate-controls";
 import { PickupPendingBadge } from "@/components/pickup-pending-badge";
-import { ArchiveToggle } from "@/components/archive-toggle";
+import {
+  OrderBulkSelectProvider,
+  OrderRowControls,
+  SelectModeToggle,
+} from "@/components/order-bulk-archive";
 import { isArchivable } from "@/lib/orders/archive";
 import {
   ORDERS_PAGE_SIZE,
@@ -187,6 +191,7 @@ export default async function OrdersPage({
 
   return (
     <div style={{ maxWidth: 720, margin: "0 auto" }}>
+      <OrderBulkSelectProvider orderIds={orders.map((o) => o.id)}>
       <div className="orders-header">
         <div className="orders-title-row">
           <h1 style={{ fontSize: 22, fontWeight: 700 }}>
@@ -204,9 +209,10 @@ export default async function OrdersPage({
               {t(DEFAULT_LOCALE, "orders.backToList")}
             </Link>
           ) : (
-            /* Hauptliste → Refresh + Archiv-Link */
+            /* Hauptliste → Refresh + Mehrfach-Auswahl + Archiv-Link */
             <>
               <OrdersRefreshButton />
+              <SelectModeToggle />
               <Link
                 href={buildOrdersUrl({ archived: true })}
                 className="orders-archive-link"
@@ -301,9 +307,6 @@ export default async function OrdersPage({
                   ? order.picked_up_at
                   : null;
 
-              const canArchive =
-                !isArchiveView && isArchivable(order.status, order.picked_up_at);
-
               return (
                 <Link
                   key={order.id}
@@ -394,13 +397,17 @@ export default async function OrdersPage({
                       <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>
                         {DATE_FORMAT.format(new Date(order.created_at))}
                       </div>
-                      {/* Archiv-Icon: auf archivierbaren Aufträgen der Hauptliste
-                          oder auf allen Aufträgen in der Archiv-Ansicht. */}
-                      {canArchive ? (
-                        <ArchiveToggle orderId={order.id} mode="archive" />
-                      ) : isArchiveView ? (
-                        <ArchiveToggle orderId={order.id} mode="unarchive" />
-                      ) : null}
+                      {/* Kachel-Kontrolle (Client): Auswahl-Checkbox im
+                          Select-Mode, sonst Einzel-Archiv-Icon (Hauptliste,
+                          archivierbar) bzw. Entarchivieren-Icon (Archiv-Scope). */}
+                      <OrderRowControls
+                        orderId={order.id}
+                        archivable={isArchivable(
+                          order.status,
+                          order.picked_up_at,
+                        )}
+                        archiveView={isArchiveView}
+                      />
                     </div>
                   </div>
                   {flaggedDate ? (
@@ -420,6 +427,7 @@ export default async function OrdersPage({
           />
         </>
       )}
+      </OrderBulkSelectProvider>
     </div>
   );
 }
