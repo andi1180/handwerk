@@ -27,7 +27,10 @@ import {
   type QuickFilter,
   type StatusFilter,
 } from "@/lib/orders/filters";
-import { buildFilteredOrdersQuery } from "@/lib/orders/orders-query";
+import {
+  buildFilteredOrdersQuery,
+  getDraftWithMediaIds,
+} from "@/lib/orders/orders-query";
 
 /** Eine Zeile der Auftragsliste — nur die für die Übersicht benötigten Felder. */
 type OrderListRow = {
@@ -101,20 +104,14 @@ export default async function OrdersPage({
 
   const supabase = await createClient();
 
-  // EINE Zweitquery, die das Badge UND den Filter speist: alle Entwürfe des
-  // aktuellen Scopes (aktiv/archiviert) MIT ≥1 Medium. `order_media!inner` ⇒
-  // PostgREST liefert nur Aufträge mit mindestens einem Medium. RLS skopiert auf
-  // den Betrieb; kein service_role. **Geschäftsweit** (nicht seiten-skopiert).
-  const draftMediaBase = supabase
-    .from("orders")
-    .select("id, order_media!inner(id)")
-    .eq("business_id", business.id)
-    .eq("status", "draft");
-  const { data: draftMediaRows } = await (isArchiveView
-    ? draftMediaBase.not("archived_at", "is", null)
-    : draftMediaBase.is("archived_at", null)
-  ).returns<{ id: string }[]>();
-  const draftWithMedia = new Set((draftMediaRows ?? []).map((r) => r.id));
+  // EINE Zweitquery (geteilter Helfer), die das Badge UND den Filter speist: alle
+  // Entwürfe des aktuellen Scopes (aktiv/archiviert) MIT ≥1 Medium. RLS skopiert
+  // auf den Betrieb; kein service_role. **Geschäftsweit** (nicht seiten-skopiert).
+  // Derselbe Helfer trägt den by-filter-Bulk (`status='new'`) ⇒ kein Drift.
+  const draftWithMedia = await getDraftWithMediaIds(supabase, {
+    businessId: business.id,
+    archived: isArchiveView,
+  });
 
   // Gefilterte (un-ge-`order`-te, un-ge-`range`-te) Query über den geteilten
   // Builder — dieselbe Filter-Verzweigung speist später den by-filter-Bulk.
@@ -170,7 +167,11 @@ export default async function OrdersPage({
 
   return (
     <div style={{ maxWidth: 720, margin: "0 auto" }}>
-      <OrderBulkSelectProvider orderIds={orders.map((o) => o.id)}>
+      <OrderBulkSelectProvider
+        orderIds={orders.map((o) => o.id)}
+        status={activeStatusFilter}
+        quick={activeQuick}
+      >
       <div className="orders-header">
         <div className="orders-title-row">
           <h1 style={{ fontSize: 22, fontWeight: 700 }}>

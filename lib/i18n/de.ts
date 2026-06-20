@@ -86,6 +86,8 @@ export const de = {
     archiveAllDone: "Alle erledigten archivieren",
     confirmArchiveAllDone: "Alle {n} erledigten archivieren?",
     noneToArchive: "Keine erledigten Aufträge zum Archivieren",
+    selectAllFiltered: "Alle auswählen",
+    allFilteredSelected: "Alle {n} ausgewählt",
     yes: "Ja",
     customerName: "Kundenname",
     email: "E-Mail",

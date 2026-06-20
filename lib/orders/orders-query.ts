@@ -30,6 +30,13 @@ export type FilteredOrdersOptions = {
   selectCols: string;
   /** Optional die count-Option (Liste: "exact"; Bulk: weglassen). */
   count?: "exact" | "planned" | "estimated";
+  /**
+   * Optional `head: true` — nur den `count` holen, KEINE Zeilen übertragen
+   * (für den by-filter-Bulk-Count, GET). Wirkt nur zusammen mit `count`.
+   * Default (undefined/false): Zeilen werden geladen — Verhalten der Liste
+   * bleibt unverändert (sie übergibt `head` nicht).
+   */
+  head?: boolean;
 };
 
 /**
@@ -63,6 +70,7 @@ export function buildFilteredOrdersQuery(
     draftWithMediaIds,
     selectCols,
     count,
+    head,
   } = opts;
 
   // „In Arbeit" = Entwurf MIT Medium ⇒ order_media!inner direkt in der Query;
@@ -74,9 +82,11 @@ export function buildFilteredOrdersQuery(
         ? `${selectCols}, booklets!inner(reel_status)`
         : selectCols;
 
+  // `head` nur zusammen mit `count` setzen; ohne `head` bleibt das Select-Argument
+  // exakt `{ count }` (Liste unverändert) bzw. `undefined`.
   let query = supabase
     .from("orders")
-    .select(cols, count ? { count } : undefined)
+    .select(cols, count ? (head ? { count, head: true } : { count }) : undefined)
     .eq("business_id", businessId);
 
   // Archiv-Scope: zeigt nur archivierte Aufträge; Hauptliste nur aktive.
@@ -111,4 +121,31 @@ export function buildFilteredOrdersQuery(
   }
 
   return query;
+}
+
+/**
+ * Geschäftsweite Menge der Entwürfe (`status='draft'`) MIT ≥1 `order_media` —
+ * **eine Quelle** für das `hasMedia`-Badge + den `status='new'`-Filter der Liste
+ * (`page.tsx`) UND den by-filter-Bulk (`status='new'` braucht exakt dieselbe
+ * Menge, sonst trifft die Massen-Archivierung eine ANDERE Menge als die Liste
+ * anzeigt). Vorher inline in `page.tsx` — hier extrahiert, damit kein Drift.
+ *
+ * `order_media!inner` ⇒ PostgREST liefert nur Aufträge mit mindestens einem
+ * Medium (eine Zeile je Auftrag, Kinder genestet). Skope nach `archived`
+ * (Hauptliste: aktiv; Archiv-Scope: archiviert). Ausschließlich AUTHENTICATED
+ * Client (RLS); kein service_role.
+ */
+export async function getDraftWithMediaIds(
+  supabase: ServerClient,
+  opts: { businessId: string; archived: boolean },
+): Promise<Set<string>> {
+  const base = supabase
+    .from("orders")
+    .select("id, order_media!inner(id)")
+    .eq("business_id", opts.businessId)
+    .eq("status", "draft");
+  const { data } = await (
+    opts.archived ? base.not("archived_at", "is", null) : base.is("archived_at", null)
+  ).returns<{ id: string }[]>();
+  return new Set((data ?? []).map((r) => r.id));
 }

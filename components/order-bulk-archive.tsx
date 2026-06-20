@@ -13,10 +13,15 @@ import {
 import { DEFAULT_LOCALE, t } from "@/lib/i18n";
 import { ArchiveToggle } from "@/components/archive-toggle";
 import { DropdownMenu, DropdownItem } from "@/components/dropdown-menu";
-import { buildOrdersUrl } from "@/lib/orders/filters";
+import {
+  buildOrdersUrl,
+  type QuickFilter,
+  type StatusFilter,
+} from "@/lib/orders/filters";
 
 /**
- * Mehrfach-Auswahl + Bulk-Archivieren (Schritt 3a).
+ * Mehrfach-Auswahl + Bulk-Archivieren (Schritt 3a) + „Alle auswählen" pro
+ * aktivem Filter über alle Seiten (Schritt 3b-2b).
  *
  * Eine Client-Auswahl-Schicht über die server-gerenderte Auftragsliste: der
  * Provider liefert per Context den Auswahl-State; die server-gerenderten Kacheln
@@ -26,7 +31,14 @@ import { buildOrdersUrl } from "@/lib/orders/filters";
  *
  * Auswahl-UI NUR im Hauptlisten-Scope (Archiv-Scope rendert keine
  * `OrdersArchiveMenu` ⇒ `selectMode` bleibt false ⇒ keine Checkboxen, keine Bar).
- * KEIN „Alle auswählen", KEIN Per-Filter-Bulk, KEINE Auto-Archivierung (3b).
+ *
+ * Zwei sich ausschließende Auswahl-Modi innerhalb des Select-Mode:
+ *  - IDs-Modus           — einzeln angetippte Kacheln (`selected`).
+ *  - All-gefiltert-Modus — „Alle auswählen": der Server zählt ALLE archivierbaren
+ *    Treffer des aktiven Filters (`allFilteredCount`, über alle Seiten); das
+ *    Archivieren postet dann `{ scope:"filter", status, quick }` statt der IDs.
+ * Eine Einzelauswahl verlässt den All-gefiltert-Modus; „Alle auswählen" leert die
+ * Einzelauswahl. Der aktive Filter (`status`/`quick`) kommt als Prop aus der Seite.
  */
 
 type BulkSelectContextValue = {
@@ -36,6 +48,13 @@ type BulkSelectContextValue = {
   selected: ReadonlySet<string>;
   toggle: (id: string) => void;
   clear: () => void;
+  /** Aktiver Listen-Filter (für „Alle auswählen" → by-filter-Bulk). */
+  status: StatusFilter | null;
+  quick: QuickFilter | null;
+  /** Anzahl im All-gefiltert-Modus, sonst `null` (= IDs-Modus). */
+  allFilteredCount: number | null;
+  /** In den All-gefiltert-Modus wechseln (leert die Einzelauswahl). */
+  selectAllFiltered: (count: number) => void;
 };
 
 const BulkSelectContext = createContext<BulkSelectContextValue | null>(null);
@@ -52,23 +71,33 @@ function useBulkSelect(): BulkSelectContextValue {
 
 export function OrderBulkSelectProvider({
   orderIds,
+  status,
+  quick,
   children,
 }: {
   orderIds: string[];
+  status: StatusFilter | null;
+  quick: QuickFilter | null;
   children: React.ReactNode;
 }) {
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
+  const [allFilteredCount, setAllFilteredCount] = useState<number | null>(null);
 
-  // Bei Listen-Wechsel (Pagination / Refresh nach dem Archivieren) Auswahl +
-  // Modus zurücksetzen — die Auswahl wird nicht über Seiten/Refreshs getragen.
+  // Bei Listen- ODER Filter-Wechsel (Pagination / Filter / Refresh nach dem
+  // Archivieren) Auswahl + Modus zurücksetzen — nichts wird über Seiten/Filter
+  // getragen (eine All-gefiltert-Auswahl gälte sonst für den falschen Filter).
   const idsKey = orderIds.join(",");
+  const filterKey = `${status ?? ""}|${quick ?? ""}`;
   useEffect(() => {
     setSelected(new Set());
     setSelectMode(false);
-  }, [idsKey]);
+    setAllFilteredCount(null);
+  }, [idsKey, filterKey]);
 
   const toggle = useCallback((id: string) => {
+    // Eine Einzelauswahl verlässt den All-gefiltert-Modus (zurück zu IDs).
+    setAllFilteredCount(null);
     setSelected((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
@@ -77,11 +106,19 @@ export function OrderBulkSelectProvider({
     });
   }, []);
 
-  const clear = useCallback(() => setSelected(new Set()), []);
+  const clear = useCallback(() => {
+    setSelected(new Set());
+    setAllFilteredCount(null);
+  }, []);
   const enterSelectMode = useCallback(() => setSelectMode(true), []);
   const exitSelectMode = useCallback(() => {
     setSelectMode(false);
     setSelected(new Set());
+    setAllFilteredCount(null);
+  }, []);
+  const selectAllFiltered = useCallback((count: number) => {
+    setSelected(new Set());
+    setAllFilteredCount(count);
   }, []);
 
   const value = useMemo<BulkSelectContextValue>(
@@ -92,8 +129,23 @@ export function OrderBulkSelectProvider({
       selected,
       toggle,
       clear,
+      status,
+      quick,
+      allFilteredCount,
+      selectAllFiltered,
     }),
-    [selectMode, enterSelectMode, exitSelectMode, selected, toggle, clear],
+    [
+      selectMode,
+      enterSelectMode,
+      exitSelectMode,
+      selected,
+      toggle,
+      clear,
+      status,
+      quick,
+      allFilteredCount,
+      selectAllFiltered,
+    ],
   );
 
   return (
@@ -311,20 +363,40 @@ export function OrderRowControls({
 }
 
 /**
- * Fixierte Toolbar, sichtbar sobald ≥1 Auftrag gewählt ist. „Archivieren"
- * verlangt einen inline-Bestätigungsschritt (keine stille Aktion).
+ * Fixierte Toolbar, sichtbar im gesamten Auswahl-Modus (damit „Alle auswählen"
+ * auch ohne vorherige Einzelauswahl erreichbar ist). „Archivieren" verlangt einen
+ * inline-Bestätigungsschritt (keine stille Aktion).
+ *
+ * Drei Zustände (ohne Bestätigung):
+ *  - leer (0 ausgewählt)   → nur „Alle auswählen".
+ *  - IDs (≥1 angetippt)    → „{n} ausgewählt" + „Alle auswählen" + Archivieren + aufheben.
+ *  - All-gefiltert         → „Alle {N} ausgewählt" + Archivieren + aufheben.
+ * „Alle auswählen" holt den exakten Count des aktiven Filters (`GET ?scope=filter`)
+ * und wechselt bei N>0 in den All-gefiltert-Modus; N===0 ⇒ nur ein Hinweis.
  */
 function BulkArchiveBar() {
   const router = useRouter();
-  const { selectMode, selected, clear, exitSelectMode } = useBulkSelect();
+  const {
+    selectMode,
+    selected,
+    clear,
+    exitSelectMode,
+    status,
+    quick,
+    allFilteredCount,
+    selectAllFiltered,
+  } = useBulkSelect();
   const [busy, setBusy] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState(false);
+  const [selectAllBusy, setSelectAllBusy] = useState(false);
 
-  const count = selected.size;
-  const visible = selectMode && count > 0;
+  const idsCount = selected.size;
+  const allFiltered = allFilteredCount !== null;
+  const effectiveCount = allFiltered ? allFilteredCount : idsCount;
+  const visible = selectMode;
 
-  // Zustände zurücksetzen, sobald die Bar verschwindet (z. B. „Auswahl aufheben").
+  // Zustände zurücksetzen, sobald die Bar verschwindet (Modus verlassen).
   useEffect(() => {
     if (!visible) {
       setConfirming(false);
@@ -332,17 +404,59 @@ function BulkArchiveBar() {
     }
   }, [visible]);
 
+  // Fällt die Auswahl auf 0 (z. B. letzte Kachel abgewählt), Bestätigung verwerfen.
+  useEffect(() => {
+    if (effectiveCount === 0) setConfirming(false);
+  }, [effectiveCount]);
+
   if (!visible) return null;
+
+  // „Alle auswählen": exakten Count des AKTIVEN Filters über alle Seiten holen.
+  // N>0 ⇒ All-gefiltert-Modus; N===0 ⇒ nur Hinweis (kein Modus).
+  async function handleSelectAll() {
+    if (selectAllBusy) return;
+    setSelectAllBusy(true);
+    setError(false);
+    try {
+      const params = new URLSearchParams({ scope: "filter" });
+      if (quick) params.set("quick", quick);
+      else if (status) params.set("status", status);
+      const res = await fetch(
+        `/api/portal/orders/archive-bulk?${params.toString()}`,
+      );
+      if (!res.ok) {
+        console.error("[order-bulk-archive] filter count failed", res.status);
+        setError(true);
+        return;
+      }
+      const { count } = (await res.json()) as { count: number };
+      if (!count) {
+        window.alert(t(DEFAULT_LOCALE, "orders.noneToArchive"));
+        return;
+      }
+      selectAllFiltered(count);
+    } catch (err) {
+      console.error("[order-bulk-archive] filter count error", err);
+      setError(true);
+    } finally {
+      setSelectAllBusy(false);
+    }
+  }
 
   async function handleArchive() {
     if (busy) return;
     setBusy(true);
     setError(false);
     try {
+      // All-gefiltert ⇒ `{ scope:"filter", status, quick }` (alle Seiten);
+      // sonst die angetippten IDs (3a).
+      const body = allFiltered
+        ? { scope: "filter", status, quick, archive: true }
+        : { ids: [...selected], archive: true };
       const res = await fetch("/api/portal/orders/archive-bulk", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ids: [...selected], archive: true }),
+        body: JSON.stringify(body),
       });
       if (res.ok) {
         exitSelectMode(); // leert Auswahl + verlässt den Modus
@@ -370,7 +484,7 @@ function BulkArchiveBar() {
       {confirming ? (
         <>
           <span className="bulk-bar-label">
-            {t(DEFAULT_LOCALE, "orders.confirmArchive", { n: count })}
+            {t(DEFAULT_LOCALE, "orders.confirmArchive", { n: effectiveCount })}
           </span>
           <div className="bulk-bar-actions">
             <button
@@ -396,19 +510,37 @@ function BulkArchiveBar() {
           <span className="bulk-bar-label">
             {error
               ? t(DEFAULT_LOCALE, "orders.archiveError")
-              : t(DEFAULT_LOCALE, "orders.selected", { n: count })}
+              : allFiltered
+                ? t(DEFAULT_LOCALE, "orders.allFilteredSelected", {
+                    n: effectiveCount,
+                  })
+                : t(DEFAULT_LOCALE, "orders.selected", { n: idsCount })}
           </span>
           <div className="bulk-bar-actions">
-            <button
-              type="button"
-              className="bulk-bar-btn bulk-bar-btn--primary"
-              onClick={() => setConfirming(true)}
-            >
-              {t(DEFAULT_LOCALE, "orders.archiveSelected")}
-            </button>
-            <button type="button" className="bulk-bar-btn" onClick={clear}>
-              {t(DEFAULT_LOCALE, "orders.clearSelection")}
-            </button>
+            {!allFiltered ? (
+              <button
+                type="button"
+                className="bulk-bar-btn"
+                onClick={handleSelectAll}
+                disabled={selectAllBusy}
+              >
+                {t(DEFAULT_LOCALE, "orders.selectAllFiltered")}
+              </button>
+            ) : null}
+            {effectiveCount > 0 ? (
+              <button
+                type="button"
+                className="bulk-bar-btn bulk-bar-btn--primary"
+                onClick={() => setConfirming(true)}
+              >
+                {t(DEFAULT_LOCALE, "orders.archiveSelected")}
+              </button>
+            ) : null}
+            {effectiveCount > 0 ? (
+              <button type="button" className="bulk-bar-btn" onClick={clear}>
+                {t(DEFAULT_LOCALE, "orders.clearSelection")}
+              </button>
+            ) : null}
           </div>
         </>
       )}
