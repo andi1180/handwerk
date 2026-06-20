@@ -92,10 +92,10 @@ export const de = {
     sent: "Gesendet",
     viewed: "Angesehen",
     shared: "Geteilt",
-    reelMissing: "Reel fehlt",
-    reelRendering: "Reel rendert …",
-    reelReady: "Reel fertig",
-    reelFailed: "Reel fehlgeschlagen",
+    // generated → zusammengesetztes Render-Badge (aus booklets.reel_status):
+    creating: "Wird erstellt …",
+    ready: "Fertig",
+    failed: "Fehler",
     pickupPendingNotice: "Abgeholt am {date} – Booklet nicht versendet",
   },
   orderDetail: {

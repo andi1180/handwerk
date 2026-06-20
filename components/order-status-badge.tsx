@@ -54,6 +54,11 @@ const GREEN: BadgeStyle = {
   border: "var(--green-border)",
   color: "var(--green-text)",
 };
+const RED: BadgeStyle = {
+  background: "var(--red-light)",
+  border: "var(--red-border)",
+  color: "var(--red-text)",
+};
 
 const STATUS_STYLES: Record<OrderStatus, BadgeStyle> = {
   draft: NEUTRAL,
@@ -64,6 +69,26 @@ const STATUS_STYLES: Record<OrderStatus, BadgeStyle> = {
 };
 
 /**
+ * Render-Achse (`booklets.reel_status`) → Badge-Stil + i18n-Label, NUR für
+ * `status='generated'`. Seit B1 rendert jede generierte Order ein Reel
+ * (`rendering → ready → failed`); das Listen-Badge wird dafür zusammengesetzt
+ * statt einen separaten Pill zu zeigen: fertig ⇒ gold „Fertig", Fehler ⇒ rot
+ * „Fehler", sonst (pending/rendering/null/unbekannt) ⇒ amber „Wird erstellt …"
+ * — der Default, weil seit B1 jede generierte Order rendert.
+ */
+type ReelBadge = { style: BadgeStyle; key: "creating" | "ready" | "failed" };
+function reelBadge(reelStatus: string | null): ReelBadge {
+  switch (reelStatus) {
+    case "ready":
+      return { style: GOLD, key: "ready" };
+    case "failed":
+      return { style: RED, key: "failed" };
+    default:
+      return { style: AMBER, key: "creating" };
+  }
+}
+
+/**
  * Status-Badge eines Auftrags: i18n-Label + Stil (pill, border-radius 999px).
  * Reine Präsentation — kann als Server Component gerendert werden.
  *
@@ -71,19 +96,36 @@ const STATUS_STYLES: Record<OrderStatus, BadgeStyle> = {
  * gesplittet (KEIN neuer `orders.status`-Wert, keine Migration): `hasMedia`
  * ⇒ „In Arbeit" (amber), sonst „Neu" (grau, wie bisher der Entwurf). Alle
  * übrigen Status sind unverändert; `hasMedia` wirkt nur auf `draft`.
+ *
+ * Für `status='generated'` wird das Badge zusätzlich aus `reelStatus`
+ * (`booklets.reel_status`) zusammengesetzt — „Wird erstellt …" / „Fertig" /
+ * „Fehler" (ersetzt den früheren separaten ReelStatePill). Default bei
+ * null/unbekanntem `reelStatus` ⇒ „Wird erstellt …" (defensiv, weil seit B1
+ * jede generierte Order rendert); `reelStatus` wirkt nur auf `generated`.
  */
 export function OrderStatusBadge({
   status,
   hasMedia = false,
+  reelStatus = null,
 }: {
   status: OrderStatus;
   hasMedia?: boolean;
+  reelStatus?: string | null;
 }) {
   const inProgress = status === "draft" && hasMedia;
-  const style = inProgress ? AMBER : STATUS_STYLES[status];
-  const label = inProgress
-    ? t(DEFAULT_LOCALE, "orderStatus.inProgress")
-    : t(DEFAULT_LOCALE, `orderStatus.${status}`);
+  let style: BadgeStyle;
+  let label: string;
+  if (status === "generated") {
+    const reel = reelBadge(reelStatus);
+    style = reel.style;
+    label = t(DEFAULT_LOCALE, `orderStatus.${reel.key}`);
+  } else if (inProgress) {
+    style = AMBER;
+    label = t(DEFAULT_LOCALE, "orderStatus.inProgress");
+  } else {
+    style = STATUS_STYLES[status];
+    label = t(DEFAULT_LOCALE, `orderStatus.${status}`);
+  }
   return (
     <span
       style={{

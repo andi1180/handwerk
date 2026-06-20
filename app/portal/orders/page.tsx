@@ -12,10 +12,7 @@ import { OrderStatusFilter } from "@/components/order-status-filter";
 import { OrderQuickFilters } from "@/components/order-quick-filters";
 import { OrdersPagination } from "@/components/orders-pagination";
 import { OrdersRefreshButton } from "@/components/orders-refresh-button";
-import {
-  ReelStatePill,
-  type ReelStatus,
-} from "@/components/reel-state-pill";
+import type { ReelStatus } from "@/app/portal/orders/[id]/generate-controls";
 import { PickupPendingBadge } from "@/components/pickup-pending-badge";
 import {
   ORDERS_PAGE_SIZE,
@@ -340,12 +337,8 @@ export default async function OrdersPage({
                     <OrderStatusBadge
                       status={order.status}
                       hasMedia={draftWithMedia.has(order.id)}
+                      reelStatus={reelByOrder.get(order.id) ?? null}
                     />
-                    {order.status === "generated" ? (
-                      <ReelStatePill
-                        reelStatus={reelByOrder.get(order.id) ?? null}
-                      />
-                    ) : null}
                   </div>
                   <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>
                     {DATE_FORMAT.format(new Date(order.created_at))}

@@ -1706,29 +1706,39 @@ reel_status")`, `.in("order_id", generatedIds)`) über den **AUTHENTICATED Serve
 Aufträge im Status `generated` (sonst gar nicht); das Ergebnis wird zu einer
 `Map<order_id, reel_status>` reduziert, aus der die Zeile per `?? null` liest.
 
-### Anzeige ([components/reel-state-pill.tsx](components/reel-state-pill.tsx))
+### Anzeige — Schritt C: Badge zusammengesetzt (ReelStatePill entfernt)
 
-`<ReelStatePill>` — reine Präsentation (Server-Component-fähig, Muster wie
-`order-status-badge.tsx`), in der Zeile **neben** dem Status-Badge (gemeinsamer
-wrap-Flex). Die Liste rendert sie **ausschließlich** bei `order.status === 'generated'`;
-`draft`/`finalized` (noch kein Booklet) und `sent`/`viewed`/`shared` (bereits
-ausgeliefert) bekommen **keine** Pill. Zustände:
+> **Aktualisiert (Schritt C):** Der ursprünglich separate `<ReelStatePill>` ist
+> **entfernt** ([components/reel-state-pill.tsx](components/reel-state-pill.tsx) gelöscht).
+> Seit B1 rendert **jede** generierte Order ein Reel (`rendering → ready → failed`) ⇒ ein
+> eigener Pill neben dem Status-Badge war redundant. Der `reel_status` wird jetzt **in den
+> Auftrags-Status-Badge zusammengeführt** ([order-status-badge.tsx](components/order-status-badge.tsx)).
+> Die zwei Achsen bleiben datenseitig getrennt — nur die **Anzeige** ist ein Badge.
 
-| `reel_status` | Label | Farbe |
+Der Badge bekommt einen optionalen Prop `reelStatus?: string | null`, der **nur** bei
+`status === 'generated'` wirkt (sonst ignoriert). Die Liste reicht
+`reelStatus={reelByOrder.get(order.id) ?? null}` durch; die `reelByOrder`-Batch-Query
+(oben) ist **unverändert**. Mapping (kleiner `reelBadge(reelStatus)`-Switch, kein
+unsicherer Cast, `noUncheckedIndexedAccess`-fest):
+
+| `reel_status` (bei `generated`) | Label | Farbe |
 | --- | --- | --- |
-| `pending` / `null` | „Reel fehlt" | **Amber/Warnung — aufmerksamkeitsstark** (der Kern) |
-| `rendering` | „Reel rendert …" | Blau |
-| `ready` | „Reel fertig" | Grün |
-| `failed` | „Reel fehlgeschlagen" | Rot |
+| `pending` / `rendering` / `null` / unbekannt | „Wird erstellt …" | **Amber** (Default — post-B1 rendert jede generierte Order) |
+| `ready` | „Fertig" | Gold (`GOLD`-BadgeStyle) |
+| `failed` | „Fehler" | Rot (neue `RED`-BadgeStyle aus den `--red-*`-Tokens) |
 
-Der `ReelStatus`-Typ bleibt **eine Quelle** (definiert in
-[generate-controls.tsx](app/portal/orders/[id]/generate-controls.tsx), über die Pill
-re-exportiert). Die Farb-Tokens `--amber-*`/`--blue-*`/`--red-*` ([globals.css](app/globals.css))
-sind analog zu den `--green-*`-Tokens (6c) angelegt; Grün wird wiederverwendet.
+Alle übrigen Status unverändert: `draft` ⇒ „Neu"/„In Arbeit" (aus `hasMedia`),
+`sent`/`viewed`/`shared` ⇒ Funnel-Farben. Der `ReelStatus`-Typ wird in der Liste jetzt
+direkt aus [generate-controls.tsx](app/portal/orders/[id]/generate-controls.tsx)
+importiert (`import type`; vorher über die gelöschte Pill re-exportiert).
 
 ### i18n
 
-`orderStatus.reelMissing`/`reelRendering`/`reelReady`/`reelFailed`. Keine Inline-Strings.
+`orderStatus.creating` („Wird erstellt …") / `orderStatus.ready` („Fertig") /
+`orderStatus.failed` („Fehler"). Die früheren
+`orderStatus.reelMissing`/`reelRendering`/`reelReady`/`reelFailed` (nur von der Pill
+genutzt) wurden mit der Pill **entfernt**; `orderStatus.generated` bleibt (Status-Filter-
+Dropdown). Keine Inline-Strings.
 
 ---
 
