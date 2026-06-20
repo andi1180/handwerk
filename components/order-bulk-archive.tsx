@@ -11,6 +11,8 @@ import {
 } from "react";
 import { DEFAULT_LOCALE, t } from "@/lib/i18n";
 import { ArchiveToggle } from "@/components/archive-toggle";
+import { DropdownMenu, DropdownItem } from "@/components/dropdown-menu";
+import { buildOrdersUrl } from "@/lib/orders/filters";
 
 /**
  * Mehrfach-Auswahl + Bulk-Archivieren (Schritt 3a).
@@ -21,8 +23,8 @@ import { ArchiveToggle } from "@/components/archive-toggle";
  * lesen. So bleibt die Liste eine Server-Component, der bestehende `<Link>`/das
  * Einzel-Archiv-Icon brechen nicht.
  *
- * Auswahl-UI NUR im Hauptlisten-Scope (Archiv-Scope rendert keinen
- * `SelectModeToggle` ⇒ `selectMode` bleibt false ⇒ keine Checkboxen, keine Bar).
+ * Auswahl-UI NUR im Hauptlisten-Scope (Archiv-Scope rendert keine
+ * `OrdersArchiveMenu` ⇒ `selectMode` bleibt false ⇒ keine Checkboxen, keine Bar).
  * KEIN „Alle auswählen", KEIN Per-Filter-Bulk, KEINE Auto-Archivierung (3b).
  */
 
@@ -101,8 +103,8 @@ export function OrderBulkSelectProvider({
   );
 }
 
-/** Kleines Kästchen-Icon (Mehrfach-Auswahl) für den Header-Toggle. */
-function SelectIcon() {
+/** Archiv-Box-Icon für den Dropdown-Trigger. */
+function ArchiveIcon() {
   return (
     <svg
       width={16}
@@ -115,27 +117,61 @@ function SelectIcon() {
       strokeLinejoin="round"
       aria-hidden
     >
-      <path d="M9 11l3 3L22 4" />
-      <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+      <rect x="2" y="3" width="20" height="5" rx="1" />
+      <path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8" />
+      <path d="M10 12l2 2 2-2" />
+      <path d="M12 12v4" />
     </svg>
   );
 }
 
-/** Header-Toggle: „Auswählen" ⇄ „Abbrechen" (nur Hauptlisten-Scope). */
-export function SelectModeToggle() {
+/**
+ * Header-Control „Archiv ▾" (nur Hauptlisten-Scope). Fasst die früher zwei
+ * separaten Trigger zusammen:
+ *  - „Archiv"     → in den Archiv-Scope navigieren (`?archived=1`).
+ *  - „Auswählen"  → Mehrfach-Auswahl-Modus starten.
+ *
+ * Im Auswahl-Modus wird derselbe Header-Slot zum direkten „Abbrechen"-Button
+ * (kein Menü) — so bleibt der bisherige Abbrechen-Weg ohne Doppelung erhalten
+ * (die Toolbar trägt weiterhin nur „Auswahl aufheben"). Das Menü ist so
+ * angelegt, dass ein dritter Eintrag (3b: „Alle erledigten archivieren") leicht
+ * ergänzt werden kann.
+ */
+export function OrdersArchiveMenu() {
   const { selectMode, enterSelectMode, exitSelectMode } = useBulkSelect();
+
+  if (selectMode) {
+    return (
+      <button
+        type="button"
+        className="orders-archive-link"
+        onClick={exitSelectMode}
+        aria-pressed
+      >
+        <span>{t(DEFAULT_LOCALE, "orders.cancel")}</span>
+      </button>
+    );
+  }
+
   return (
-    <button
-      type="button"
-      className="orders-archive-link"
-      onClick={selectMode ? exitSelectMode : enterSelectMode}
-      aria-pressed={selectMode}
+    <DropdownMenu
+      triggerClassName="orders-archive-link"
+      ariaLabel={t(DEFAULT_LOCALE, "orders.archiveMenu")}
+      trigger={
+        <>
+          <ArchiveIcon />
+          <span>{t(DEFAULT_LOCALE, "orders.archiveMenu")}</span>
+        </>
+      }
     >
-      <SelectIcon />
-      <span>
-        {t(DEFAULT_LOCALE, selectMode ? "orders.cancel" : "orders.select")}
-      </span>
-    </button>
+      <DropdownItem href={buildOrdersUrl({ archived: true })}>
+        {t(DEFAULT_LOCALE, "orders.archiveView")}
+      </DropdownItem>
+      <DropdownItem onSelect={enterSelectMode}>
+        {t(DEFAULT_LOCALE, "orders.select")}
+      </DropdownItem>
+      {/* 3b: hier kommt „Alle erledigten archivieren" als dritter Eintrag dazu. */}
+    </DropdownMenu>
   );
 }
 

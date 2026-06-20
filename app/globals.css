@@ -525,6 +525,54 @@ body {
   border-color: var(--gold-border);
 }
 
+/* --- Kleines Dropdown-Menü (Header „Archiv ▾", wiederverwendbar) --- */
+.dropdown {
+  position: relative;
+  display: inline-flex;
+  flex-shrink: 0;
+}
+/* Trigger nutzt die `.orders-archive-link`-Optik; der Chevron rotiert offen. */
+.dropdown-chevron {
+  margin-left: 1px;
+  transition: transform 0.15s ease;
+}
+.dropdown [aria-expanded="true"] .dropdown-chevron {
+  transform: rotate(180deg);
+}
+.dropdown-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 50;
+  min-width: 180px;
+  display: flex;
+  flex-direction: column;
+  padding: 6px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
+}
+.dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  font-size: 14px;
+  color: var(--text-primary);
+  text-decoration: none;
+  padding: 9px 10px;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.dropdown-item:hover {
+  background: var(--surface);
+}
+
 /* Archiv-/Entarchivieren-Icon-Button auf der Auftragskachel. */
 .archive-toggle {
   display: inline-flex;

@@ -72,6 +72,7 @@ export const de = {
     noDescription: "Keine Beschreibung",
     archive: "Archivieren",
     unarchive: "Aus Archiv holen",
+    archiveMenu: "Archiv",
     archiveView: "Archiv",
     backToList: "← Hauptliste",
     archiveError: "Archivieren fehlgeschlagen. Bitte erneut versuchen.",

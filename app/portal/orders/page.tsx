@@ -17,7 +17,7 @@ import { PickupPendingBadge } from "@/components/pickup-pending-badge";
 import {
   OrderBulkSelectProvider,
   OrderRowControls,
-  SelectModeToggle,
+  OrdersArchiveMenu,
 } from "@/components/order-bulk-archive";
 import { isArchivable } from "@/lib/orders/archive";
 import {
@@ -209,33 +209,10 @@ export default async function OrdersPage({
               {t(DEFAULT_LOCALE, "orders.backToList")}
             </Link>
           ) : (
-            /* Hauptliste → Refresh + Mehrfach-Auswahl + Archiv-Link */
+            /* Hauptliste → Refresh + „Archiv ▾"-Dropdown (Archiv / Auswählen) */
             <>
               <OrdersRefreshButton />
-              <SelectModeToggle />
-              <Link
-                href={buildOrdersUrl({ archived: true })}
-                className="orders-archive-link"
-                title={t(DEFAULT_LOCALE, "orders.archiveView")}
-              >
-                <svg
-                  width={18}
-                  height={18}
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth={1.8}
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  aria-hidden
-                >
-                  <rect x="2" y="3" width="20" height="5" rx="1" />
-                  <path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8" />
-                  <path d="M10 12l2 2 2-2" />
-                  <path d="M12 12v4" />
-                </svg>
-                <span>{t(DEFAULT_LOCALE, "orders.archiveView")}</span>
-              </Link>
+              <OrdersArchiveMenu />
             </>
           )}
         </div>
