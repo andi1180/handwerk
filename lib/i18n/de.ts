@@ -272,26 +272,34 @@ export const de = {
     // Der EINE Erstellen-Schritt: „Booklet erstellen" führt direkt
     // draft → generated aus (KI-Texte + Kunden-Link), keine Vorstufe.
     generate: "Booklet erstellen",
+    // B2a: EIN kombinierter Schritt erzeugt Booklet UND Reel in einem Klick.
+    combined: "Booklet & Reel erzeugen",
     generating: "Erstelle Booklet…",
+    // Während der POST läuft (vor dem 202).
+    waiting: "Bitte warten…",
+    // Nach dem 202: der Render läuft serverseitig weiter — die Seite ist verlassbar.
+    background: "Läuft im Hintergrund — diese Seite kann verlassen werden.",
     // Erledigter, grauer Zustand, sobald das Booklet existiert (Status generated).
     created: "Booklet erstellt",
+    // B2a: Booklet + Reel stehen ⇒ „✓ Fertig".
+    done: "Fertig",
     hint: "Erstellt die persönlichen Texte und den Kunden-Link. Jederzeit wieder änderbar.",
     needMedia: "Bitte zuerst mindestens ein Medium hinzufügen.",
     // 0010: nur Vorher/Nachher reicht nicht — mindestens ein Prozess-Medium nötig.
     needProcess: "Mindestens ein Prozess-Bild oder -Video nötig.",
     error: "Erzeugung fehlgeschlagen. Bitte erneut versuchen.",
+    // B2a: reel_status='failed' ⇒ grober voller Neulauf (keine Diskriminierung).
+    failed: "Erstellung fehlgeschlagen",
+    retryFull: "Erneut erstellen",
     timeout: "Zeitüberschreitung. Bitte erneut versuchen.",
     aiNotConfigured:
       "Die KI ist nicht konfiguriert. Bitte später erneut versuchen.",
     openPreview: "Booklet ansehen",
   },
   reel: {
-    create: "Reel erstellen",
     // Erledigter, grauer Zustand, sobald das Reel fertig gerendert ist
-    // (reel_status='ready'). Neu-Rendern nur noch über „Bearbeiten" → erneut
-    // „Booklet erstellen" (setzt das Reel zurück) — kein „Neu erstellen" mehr.
+    // (reel_status='ready').
     created: "Reel erstellt",
-    starting: "Starte…",
     rendering: "Reel wird erstellt…",
     // Rotierende, rein kosmetische Fortschritts-Stufen während des Renders
     // (keine echte Telemetrie) — sequenziell an der Pipeline-Reihenfolge

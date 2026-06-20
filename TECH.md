@@ -2892,6 +2892,29 @@ Die synchronen 500-Pfade liegen bewusst **vor** dem 202, damit der Client einen 
 
 ---
 
+## B2a — kombinierter „Booklet & Reel erzeugen"-Button + Zwei-Zustand-Message + Auto-Poll
+
+**REINE UI** — kein Backend. NUR [generate-controls.tsx](app/portal/orders/[id]/generate-controls.tsx) + [page.tsx](app/portal/orders/[id]/page.tsx) + [de.ts](lib/i18n/de.ts). `generate/route.ts` und `render-reel/route.ts` **unangetastet**. Baut auf B1 (Sofort-202, Reel im `after()`, `reel_status='rendering'` sofort gesetzt): statt eines separaten opt-in Reel-Buttons gibt es jetzt **EINEN** Button, der nach dem 202 selbst pollt und die Seite verlassbar macht.
+
+**Lebenszyklus des kombinierten Buttons** (`CreateBookletButton`): `idle` → Klick → `waiting` (POST `…/generate` läuft, Label „Bitte warten…") → **202-ANTWORT erhalten** ⇒ `rendering` (übergibt an `<RenderingProgress>`). **Der Message-Wechsel ist an die ANTWORT gebunden, NICHT an einen Timer.** Fehler VOR dem 202 (non-2xx/Netzwerk) ⇒ zurück auf `idle` + Fehlertext (`generate.error`/`needProcess`/`timeout`/…); der sichtbare Button wiederholt denselben POST (= „Erneut"), die Hintergrund-Message wird dabei NICHT gezeigt. Der Button bekam zwei optionale Props: `label` (Failed-Retry: „Erneut erstellen") und `initialNotice` (Failed-Retry: „Erstellung fehlgeschlagen").
+
+**`<RenderingProgress>` (NEU, geteilt):** zeigt die Zwei-Zustand-/Hintergrund-Message „Läuft im Hintergrund — diese Seite kann verlassen werden." (`generate.background`) + die rein kosmetischen `REEL_STAGES` als zweite Zeile, und pollt `…/reel-status` alle ~3 s (Logik 1:1 aus dem entfernten `ReelCreateButton` — `cancelled`-Flag + `clearInterval`-Cleanup). Bei `ready` **ODER** `failed` ⇒ `router.refresh()` (KEINE clientseitige Fehler-Diskriminierung — folgt B2b). Zwei Einsatzorte, EINE Logik: Hand-off direkt nach dem 202 **und** Resume beim Reload eines noch rendernden Auftrags (page.tsx rendert die Komponente bei `reel_status ∈ {pending, rendering}`). Die Komponente startet KEINEN Render, sie beobachtet nur.
+
+**Entfernt:** der separate opt-in `ReelCreateButton` (samt `noticeForReelStart`-Helfer) — seine Poll-Mechanik wandert in `RenderingProgress`. `ReelWatchButton`, `ReopenButton`, `NoticeBox`, `ReelViewer`, `DoneButton` (jetzt exportiert für die „Fertig"-Bestätigung), Icons bleiben. Die `render-reel`-Route bleibt erhalten (Render-Endpoint des `after()`-Jobs).
+
+**Verzweigung in page.tsx** (Aktionszone am Seitenende):
+- `draft` + `processCount ≥ 1` → kombinierter `<CreateBookletButton>`. Ohne process-Medium gar kein Button (`need_process` client + server).
+- `generated` + `reel_status ∈ {pending, rendering}` → `<RenderingProgress initialStatus="rendering">` (Resume) + `<ReopenButton>`. KEIN Deliver, KEIN Watch (Booklet/Reel noch nicht fertig).
+- `generated` + `reel_status='ready'` → `<DoneButton>` „✓ Fertig" + `<ReopenButton>` | `<DeliverButton reelReady>` (B1-Gate erfüllt) + Ansehen-Aktionen (`<BookletViews>`: Booklet ansehen · [Reel ansehen] · QR drucken).
+- `generated` + `reel_status='failed'` → `<CreateBookletButton label="Erneut erstellen" initialNotice="Erstellung fehlgeschlagen">` (grober voller Neulauf via POST `…/generate`) + `<ReopenButton>`. KEINE Diskriminierung (B2b).
+- `sent/viewed/shared` → wie heute: Ausgeliefert-Hinweis + Ansehen-Aktionen.
+
+`reelStatus` wird in page.tsx unverändert berechnet (`booklet?.reel_status ?? 'pending'`); die Booklet-Query bleibt gleich. Die Ansehen-Aktionen sind in den lokalen Helfer `<BookletViews>` extrahiert (geteilt von ready-`generated` und versendet, kein Duplikat).
+
+**i18n** (Block `generate.*`): neu `combined`/`waiting`/`background`/`failed`/`retryFull`/`done`; entfernt die opt-in-Reel-Button-Keys `reel.create`/`starting`/`retry` (nirgends sonst referenziert). `pnpm typecheck` + `pnpm build` grün.
+
+---
+
 ## Launch-Fahrplan & deferierte Härtung
 
 Detail-Referenz für die Risikobewertung: [SECURITY_REVIEW.md](SECURITY_REVIEW.md) (bleibt im Repo). Dieser Abschnitt fasst die **Reihenfolge** des Live-Gangs und die **vor Kunde #2 verpflichtende** Härtung zusammen.

@@ -5,26 +5,29 @@ import { useRouter } from "next/navigation";
 import { DEFAULT_LOCALE, t } from "@/lib/i18n";
 
 /**
- * Booklet-Aktionen der Detailseite — gebündeltes „Control Center" am Seitenende
- * (Layout-Umbau). Kleine Client-Komponenten, `div/button + onClick`, kein
- * `<form>`. Die Logik der Routen (generate/reopen/render-reel/reel-status) ist
- * UNVERÄNDERT; nur Anordnung + Benennung wurden aufgeräumt.
+ * Booklet-Aktionen der Detailseite — gebündeltes „Control Center" am Seitenende.
+ * Kleine Client-Komponenten, `div/button + onClick`, kein `<form>`. Die Logik der
+ * Routen (generate/reopen/render-reel/reel-status) ist UNVERÄNDERT; B2a ändert
+ * nur die UI-Präsentation.
  *
- *  - `<CreateBookletButton>`: der EINE „Booklet erstellen"-Schritt. Im `draft`
- *    aktiv ⇒ `POST generate` (führt direkt `draft → generated` aus: KI-Texte +
- *    Kunden-Link). Im `generated` als erledigter, grauer Zustand (`disabled`,
- *    via `<DoneButton>`) — das Booklet existiert bereits.
+ *  - `<CreateBookletButton>`: der EINE kombinierte „Booklet & Reel erzeugen"-
+ *    Schritt (B2a). Klick ⇒ `POST generate` (Sofort-202; Server baut Booklet-
+ *    Shell + Texte und rendert das Reel im Hintergrund). Während des POST kurz
+ *    „Bitte warten…"; sobald die 202-ANTWORT da ist (an die Antwort gebunden,
+ *    NICHT an einen Timer) übergibt der Button an `<RenderingProgress>`. Bei
+ *    einem Fehler VOR dem 202: Fehlertext, der Button bleibt als Erneut-Aktion.
+ *    Optionales `label` (Failed-Retry „Erneut erstellen") + `initialNotice`.
+ *  - `<RenderingProgress>`: die geteilte Zwei-Zustand-/Hintergrund-Anzeige
+ *    („Läuft im Hintergrund — diese Seite kann verlassen werden.") + reel-status-
+ *    Poll. Bei `ready`/`failed` ⇒ `router.refresh()`. Zwei Einsatzorte, EINE
+ *    Logik: Hand-off direkt nach dem 202 UND Resume beim Reload eines noch
+ *    rendernden Auftrags (page.tsx rendert sie bei reel_status ∈ {pending,
+ *    rendering}). Ersetzt den früheren opt-in `ReelCreateButton`.
  *  - `<ReopenButton>` (Status `generated`): „Bearbeiten" ⇒ `POST reopen`
  *    (`generated → draft`), zurück in den Editier-Modus. Token/Kurzlink bleiben.
- *  - `<ReelCreateButton>`: erstellt das echte Reel (Render + Poll), ab
- *    `generated` und auch nach Versand (FIX 7.1). Fertig gerendert ⇒ grauer
- *    „✓ Reel erstellt"-Zustand (KEIN „Neu erstellen" mehr — Neu-Rendern nur über
- *    „Bearbeiten" → erneut „Booklet erstellen", das das Reel serverseitig
- *    zurücksetzt). Bei Erfolg `router.refresh()`, damit der Watch-Button (#4) +
- *    die Auslieferungs-Warnung den fertigen Stand vom Server bekommen.
  *  - `<ReelWatchButton>`: „Reel ansehen" — öffnet das fertige Reel im In-App-
  *    Overlay (`<ReelViewer>`, Schließen-X, kein Browser-Tab-Sackgasse). Liegt in
- *    der Ansehen-Zeile (#4) zusammen mit „Booklet ansehen"/„QR drucken".
+ *    der Ansehen-Zeile zusammen mit „Booklet ansehen"/„QR drucken".
  *
  * ISOLATION: kein Body; Betrieb/Order werden im Route Handler gegen die Session
  * geprüft, die `business_id` stammt aus der geladenen Order.
@@ -106,10 +109,10 @@ function NoticeBox({ text }: { text: string }) {
 
 /**
  * Erledigter, grauer „✓ {label}"-Zustand über die volle Breite (nicht klickbar).
- * Geteilt von „Booklet erstellt" (Status `generated`) und „Reel erstellt"
- * (reel_status='ready') — eine Optik, kein Duplikat.
+ * In B2a die „Fertig"-Bestätigung des `generated`+`ready`-Zustands (Booklet +
+ * Reel stehen) — von page.tsx gerendert. Eine Optik, kein Duplikat.
  */
-function DoneButton({ label }: { label: string }) {
+export function DoneButton({ label }: { label: string }) {
   return (
     <button
       type="button"
@@ -137,31 +140,41 @@ function DoneButton({ label }: { label: string }) {
 }
 
 /**
- * Der eine „Booklet erstellen"-Schritt (Slot 1 der Aktionszone).
+ * Der kombinierte „Booklet & Reel erzeugen"-Schritt (B2a).
  *
- *  - `disabled` (Status `generated`): Booklet existiert ⇒ grauer, nicht
- *    klickbarer „✓ Booklet erstellt"-Zustand. Geändert/neu erzeugt wird über
- *    „Bearbeiten" (Reopen) → erneut „Booklet erstellen".
- *  - sonst (Status `draft`): aktiv ⇒ `POST generate`, das in EINEM Schritt
- *    `draft → generated` ausführt (KI-Texte + Kunden-Link). Ohne process-Medium
- *    kein Request (Server prüft zusätzlich, `need_process`). Während des
- *    KI-Laufs Busy-Label + Spinner; Fehler ⇒ der Auftrag bleibt sauber `draft`
- *    (Route-Fehlersicherheit), der Nutzer kann erneut tippen.
+ * Klick ⇒ `POST generate` (Sofort-202: der Server baut die Booklet-Shell + Texte
+ * und stößt den Reel-Render im Hintergrund an, reel_status='rendering'). Lebens-
+ * zyklus des Buttons:
+ *   idle  → (Klick, ohne process-Medium: Hinweis, kein Request)
+ *   waiting (POST läuft, „Bitte warten…")
+ *   → 202-ANTWORT erhalten ⇒ rendering: übergibt an `<RenderingProgress>`
+ *     (Hintergrund-Message + Poll). Der Wechsel ist an die ANTWORT gebunden,
+ *     NICHT an einen Timer.
+ *   → Fehler VOR dem 202 (non-2xx/Netzwerk): zurück auf idle + Fehlertext; der
+ *     sichtbare Button wiederholt denselben POST (= „Erneut"). NICHT die
+ *     Hintergrund-Message zeigen.
+ *
+ * `label` überschreibt das Default-Label (Failed-Retry: „Erneut erstellen");
+ * `initialNotice` blendet beim Mount einen Hinweis ein (Failed-Retry:
+ * „Erstellung fehlgeschlagen"). Ohne process-Medium kein Request (Server prüft
+ * zusätzlich, `need_process`).
  */
 export function CreateBookletButton({
   orderId,
   processCount,
-  disabled = false,
+  label,
+  initialNotice = null,
 }: {
   orderId: string;
   /** Anzahl process-Medien (0010) — Pflicht fürs Erstellen, before/after zählen nicht. */
   processCount: number;
-  /** true ⇒ Booklet existiert bereits (Status `generated`): erledigter, grauer Zustand. */
-  disabled?: boolean;
+  /** Button-Label; Default „Booklet & Reel erzeugen". Failed-Retry: „Erneut erstellen". */
+  label?: string;
+  /** Vorbelegter Hinweis (z. B. „Erstellung fehlgeschlagen" beim Retry nach Fehlschlag). */
+  initialNotice?: string | null;
 }) {
-  const router = useRouter();
-  const [busy, setBusy] = useState(false);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [phase, setPhase] = useState<"idle" | "waiting" | "rendering">("idle");
+  const [notice, setNotice] = useState<string | null>(initialNotice);
 
   const handleCreate = useCallback(() => {
     // Ohne process-Medium kein Request — direkt der Hinweis (Server prüft zusätzlich).
@@ -169,31 +182,38 @@ export function CreateBookletButton({
       setNotice(t(DEFAULT_LOCALE, "generate.needProcess"));
       return;
     }
-    setBusy(true);
+    setPhase("waiting");
     setNotice(null);
     void (async () => {
       try {
         const res = await postGenerate(orderId);
         if (!res.ok) {
+          // Fehler VOR dem 202: zurück auf den (Erneut-)Button + Fehlertext,
+          // KEINE Hintergrund-Message. Ein erneuter Klick wiederholt den POST.
           setNotice(await noticeForError(res));
+          setPhase("idle");
           return;
         }
-        router.refresh(); // Server rendert die Seite im Generiert-Modus neu
+        // 202 erhalten ⇒ Booklet-Shell steht, Reel rendert im Hintergrund. Erst
+        // JETZT — an die ANTWORT gebunden, NICHT an einen Timer — in den
+        // Hintergrund-Zustand wechseln (Poll + Seite verlassbar).
+        setPhase("rendering");
       } catch (error) {
         setNotice(noticeForThrow(error));
-      } finally {
-        // Lade-Zustand IMMER zurücksetzen — nie ein Dauer-„Erstelle…".
-        setBusy(false);
+        setPhase("idle");
       }
     })();
-  }, [processCount, orderId, router]);
+  }, [processCount, orderId]);
 
-  // Generiert: das Booklet existiert ⇒ grauer, erledigter Zustand (kein Klick).
-  if (disabled) {
-    return <DoneButton label={t(DEFAULT_LOCALE, "generate.created")} />;
+  // Nach dem 202: an die geteilte Fortschritts-Komponente übergeben (Poll +
+  // refresh bei ready/failed). Dieselbe Komponente nimmt beim Reload den
+  // laufenden Render automatisch wieder auf (Resume; s. page.tsx).
+  if (phase === "rendering") {
+    return <RenderingProgress orderId={orderId} initialStatus="rendering" />;
   }
 
-  // Entwurf: ein Klick erzeugt das ganze Booklet (draft → generated).
+  const busy = phase === "waiting";
+
   return (
     <div>
       <button
@@ -206,10 +226,10 @@ export function CreateBookletButton({
         {busy ? (
           <>
             <Spinner />
-            {t(DEFAULT_LOCALE, "generate.generating")}
+            {t(DEFAULT_LOCALE, "generate.waiting")}
           </>
         ) : (
-          t(DEFAULT_LOCALE, "generate.generate")
+          label ?? t(DEFAULT_LOCALE, "generate.combined")
         )}
       </button>
 
@@ -301,43 +321,23 @@ const REEL_STAGES = [
   "reel.stage14",
 ] as const;
 
-/** Server-Fehlercode des Render-Starts → i18n-Hinweis (+ technischer Detail-Teil). */
-async function noticeForReelStart(res: Response): Promise<string> {
-  let code = "";
-  try {
-    const body = (await res.json()) as { error?: unknown };
-    if (typeof body.error === "string") code = body.error;
-  } catch {
-    // kein/ungültiger Body → generischer Fehler
-  }
-  const base =
-    code === "need_media"
-      ? t(DEFAULT_LOCALE, "reel.needMedia")
-      : t(DEFAULT_LOCALE, "reel.error");
-  const detail = code ? `${res.status} ${code}` : String(res.status);
-  return `${base} (${detail})`;
-}
-
 /**
- * „Reel erstellen" (Slot 2 der Aktionszone) — asynchroner Render mit Status-Poll
- * (Schritt 8b-1a, Logik UNVERÄNDERT).
+ * Geteilte Hintergrund-/Zwei-Zustand-Anzeige (B2a). Zeigt die Botschaft „Läuft
+ * im Hintergrund — diese Seite kann verlassen werden." (zweite Zeile: die rein
+ * kosmetischen REEL_STAGES, keine echte Telemetrie) und pollt `reel-status` alle
+ * ~3 s. Bei `ready` ODER `failed` ⇒ `router.refresh()` — der Server rendert dann
+ * den passenden Zweig (Fertig bzw. Fehler/Erneut). KEINE clientseitige Fehler-
+ * Diskriminierung (folgt B2b).
  *
- * Opt-in (= Kostenkontrolle): Klick startet `POST render-reel` (Server antwortet
- * 202 + setzt reel_status='rendering'), danach wird `reel-status` alle ~3 s
- * gepollt. Bei `ready` ⇒ grauer „✓ Reel erstellt"-Zustand (`<DoneButton>`) +
- * `router.refresh()` — der Server liefert dann die signierte Reel-URL nach, der
- * Watch-Button (#4) erscheint und die Auslieferungs-Warnung verschwindet. Bei
- * `failed` ⇒ Fehlerhinweis + „Erneut".
+ * Zwei Einsatzorte, EINE Logik:
+ *  - Hand-off direkt nach dem 202 des kombinierten Buttons, und
+ *  - Resume beim Reload eines noch rendernden Auftrags (page.tsx rendert die
+ *    Komponente, wenn reel_status ∈ {pending, rendering}).
  *
- * KEIN „Neu erstellen" mehr: ein fertiges Reel neu zu rendern geht nur über
- * „Bearbeiten" → erneut „Booklet erstellen" — das setzt reel_status server-
- * seitig auf `pending` zurück (Stale-Reel: der alte, auf veraltetem Booklet-
- * Stand basierende Render wird verworfen), wodurch dieser Button wieder aktiv ist.
- *
- * Der Anfangsstatus kommt vom Server (Reload zeigt den persistenten Stand); steht
- * er auf `rendering`, nimmt der Poll automatisch wieder auf.
+ * Der Render selbst (`POST generate` → `after()`) läuft serverseitig; diese
+ * Komponente startet KEINEN Render, sie beobachtet nur.
  */
-export function ReelCreateButton({
+export function RenderingProgress({
   orderId,
   initialStatus,
 }: {
@@ -346,10 +346,6 @@ export function ReelCreateButton({
 }) {
   const router = useRouter();
   const [status, setStatus] = useState<ReelStatus>(initialStatus);
-  const [notice, setNotice] = useState<string | null>(
-    initialStatus === "failed" ? t(DEFAULT_LOCALE, "reel.failed") : null,
-  );
-  const [starting, setStarting] = useState(false);
   // Index der kosmetischen Render-Stufe (nur während `rendering` sichtbar).
   const [stageIdx, setStageIdx] = useState(0);
 
@@ -364,8 +360,8 @@ export function ReelCreateButton({
   }, [status]);
 
   // Solange gerendert wird, den Status pollen (sofort + alle REEL_POLL_MS). Bei
-  // `ready` zusätzlich `router.refresh()` — die signierte Reel-URL (#4 Watch +
-  // Deliver-Warnung) kommt vom Server, nicht aus dieser Komponente.
+  // ready/failed `router.refresh()` — der Server rendert den Folge-Zweig (fertig
+  // bzw. Fehler); die signierte Reel-URL/Deliver-Warnung kommen vom Server.
   useEffect(() => {
     if (status !== "rendering") return;
     let cancelled = false;
@@ -380,8 +376,8 @@ export function ReelCreateButton({
           setStatus("ready");
           router.refresh();
         } else if (body.status === "failed") {
-          setNotice(t(DEFAULT_LOCALE, "reel.failed"));
           setStatus("failed");
+          router.refresh();
         }
       } catch {
         // transienter Netzwerkfehler — beim nächsten Tick erneut versuchen
@@ -396,76 +392,26 @@ export function ReelCreateButton({
     };
   }, [status, orderId, router]);
 
-  const start = useCallback(() => {
-    setStarting(true);
-    setNotice(null);
-    void (async () => {
-      try {
-        const res = await fetch(`/api/portal/orders/${orderId}/render-reel`, {
-          method: "POST",
-        });
-        if (!res.ok) {
-          setNotice(await noticeForReelStart(res));
-          return;
-        }
-        // 202: Render läuft → in den Poll-Zustand wechseln.
-        setStatus("rendering");
-      } catch (error) {
-        console.error("reel: start failed", error);
-        setNotice(t(DEFAULT_LOCALE, "reel.error"));
-      } finally {
-        setStarting(false);
-      }
-    })();
-  }, [orderId]);
-
-  // Fertig gerendert ⇒ grauer „✓ Reel erstellt"-Zustand (Ansehen liegt in #4).
-  if (status === "ready") {
-    return <DoneButton label={t(DEFAULT_LOCALE, "reel.created")} />;
-  }
-
-  const rendering = status === "rendering";
-  const busy = starting || rendering;
-
   return (
     <div>
-      <button
-        type="button"
-        className="btn-gold capture-btn"
-        onClick={start}
-        disabled={busy}
-        style={{ opacity: busy ? 0.6 : 1, cursor: busy ? "default" : "pointer" }}
+      <p
+        aria-live="polite"
+        style={{
+          margin: 0,
+          fontSize: 14,
+          fontWeight: 600,
+          color: "var(--text-primary)",
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 8,
+        }}
       >
-        {starting
-          ? t(DEFAULT_LOCALE, "reel.starting")
-          : rendering
-            ? t(DEFAULT_LOCALE, "reel.rendering")
-            : status === "failed"
-              ? t(DEFAULT_LOCALE, "reel.retry")
-              : t(DEFAULT_LOCALE, "reel.create")}
-      </button>
-      {rendering ? (
-        <p
-          aria-live="polite"
-          style={{
-            marginTop: 8,
-            fontSize: 13,
-            fontWeight: 600,
-            color: "var(--gold)",
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 8,
-          }}
-        >
-          <Spinner />
-          {t(DEFAULT_LOCALE, REEL_STAGES[stageIdx] ?? "reel.rendering")}
-        </p>
-      ) : (
-        <p style={{ marginTop: 8, fontSize: 12, color: "var(--text-secondary)" }}>
-          {t(DEFAULT_LOCALE, "reel.hint")}
-        </p>
-      )}
-      {notice ? <NoticeBox text={notice} /> : null}
+        <Spinner />
+        {t(DEFAULT_LOCALE, "generate.background")}
+      </p>
+      <p style={{ marginTop: 6, fontSize: 13, color: "var(--gold)" }}>
+        {t(DEFAULT_LOCALE, REEL_STAGES[stageIdx] ?? "reel.rendering")}
+      </p>
     </div>
   );
 }

@@ -13,8 +13,9 @@ import type { MediaWithUrl } from "./media-list";
 import {
   CreateBookletButton,
   ReopenButton,
-  ReelCreateButton,
+  RenderingProgress,
   ReelWatchButton,
+  DoneButton,
   type ReelStatus,
 } from "./generate-controls";
 import { DeliverButton } from "./deliver-controls";
@@ -288,98 +289,136 @@ export default async function OrderDetailPage({
       </section>
 
       {/* ───── Aktionszone (Control Center) am Seitenende ─────
-          Alle Folge-Aktionen gebündelt an EINER Stelle (statt oben verstreut).
-          Die Routen-/Status-Logik ist unverändert; nur Anordnung + Benennung. */}
+          Alle Folge-Aktionen gebündelt an EINER Stelle. B2a ändert nur die
+          UI-Präsentation; die Routen-/Status-Logik bleibt unverändert. */}
 
-      {/* draft: EIN großer „Booklet erstellen" über die volle Breite. Ohne
-          Prozess-Medium gar kein Button (Validierung need_process bleibt
-          client- UND serverseitig) — es gibt dann nichts zu erstellen. */}
+      {/* draft: EIN kombinierter „Booklet & Reel erzeugen"-Button (B2a). Ein Klick
+          stößt serverseitig Booklet + Reel an (Sofort-202, Rest in after()); der
+          Button wechselt nach dem 202 selbst in den Hintergrund-/Poll-Zustand.
+          Ohne Prozess-Medium gar kein Button (need_process bleibt client- UND
+          serverseitig). */}
       {isDraft && processCount >= 1 ? (
         <section style={{ marginTop: 32 }}>
           <CreateBookletButton orderId={order.id} processCount={processCount} />
         </section>
       ) : null}
 
-      {/* generated / sent / viewed / shared: gebündeltes Control Center.
-            1) Zustands-Bestätigung (grau „✓ Booklet erstellt" bzw. „✓ Ausgeliefert").
-            2) „Reel erstellen" (aktiv) bzw. „✓ Reel erstellt" (grau).
-            3) nur generated: „Bearbeiten" | „Ausliefern".
-            4) Ansehen-Aktionen: Booklet ansehen · [Reel ansehen] · QR drucken. */}
-      {isGenerated || isDelivered ? (
+      {/* generated: status-getriebene Verzweigung über reel_status (B2a).
+            - pending/rendering → Hintergrund-Fortschritt (Resume bei Reload) +
+              „Bearbeiten". KEIN Ausliefern, KEIN Ansehen (Booklet/Reel noch
+              nicht fertig).
+            - ready  → „Fertig" + „Bearbeiten" | „Ausliefern" + Ansehen-Aktionen.
+            - failed → Fehler + „Erneut erstellen" (voller Neulauf via
+              CreateBookletButton) + „Bearbeiten". KEINE Diskriminierung (B2b). */}
+      {isGenerated ? (
         <section className="booklet-cc">
-          {/* 1) Wo der Auftrag steht. generated ⇒ Booklet ist erstellt (grau,
-              regenerieren via „Bearbeiten"); versendet ⇒ Ausgeliefert-Hinweis. */}
-          {isGenerated ? (
-            <CreateBookletButton
-              orderId={order.id}
-              processCount={processCount}
-              disabled
-            />
-          ) : (
-            <p className="booklet-cc-delivered">
-              ✓{" "}
-              {sentAt
-                ? t(DEFAULT_LOCALE, "deliver.delivered", {
-                    date: DATE_FORMAT.format(new Date(sentAt)),
-                  })
-                : t(DEFAULT_LOCALE, "deliver.deliveredNoDate")}
-            </p>
-          )}
+          {reelStatus === "ready" ? (
+            <>
+              {/* Booklet + Reel stehen ⇒ „✓ Fertig". */}
+              <DoneButton label={t(DEFAULT_LOCALE, "generate.done")} />
 
-          {/* 2) Reel: erstellen / rendert / „✓ Reel erstellt". Ab `generated`
-              renderbar — auch nach Versand (FIX 7.1: der Render lässt den
-              Order-Status unberührt, das Reel erscheint im bestehenden Link). */}
-          <ReelCreateButton orderId={order.id} initialStatus={reelStatus} />
-
-          {/* 3) nur generated: „Bearbeiten" (Reopen) | „Ausliefern" (deliver,
-              unveränderte Logik inkl. Safe-Mode/Connector/Doppelversand-Guard).
-              Versendet lässt sich weder zurückdrehen noch erneut ausliefern.
-
-              B1-Gate: Solange das Reel rendert (reel_status='rendering', direkt nach
-              „Booklet erstellen"), hat das Booklet noch leeres Intro + kein Reel —
-              Ausliefern würde ein halbfertiges Booklet senden. Der „Ausliefern"-Button
-              erscheint daher erst bei reel_status='ready'. „Bearbeiten" bleibt
-              durchgehend verfügbar. */}
-          {isGenerated ? (
-            <div className="booklet-actions-row">
-              <ReopenButton orderId={order.id} />
-              {reelStatus === "ready" ? (
+              {/* „Bearbeiten" (Reopen) | „Ausliefern" (deliver, unveränderte Logik
+                  inkl. Safe-Mode/Connector/Doppelversand-Guard). Deliver ist erst
+                  bei reel_status='ready' freigegeben (B1-Gate) — hier erfüllt. */}
+              <div className="booklet-actions-row">
+                <ReopenButton orderId={order.id} />
                 <DeliverButton
                   orderId={order.id}
                   hasEmail={Boolean(order.customer_email)}
                   hasPhone={Boolean(order.customer_phone)}
-                  reelReady={reelStatus === "ready"}
+                  reelReady
                   connectorEnabled={
                     business?.settings.connector_roapp_enabled ?? true
                   }
                 />
-              ) : null}
-            </div>
-          ) : null}
+              </div>
 
-          {/* 4) Ansehen-Aktionen, gebündelt (vorher oben verstreut): „Booklet
-              ansehen" (`?c=1` Kunden-Sicht §9d + `&p=1` No-Track §10a.1; gleiche
-              Domain, same-tab — die Vorschau hat einen Zurück-Button),
-              optional „Reel ansehen" (In-App-Overlay) und „QR drucken". */}
+              {bookletToken ? (
+                <BookletViews
+                  orderId={order.id}
+                  bookletToken={bookletToken}
+                  reelUrl={reelUrl}
+                />
+              ) : null}
+            </>
+          ) : reelStatus === "failed" ? (
+            <>
+              {/* Erstellung fehlgeschlagen ⇒ grober voller Neulauf (POST generate)
+                  über denselben kombinierten Button; der Failure-Hinweis ist als
+                  initialNotice vorbelegt. Keine Fehler-Diskriminierung (B2b). */}
+              <CreateBookletButton
+                orderId={order.id}
+                processCount={processCount}
+                label={t(DEFAULT_LOCALE, "generate.retryFull")}
+                initialNotice={t(DEFAULT_LOCALE, "generate.failed")}
+              />
+              <ReopenButton orderId={order.id} />
+            </>
+          ) : (
+            <>
+              {/* pending/rendering: läuft im Hintergrund — der Poll übernimmt und
+                  refresh()t bei ready/failed; bei Reload nimmt RenderingProgress
+                  den laufenden Render automatisch wieder auf (Resume). */}
+              <RenderingProgress orderId={order.id} initialStatus="rendering" />
+              <ReopenButton orderId={order.id} />
+            </>
+          )}
+        </section>
+      ) : null}
+
+      {/* sent/viewed/shared: wie heute — Ausgeliefert-Hinweis + Ansehen-Aktionen.
+          Erstellungs-/Auslieferungs-Aktionen entfallen. Reel ist auch nach Versand
+          renderbar (FIX 7.1), erscheint hier als „Reel ansehen", sobald fertig. */}
+      {isDelivered ? (
+        <section className="booklet-cc">
+          <p className="booklet-cc-delivered">
+            ✓{" "}
+            {sentAt
+              ? t(DEFAULT_LOCALE, "deliver.delivered", {
+                  date: DATE_FORMAT.format(new Date(sentAt)),
+                })
+              : t(DEFAULT_LOCALE, "deliver.deliveredNoDate")}
+          </p>
           {bookletToken ? (
-            <div className="booklet-cc-views">
-              <a
-                className="btn-outline"
-                href={`/b/${bookletToken}?${CUSTOMER_VIEW_QUERY}&${NO_TRACK_QUERY}`}
-              >
-                {t(DEFAULT_LOCALE, "generate.openPreview")}
-              </a>
-              {reelUrl ? <ReelWatchButton url={reelUrl} /> : null}
-              <a
-                className="btn-outline"
-                href={`/portal/orders/${order.id}/qr`}
-              >
-                {t(DEFAULT_LOCALE, "qr.printButton")}
-              </a>
-            </div>
+            <BookletViews
+              orderId={order.id}
+              bookletToken={bookletToken}
+              reelUrl={reelUrl}
+            />
           ) : null}
         </section>
       ) : null}
+    </div>
+  );
+}
+
+/**
+ * Ansehen-Aktionen, gebündelt (geteilt von ready-`generated` und versendet):
+ * „Booklet ansehen" (`?c=1` Kunden-Sicht §9d + `&p=1` No-Track §10a.1; gleiche
+ * Domain, same-tab — die Vorschau hat einen Zurück-Button), optional „Reel
+ * ansehen" (In-App-Overlay, nur bei vorhandener Signed-URL) und „QR drucken".
+ */
+function BookletViews({
+  orderId,
+  bookletToken,
+  reelUrl,
+}: {
+  orderId: string;
+  bookletToken: string;
+  reelUrl: string | null;
+}) {
+  return (
+    <div className="booklet-cc-views">
+      <a
+        className="btn-outline"
+        href={`/b/${bookletToken}?${CUSTOMER_VIEW_QUERY}&${NO_TRACK_QUERY}`}
+      >
+        {t(DEFAULT_LOCALE, "generate.openPreview")}
+      </a>
+      {reelUrl ? <ReelWatchButton url={reelUrl} /> : null}
+      <a className="btn-outline" href={`/portal/orders/${orderId}/qr`}>
+        {t(DEFAULT_LOCALE, "qr.printButton")}
+      </a>
     </div>
   );
 }
