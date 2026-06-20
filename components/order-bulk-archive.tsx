@@ -7,6 +7,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import { DEFAULT_LOCALE, t } from "@/lib/i18n";
@@ -170,8 +171,73 @@ export function OrdersArchiveMenu() {
       <DropdownItem onSelect={enterSelectMode}>
         {t(DEFAULT_LOCALE, "orders.select")}
       </DropdownItem>
-      {/* 3b: hier kommt „Alle erledigten archivieren" als dritter Eintrag dazu. */}
+      <ArchiveAllDoneItem />
     </DropdownMenu>
+  );
+}
+
+/**
+ * Dropdown-Eintrag „Alle erledigten archivieren" (3b-2a). Holt zuerst die echte
+ * Stückzahl (`GET ?scope=all-done`); bei 0 nur ein Hinweis, sonst eine
+ * Bestätigung mit der Zahl. Bei „OK" archiviert EIN `POST { scope:"all-done" }`
+ * alle archivierbaren aktiven Aufträge des Betriebs auf einmal (kein IDs-Array).
+ *
+ * `window.confirm`/`window.alert` sind hier die Projekt-Konvention — das Menü
+ * schließt beim Klick (der Eintrag unmountet), darum keine inline-Bar wie beim
+ * IDs-Bulk. Minimaler Lade-/Fehler-State über busy-Guard + try/catch/finally
+ * (kein Hängen); `business_id` löst der Server aus der Session auf (nie Client).
+ */
+function ArchiveAllDoneItem() {
+  const router = useRouter();
+  const busyRef = useRef(false);
+
+  async function handleAllDone() {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    try {
+      const countRes = await fetch(
+        "/api/portal/orders/archive-bulk?scope=all-done",
+      );
+      if (!countRes.ok) {
+        console.error("[order-bulk-archive] all-done count failed", countRes.status);
+        window.alert(t(DEFAULT_LOCALE, "orders.archiveError"));
+        return;
+      }
+      const { count } = (await countRes.json()) as { count: number };
+      if (!count) {
+        window.alert(t(DEFAULT_LOCALE, "orders.noneToArchive"));
+        return;
+      }
+      if (
+        !window.confirm(
+          t(DEFAULT_LOCALE, "orders.confirmArchiveAllDone", { n: count }),
+        )
+      ) {
+        return;
+      }
+      const res = await fetch("/api/portal/orders/archive-bulk", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scope: "all-done", archive: true }),
+      });
+      if (res.ok) {
+        router.refresh();
+      } else {
+        console.error("[order-bulk-archive] all-done failed", res.status);
+        window.alert(t(DEFAULT_LOCALE, "orders.archiveError"));
+      }
+    } catch (err) {
+      console.error("[order-bulk-archive] all-done error", err);
+      window.alert(t(DEFAULT_LOCALE, "orders.archiveError"));
+    } finally {
+      busyRef.current = false;
+    }
+  }
+
+  return (
+    <DropdownItem onSelect={handleAllDone}>
+      {t(DEFAULT_LOCALE, "orders.archiveAllDone")}
+    </DropdownItem>
   );
 }
 
