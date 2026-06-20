@@ -343,7 +343,7 @@ function ReachSection({
               {top.map((r) => (
                 <tr key={r.orderId}>
                   <td>{r.customerName}</td>
-                  <td className="reach-muted">{r.email ?? "—"}</td>
+                  <td className="reach-muted">{r.email ?? r.phone ?? "—"}</td>
                   <td className="reach-muted">{r.externalRef ?? "—"}</td>
                   <td className="reach-muted">{r.description ?? "—"}</td>
                   <td className="reach-muted">

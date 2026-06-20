@@ -427,7 +427,7 @@ export const de = {
     sortName: "Name (A–Z)",
     // Tabellen-Spalten (kompakt; der CSV-Export nutzt ausführlichere Header).
     colCustomer: "Kundenname",
-    colEmail: "E-Mail",
+    colEmail: "E-Mail/SMS",
     colRef: "roapp-Nr.",
     colDescription: "Beschreibung",
     colSentAt: "Versanddatum",

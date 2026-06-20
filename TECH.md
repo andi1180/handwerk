@@ -2648,15 +2648,16 @@ Eine zweite Analytics-Sektion auf der `/portal`-Startseite — **pro-Kunde** sta
 
 EINE Quelle für Seite (Top 10) **und** CSV-Export (volle Liste) — `loadReachRows(supabase, businessId, { from, to, sort })`. Drei Queries (RLS + defensiver `business_id`-Filter), dann TS-Aggregation:
 
-- **Zeilen** = `orders` mit `status ∈ {sent, viewed, shared}`, die ein **Booklet** haben (1:1 über `order_id`; das Booklet liefert `booklet_id` für die Event-Aggregation **und** `sent_at` als Versanddatum). Aufträge ohne Booklet werden übersprungen.
+- **Zeilen** = `orders` mit `status ∈ {sent, viewed, shared}`, die ein **Booklet** haben (1:1 über `order_id`; das Booklet liefert `booklet_id` für die Event-Aggregation **und** `sent_at` als Versanddatum). Aufträge ohne Booklet werden übersprungen. Die Order-Query selektiert `customer_email` **und** `customer_phone` (`ReachRow.email`/`ReachRow.phone`, beide `string | null`) — für den Kontakt-Fallback der Tabelle und die getrennte CSV-Telefonspalte (SMS-Kunden ohne E-Mail).
 - **Events**: EINE `booklet_events`-Query (`booklet_id, event_type, ip_hash`) im optionalen Datumsbereich — `from` ⇒ `gte created_at $from T00:00Z`, `to` **inklusiv** ⇒ `lt created_at` (Folgetag 00:00Z, UTC-Grenzen; bewusst MVP-pragmatisch). Ohne Filter = alle. Je `booklet_id` aggregiert: **Reichweite** = distinct nicht-null `ip_hash` unter `event_type='viewed'` (JS-`Set`), **Gesamt-Öffnungen** = `count(viewed)` (roh, inkl. null-IP), **Teilen-Aktivitäten** = `count(shared)` (alle Kanäle). Booklets ohne Events im Zeitraum ⇒ 0.
 - **Sortierung** nach der Aggregation (`sort`): `reichweite` (Default, desc) | `oeffnungen` (desc) | `teilen` (desc) | `versanddatum` (desc, null ans Ende) | `name` (A–Z, `localeCompare("de")`); Sekundärschlüssel immer Name (deterministisch).
 
 `ReachSort`/`REACH_SORTS`/`isReachSort` + `DEFAULT_REACH_SORT`, `parseDateParam` (YYYY-MM-DD, Round-trip-Check gegen unmögliche Tage ⇒ null) und `formatReachDate` (ISO → TT.MM.JJJJ) liegen ebenfalls hier (geteilt von Seite + Export). Der Client-Typ kommt via `Awaited<ReturnType<typeof createClient>>` (kein `any`).
 
-### Spalten (Tabelle + CSV, gleiche Reihenfolge)
+### Spalten (Tabelle vs. CSV)
 
-Kundenname | E-Mail | roapp-Nr. (`external_ref`) | Beschreibung (`short_summary ?? item_description`) | Booklet-Versanddatum (`booklets.sent_at`) | Reichweite (eindeutig) | Gesamt-Öffnungen | Teilen-Aktivitäten.
+- **Tabelle (Dashboard):** Kundenname | **E-Mail/SMS** | roapp-Nr. (`external_ref`) | Beschreibung (`short_summary ?? item_description`) | Booklet-Versanddatum (`booklets.sent_at`) | Reichweite (eindeutig) | Gesamt-Öffnungen | Teilen-Aktivitäten. Die Kontaktspalte zeigt **`email ?? phone ?? "—"`** (E-Mail bevorzugt, sonst Telefon) — **EINE** Spalte (keine neue: die Tabelle ist am iPhone ohnehin rechts abgeschnitten), Label `reach.colEmail` = „E-Mail/SMS".
+- **CSV-Export:** wie die Tabelle, aber **E-Mail und Telefon als zwei getrennte Spalten** (Kundenname | E-Mail | Telefon | roapp-Nr. | …) — im CSV ist die Breite egal, getrennte Felder sind besser für die Datenarbeit.
 
 ### Filter (server-seitig über URL-Search-Params, kein `<form>`)
 
@@ -2668,7 +2669,7 @@ Die Seite liest jetzt `searchParams` (`from`/`to`/`sort`, Next-15-`Promise`), pa
 
 ### Export-Route ([app/portal/analytics/reichweite/export/route.ts](app/portal/analytics/reichweite/export/route.ts), GET)
 
-AUTHENTICATED (kein User ⇒ 401, kein Betrieb ⇒ 403) + RLS + business-scoped über **dieselbe** `loadReachRows`-Aggregation, honoriert `?from=`/`?to=`/`?sort=` wie die Seite (Export-Anchor = `<a download>` mit den aktuellen Params, lädt die **VOLLE** Liste, nicht nur die 10). Liegt unter `/portal/*` ⇒ Middleware-Schutz greift zusätzlich. **Ausgabe** `text/csv; charset=utf-8`, **UTF-8-BOM (U+FEFF) vorangestellt**, **Semikolon-getrennt**, **CRLF**-Zeilenenden, deutsche Header-Zeile; Felder mit `;`/`"`/Zeilenumbruch in `"…"` gequotet (interne `"` verdoppelt, RFC-4180-Stil). `Content-Disposition: attachment; filename="reichweite_<YYYY-MM-DD>.csv"`. **BOM + Semikolon, damit österreichisches Excel Umlaute und Spalten korrekt öffnet.** Der Export enthält Name + E-Mail (eigene Kundendaten des Betriebs, DSGVO-konform) — kein zusätzliches Gate nötig.
+AUTHENTICATED (kein User ⇒ 401, kein Betrieb ⇒ 403) + RLS + business-scoped über **dieselbe** `loadReachRows`-Aggregation, honoriert `?from=`/`?to=`/`?sort=` wie die Seite (Export-Anchor = `<a download>` mit den aktuellen Params, lädt die **VOLLE** Liste, nicht nur die 10). Liegt unter `/portal/*` ⇒ Middleware-Schutz greift zusätzlich. **Ausgabe** `text/csv; charset=utf-8`, **UTF-8-BOM (U+FEFF) vorangestellt**, **Semikolon-getrennt**, **CRLF**-Zeilenenden, deutsche Header-Zeile; Felder mit `;`/`"`/Zeilenumbruch in `"…"` gequotet (interne `"` verdoppelt, RFC-4180-Stil). `Content-Disposition: attachment; filename="reichweite_<YYYY-MM-DD>.csv"`. **BOM + Semikolon, damit österreichisches Excel Umlaute und Spalten korrekt öffnet.** Der Export enthält Name + E-Mail + Telefon (eigene Kundendaten des Betriebs, DSGVO-konform) — kein zusätzliches Gate nötig. **Header `CSV_HEADER`** = `Kundenname; E-Mail; Telefon; roapp-Nr.; …` (Telefon als eigene Spalte zusätzlich zu E-Mail).
 
 ### i18n & CSS
 

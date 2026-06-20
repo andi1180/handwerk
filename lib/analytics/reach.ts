@@ -31,6 +31,8 @@ export type ReachRow = {
   orderId: string;
   customerName: string;
   email: string | null;
+  /** Kunden-Telefon (SMS-Kanal). Im Dashboard Fallback der Kontaktspalte, im CSV eigene Spalte. */
+  phone: string | null;
   externalRef: string | null;
   /** short_summary ?? item_description. */
   description: string | null;
@@ -83,6 +85,7 @@ type OrderRow = {
   id: string;
   customer_name: string;
   customer_email: string | null;
+  customer_phone: string | null;
   external_ref: string | null;
   short_summary: string | null;
   item_description: string | null;
@@ -159,7 +162,7 @@ export async function loadReachRows(
   const { data: orderData } = await supabase
     .from("orders")
     .select(
-      "id, customer_name, customer_email, external_ref, short_summary, item_description",
+      "id, customer_name, customer_email, customer_phone, external_ref, short_summary, item_description",
     )
     .eq("business_id", businessId)
     .in("status", ["sent", "viewed", "shared"])
@@ -219,6 +222,7 @@ export async function loadReachRows(
       orderId: o.id,
       customerName: o.customer_name,
       email: o.customer_email,
+      phone: o.customer_phone,
       externalRef: o.external_ref,
       description: o.short_summary ?? o.item_description ?? null,
       sentAt: booklet.sent_at,

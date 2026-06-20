@@ -19,8 +19,8 @@ import {
  *
  * Ausgabe für österreichisches Excel: text/csv; charset=utf-8, **UTF-8-BOM**
  * vorangestellt (Umlaute korrekt), **Semikolon**-getrennt (Spalten korrekt),
- * CRLF-Zeilenenden, deutsche Header. Der Export enthält Name + E-Mail (eigene
- * Kundendaten des Betriebs, DSGVO-konform) — kein zusätzliches Gate nötig.
+ * CRLF-Zeilenenden, deutsche Header. Der Export enthält Name + E-Mail + Telefon
+ * (eigene Kundendaten des Betriebs, DSGVO-konform) — kein zusätzliches Gate nötig.
  */
 export const runtime = "nodejs";
 
@@ -28,6 +28,7 @@ export const runtime = "nodejs";
 const CSV_HEADER = [
   "Kundenname",
   "E-Mail",
+  "Telefon",
   "roapp-Nr.",
   "Beschreibung",
   "Booklet-Versanddatum",
@@ -53,6 +54,7 @@ function buildCsv(rows: ReachRow[]): string {
       [
         r.customerName,
         r.email,
+        r.phone,
         r.externalRef,
         r.description,
         formatReachDate(r.sentAt),
