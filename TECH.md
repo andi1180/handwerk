@@ -2972,6 +2972,8 @@ Aus [SECURITY_REVIEW.md](SECURITY_REVIEW.md), nach ROI sortiert:
 
 ---
 
-> Nächste Migration: **0012**.
+> Nächste Migration: **0013**.
+
+> **Migration 0012** (`orders.archived_at`, nullable `timestamptz`) wurde **erstellt** ([supabase/migrations/0012_orders_archived_at.sql](supabase/migrations/0012_orders_archived_at.sql)), aber **noch nicht angewendet**. Manuelle Anwendung im Supabase-SQL-Editor ausstehend. Vorbereitung Archiv-Feature.
 
 > **WICHTIG:** Migration **0011** (`orders_status_check` ohne `finalized`) muss vor dem Live-Gang manuell im Supabase-SQL-Editor angewendet werden (+ Verify-Gate ausführen). Funktional reicht zwar die Code-Änderung (die App schreibt `finalized` nie mehr), aber der Constraint hält die DB mit der neuen Status-Maschine konsistent. Migration **0010** (`order_media.category`) ebenso, falls noch nicht geschehen; 0009 (`orders.picked_up_at`), 0008 (`booklets.short_code`), 0007 (`orders.short_summary`), 0006 (`analytics_events`) ebenfalls (sonst scheitern die zugehörigen Schreibzugriffe — beim Webhook non-fatal, der Warn-Badge erscheint dann aber nie).
