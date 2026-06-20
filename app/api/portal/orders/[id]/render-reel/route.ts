@@ -152,6 +152,16 @@ export async function POST(
     return NextResponse.json({ error: "no_booklet" }, { status: 500 });
   }
 
+  // Intro-Missing-Guard (B2b): KEIN Reel ohne Intro-Frame. Fehlt der KI-Intro-
+  // Titel (null/leer), würde das Reel ein leeres Intro bekommen — defensiv
+  // abbrechen. Der normale Retry-Pfad (RetryReelButton) ruft render-reel nur,
+  // wenn intro_title vorhanden ist, hittet den Guard also nicht; er fängt nur
+  // den Sonderfall (Intro scheiterte) ab. Reihenfolge: nach no_booklet, VOR dem
+  // rendering-Write und dem 202.
+  if (!booklet.intro_title?.trim()) {
+    return NextResponse.json({ error: "intro_missing" }, { status: 400 });
+  }
+
   // Sofort auf 'rendering' setzen (reel_error löschen) und 202 zurückgeben.
   const { error: statusError } = await service
     .from("booklets")

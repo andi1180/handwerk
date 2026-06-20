@@ -291,6 +291,10 @@ export const de = {
     // B2a: reel_status='failed' ⇒ grober voller Neulauf (keine Diskriminierung).
     failed: "Erstellung fehlgeschlagen",
     retryFull: "Erneut erstellen",
+    // B2b: Fehler-Diskriminierung über intro_title. Intro stand, nur das Reel
+    // scheiterte ⇒ Retry NUR Reel (POST render-reel), kein neuer Sonnet-Call.
+    reelRetry: "Reel erneut",
+    reelFailed: "Reel fehlgeschlagen",
     timeout: "Zeitüberschreitung. Bitte erneut versuchen.",
     aiNotConfigured:
       "Die KI ist nicht konfiguriert. Bitte später erneut versuchen.",

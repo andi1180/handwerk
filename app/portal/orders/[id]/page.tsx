@@ -14,6 +14,7 @@ import {
   CreateBookletButton,
   ReopenButton,
   RenderingProgress,
+  RetryReelButton,
   ReelWatchButton,
   DoneButton,
   type ReelStatus,
@@ -156,20 +157,25 @@ export default async function OrderDetailPage({
   let reelStatus: ReelStatus = "pending";
   let reelUrl: string | null = null;
   let sentAt: string | null = null;
+  // B2b: Diskriminator für den failed-Zweig — stand das Intro schon (KI-Titel
+  // vorhanden), scheiterte nur das Reel ⇒ Retry NUR Reel; sonst voller Neulauf.
+  let introPresent = false;
   if (canRenderReel) {
     const { data: booklet } = await supabase
       .from("booklets")
-      .select("access_token, reel_status, reel_url, sent_at")
+      .select("access_token, reel_status, reel_url, sent_at, intro_title")
       .eq("order_id", order.id)
       .maybeSingle<{
         access_token: string;
         reel_status: ReelStatus | null;
         reel_url: string | null;
         sent_at: string | null;
+        intro_title: string | null;
       }>();
     bookletToken = booklet?.access_token ?? null;
     reelStatus = booklet?.reel_status ?? "pending";
     sentAt = booklet?.sent_at ?? null;
+    introPresent = Boolean(booklet?.intro_title?.trim());
     if (reelStatus === "ready" && booklet?.reel_url) {
       const { data } = await supabase.storage
         .from("order-media")
@@ -308,8 +314,13 @@ export default async function OrderDetailPage({
               „Bearbeiten". KEIN Ausliefern, KEIN Ansehen (Booklet/Reel noch
               nicht fertig).
             - ready  → „Fertig" + „Bearbeiten" | „Ausliefern" + Ansehen-Aktionen.
-            - failed → Fehler + „Erneut erstellen" (voller Neulauf via
-              CreateBookletButton) + „Bearbeiten". KEINE Diskriminierung (B2b). */}
+            - failed → B2b: Diskriminierung über introPresent.
+                · Intro stand (nur das Reel scheiterte) ⇒ „Reel erneut"
+                  (RetryReelButton, POST render-reel) + Hinweis „Reel
+                  fehlgeschlagen" + „Bearbeiten". KEIN neuer Sonnet-Intro-Call.
+                · Intro (oder Frühphase) scheiterte ⇒ „Erneut erstellen" (voller
+                  Neulauf via CreateBookletButton) + Hinweis „Erstellung
+                  fehlgeschlagen" + „Bearbeiten". */}
       {isGenerated ? (
         <section className="booklet-cc">
           {reelStatus === "ready" ? (
@@ -342,18 +353,31 @@ export default async function OrderDetailPage({
               ) : null}
             </>
           ) : reelStatus === "failed" ? (
-            <>
-              {/* Erstellung fehlgeschlagen ⇒ grober voller Neulauf (POST generate)
-                  über denselben kombinierten Button; der Failure-Hinweis ist als
-                  initialNotice vorbelegt. Keine Fehler-Diskriminierung (B2b). */}
-              <CreateBookletButton
-                orderId={order.id}
-                processCount={processCount}
-                label={t(DEFAULT_LOCALE, "generate.retryFull")}
-                initialNotice={t(DEFAULT_LOCALE, "generate.failed")}
-              />
-              <ReopenButton orderId={order.id} />
-            </>
+            introPresent ? (
+              <>
+                {/* Intro stand, nur das Reel scheiterte ⇒ Retry NUR das Reel
+                    (POST render-reel) — kein neuer Sonnet-Intro-Call. Der
+                    Failure-Hinweis ist als initialNotice vorbelegt. */}
+                <RetryReelButton
+                  orderId={order.id}
+                  initialNotice={t(DEFAULT_LOCALE, "generate.reelFailed")}
+                />
+                <ReopenButton orderId={order.id} />
+              </>
+            ) : (
+              <>
+                {/* Intro (oder Frühphase) scheiterte ⇒ grober voller Neulauf
+                    (POST generate) über den kombinierten Button; der Failure-
+                    Hinweis ist als initialNotice vorbelegt. */}
+                <CreateBookletButton
+                  orderId={order.id}
+                  processCount={processCount}
+                  label={t(DEFAULT_LOCALE, "generate.retryFull")}
+                  initialNotice={t(DEFAULT_LOCALE, "generate.failed")}
+                />
+                <ReopenButton orderId={order.id} />
+              </>
+            )
           ) : (
             <>
               {/* pending/rendering: läuft im Hintergrund — der Poll übernimmt und

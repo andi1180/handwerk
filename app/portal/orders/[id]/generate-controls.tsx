@@ -23,6 +23,11 @@ import { DEFAULT_LOCALE, t } from "@/lib/i18n";
  *    Logik: Hand-off direkt nach dem 202 UND Resume beim Reload eines noch
  *    rendernden Auftrags (page.tsx rendert sie bei reel_status ∈ {pending,
  *    rendering}). Ersetzt den früheren opt-in `ReelCreateButton`.
+ *  - `<RetryReelButton>` (B2b, Status `generated` + reel_status='failed' bei
+ *    VORHANDENEM Intro): Retry NUR des Reels (`POST render-reel`) — kein neuer
+ *    Sonnet-Intro-Call. Modelliert nach dem kombinierten Button-Lifecycle, aber
+ *    gegen render-reel; nach dem 202 übergibt er an `<RenderingProgress>` (Poll
+ *    1:1 wiederverwendet, keine neue Poll-Logik).
  *  - `<ReopenButton>` (Status `generated`): „Bearbeiten" ⇒ `POST reopen`
  *    (`generated → draft`), zurück in den Editier-Modus. Token/Kurzlink bleiben.
  *  - `<ReelWatchButton>`: „Reel ansehen" — öffnet das fertige Reel im In-App-
@@ -412,6 +417,89 @@ export function RenderingProgress({
       <p style={{ marginTop: 6, fontSize: 13, color: "var(--gold)" }}>
         {t(DEFAULT_LOCALE, REEL_STAGES[stageIdx] ?? "reel.rendering")}
       </p>
+    </div>
+  );
+}
+
+/**
+ * „Reel erneut"-Button (B2b). Greift im `generated`+`reel_status='failed'`-
+ * Zweig, wenn das Intro bereits steht (intro_title vorhanden): dann scheiterte
+ * NUR das Reel — ein voller Neulauf (POST generate) würde unnötig einen neuen
+ * Sonnet-Intro-Call brennen. Dieser Button retryt deshalb NUR das Reel
+ * (`POST render-reel`).
+ *
+ * Modelliert nach dem kombinierten Button-Lifecycle (`<CreateBookletButton>`),
+ * aber gegen render-reel statt generate:
+ *   idle („Reel erneut") → Klick → „Bitte warten…" → POST render-reel
+ *   → 202 ⇒ Übergabe an `<RenderingProgress initialStatus="rendering">`
+ *     (geteilte Hintergrund-Message + Poll; KEINE neue Poll-Logik).
+ *   → Fehler VOR dem 202 (non-2xx/Netzwerk) ⇒ zurück auf idle + Fehlertext; der
+ *     sichtbare Button wiederholt den POST.
+ *
+ * `initialNotice` blendet beim Mount einen Hinweis ein (im failed-Zweig:
+ * „Reel fehlgeschlagen"). Kein Body — Betrieb/Order werden serverseitig gegen
+ * die Session geprüft.
+ */
+export function RetryReelButton({
+  orderId,
+  initialNotice = null,
+}: {
+  orderId: string;
+  /** Vorbelegter Hinweis (im failed-Zweig: „Reel fehlgeschlagen"). */
+  initialNotice?: string | null;
+}) {
+  const [phase, setPhase] = useState<"idle" | "waiting" | "rendering">("idle");
+  const [notice, setNotice] = useState<string | null>(initialNotice);
+
+  const handleRetry = useCallback(() => {
+    setPhase("waiting");
+    setNotice(null);
+    void (async () => {
+      try {
+        const res = await fetch(`/api/portal/orders/${orderId}/render-reel`, {
+          method: "POST",
+        });
+        if (!res.ok) {
+          // Fehler VOR dem 202: zurück auf den (Erneut-)Button + Fehlertext.
+          setNotice(await noticeForError(res));
+          setPhase("idle");
+          return;
+        }
+        // 202 erhalten ⇒ Reel rendert im Hintergrund. An die geteilte
+        // Fortschritts-Komponente übergeben (Poll + refresh bei ready/failed).
+        setPhase("rendering");
+      } catch (error) {
+        setNotice(noticeForThrow(error));
+        setPhase("idle");
+      }
+    })();
+  }, [orderId]);
+
+  if (phase === "rendering") {
+    return <RenderingProgress orderId={orderId} initialStatus="rendering" />;
+  }
+
+  const busy = phase === "waiting";
+
+  return (
+    <div>
+      <button
+        type="button"
+        className="btn-gold capture-btn"
+        onClick={handleRetry}
+        disabled={busy}
+        style={{ opacity: busy ? 0.6 : 1, cursor: busy ? "default" : "pointer" }}
+      >
+        {busy ? (
+          <>
+            <Spinner />
+            {t(DEFAULT_LOCALE, "generate.waiting")}
+          </>
+        ) : (
+          t(DEFAULT_LOCALE, "generate.reelRetry")
+        )}
+      </button>
+      {notice ? <NoticeBox text={notice} /> : null}
     </div>
   );
 }

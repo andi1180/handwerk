@@ -2915,6 +2915,24 @@ Die synchronen 500-Pfade liegen bewusst **vor** dem 202, damit der Client einen 
 
 ---
 
+## B2b — Fehler-Diskriminierung (Reel-Fehler vs. voller Neulauf) + Intro-Missing-Guard
+
+NUR [render-reel/route.ts](app/api/portal/orders/[id]/render-reel/route.ts) + [page.tsx](app/portal/orders/[id]/page.tsx) + [generate-controls.tsx](app/portal/orders/[id]/generate-controls.tsx) + [de.ts](lib/i18n/de.ts). `generate/route.ts` **unangetastet**, keine Migration. Behebt die Verschwendung aus B2a: der `generated`+`failed`-Zweig zeigte immer „Erneut erstellen" (voller Neulauf via POST `generate`) — bei einem reinen **Reel**-Fehler brennt das unnötig einen neuen Sonnet-Intro-Call.
+
+**Diskriminator = `booklets.intro_title`** (nullable, aus 0001): stand das Intro schon, scheiterte nur das Reel.
+- `intro_title` **vorhanden** + `reel_status='failed'` ⇒ Intro stand ⇒ Retry = **NUR Reel** (POST `render-reel`), kein neuer Intro-Call.
+- `intro_title` **null/leer** + `reel_status='failed'` ⇒ Intro (oder Frühphase) scheiterte ⇒ Retry = **voller Neulauf** (POST `generate`, wie B2a).
+
+**Intro-Missing-Guard** ([render-reel/route.ts](app/api/portal/orders/[id]/render-reel/route.ts)): der bestehende Booklet-Load zieht `intro_title` bereits mit; **nach** dem `no_booklet`-Check und **VOR** dem `reel_status='rendering'`-Write/202 ein synchroner Guard — `intro_title` null/leer ⇒ **400 `intro_missing`** (kein Reel ohne Intro-Frame; verhindert ein Reel mit leerem Intro). Sonst NICHTS an der Route geändert (Guards, `after()`, `renderReel`-Aufruf, `maxDuration` unverändert). Defensive Absicherung — der normale Retry-Pfad (`RetryReelButton`) ruft `render-reel` nur bei vorhandenem Intro, hittet den Guard also nicht.
+
+**page.tsx:** Booklet-Query um `intro_title` erweitert (zu `access_token`/`reel_status`/`reel_url`/`sent_at`), `introPresent = Boolean(booklet?.intro_title?.trim())`. Der `generated`+`failed`-Zweig ist aufgeteilt: `introPresent` ⇒ `<RetryReelButton initialNotice="Reel fehlgeschlagen">` + `<ReopenButton>`; sonst ⇒ `<CreateBookletButton label="Erneut erstellen" initialNotice="Erstellung fehlgeschlagen">` + `<ReopenButton>` (= B2a-Verhalten). Alle anderen Zweige (draft / generated rendering / generated ready / sent…) unverändert.
+
+**`<RetryReelButton>`** (NEU, [generate-controls.tsx](app/portal/orders/[id]/generate-controls.tsx)): modelliert nach dem kombinierten Button-Lifecycle, aber gegen `render-reel` statt `generate`: `idle` („Reel erneut") → Klick → „Bitte warten…" → POST `…/render-reel` → bei 202 ⇒ Übergabe an `<RenderingProgress initialStatus="rendering">` (geteilte Hintergrund-Message + Poll **1:1 wiederverwendet, KEINE neue Poll-Logik**); POST-Fehler/non-2xx ⇒ zurück auf `idle` + Fehlertext (`noticeForError`/`noticeForThrow`), Button wiederholt den POST. `initialNotice` blendet beim Mount „Reel fehlgeschlagen" ein.
+
+**i18n** (Block `generate.*`): neu `reelRetry` („Reel erneut") + `reelFailed` („Reel fehlgeschlagen"); `failed`/`retryFull`/`background`/`waiting`/`error` wiederverwendet. `pnpm typecheck` + `pnpm build` grün.
+
+---
+
 ## Launch-Fahrplan & deferierte Härtung
 
 Detail-Referenz für die Risikobewertung: [SECURITY_REVIEW.md](SECURITY_REVIEW.md) (bleibt im Repo). Dieser Abschnitt fasst die **Reihenfolge** des Live-Gangs und die **vor Kunde #2 verpflichtende** Härtung zusammen.
