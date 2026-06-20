@@ -7,15 +7,30 @@
  *  - `new`         → `status='draft'` UND KEIN `order_media`  („Neu").
  *  - `in_progress` → `status='draft'` UND ≥1 `order_media`    („In Arbeit").
  *
- * Die übrigen Werte sind echte `OrderStatus` (`generated`/`sent`/`viewed`/
- * `shared`) und werden direkt auf `status=<wert>` übersetzt. Die Server-seitige
- * Übersetzung der beiden Entwurfs-Ableitungen passiert in der Auftragsliste —
- * die Medien-Bedingung muss dort IN die Query (sonst bricht die Pagination).
+ * Analog dazu wird der DB-Status `generated` für Anzeige UND Filterung in **drei**
+ * abgeleitete Render-Zustände gesplittet (ebenfalls KEIN neuer `orders.status`-Wert)
+ * — angeglichen an das zusammengesetzte Listen-Badge (Schritt C), das für
+ * `generated` aus `booklets.reel_status` „Wird erstellt / Fertig / Fehler" zeigt:
+ *
+ *  - `creating` → `status='generated'` UND `reel_status ∈ {pending, rendering}`.
+ *  - `ready`    → `status='generated'` UND `reel_status = 'ready'`.
+ *  - `failed`   → `status='generated'` UND `reel_status = 'failed'`.
+ *
+ * Die drei decken den gesamten `generated`-Raum ab (`reel_status` ist NOT NULL).
+ * Server-seitig per `booklets!inner(reel_status)`-Einbettung übersetzt (1:1 zu
+ * `orders` ⇒ kein count-Aufblähen) — siehe `buildFilteredOrdersQuery`.
+ *
+ * Die übrigen Werte sind echte `OrderStatus` (`sent`/`viewed`/`shared`) und
+ * werden direkt auf `status=<wert>` übersetzt. Die Server-seitige Übersetzung
+ * passiert in der Auftragsliste — die Medien-/Reel-Bedingung muss dort IN die
+ * Query (sonst bricht die Pagination).
  */
 export const STATUS_FILTERS = [
   "new",
   "in_progress",
-  "generated",
+  "creating",
+  "ready",
+  "failed",
   "sent",
   "viewed",
   "shared",

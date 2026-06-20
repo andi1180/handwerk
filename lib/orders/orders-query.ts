@@ -23,8 +23,9 @@ export type FilteredOrdersOptions = {
   draftWithMediaIds: Set<string>;
   /**
    * Basis-Spaltenliste. Bei `status='in_progress'` hängt die Funktion
-   * `order_media!inner(id)` an (damit auch die Bulk-Variante mit `select("id")`
-   * korrekt über den Medien-Join filtert).
+   * `order_media!inner(id)` an; bei `status ∈ {creating, ready, failed}`
+   * `booklets!inner(reel_status)` (damit auch die Bulk-Variante mit `select("id")`
+   * korrekt über den jeweiligen Inner-Join filtert).
    */
   selectCols: string;
   /** Optional die count-Option (Liste: "exact"; Bulk: weglassen). */
@@ -43,7 +44,11 @@ export type FilteredOrdersOptions = {
  *  - `quick='flagged'`      → picked_up_at gesetzt UND status ∈ {draft, generated}.
  *  - `status='new'`         → status='draft' UND id NOT IN draftWithMediaIds.
  *  - `status='in_progress'` → status='draft' (+ order_media!inner(id) im select).
- *  - `status ∈ {generated,sent,viewed,shared}` → status=<wert>.
+ *  - `status='creating'`    → status='generated' UND reel_status ∈ {pending,rendering}.
+ *  - `status='ready'`       → status='generated' UND reel_status='ready'.
+ *  - `status='failed'`      → status='generated' UND reel_status='failed'.
+ *    (Die drei composite-Filter via booklets!inner(reel_status) im select.)
+ *  - `status ∈ {sent,viewed,shared}` → status=<wert>.
  *  - sonst (null/null)      → kein Status-Filter.
  */
 export function buildFilteredOrdersQuery(
@@ -60,11 +65,14 @@ export function buildFilteredOrdersQuery(
     count,
   } = opts;
 
-  // „In Arbeit" = Entwurf MIT Medium ⇒ order_media!inner direkt in der Query.
+  // „In Arbeit" = Entwurf MIT Medium ⇒ order_media!inner direkt in der Query;
+  // die Reel-Composite-Filter (creating/ready/failed) ⇒ booklets!inner(reel_status).
   const cols =
     status === "in_progress"
       ? `${selectCols}, order_media!inner(id)`
-      : selectCols;
+      : status === "creating" || status === "ready" || status === "failed"
+        ? `${selectCols}, booklets!inner(reel_status)`
+        : selectCols;
 
   let query = supabase
     .from("orders")
@@ -90,6 +98,14 @@ export function buildFilteredOrdersQuery(
     }
   } else if (status === "in_progress") {
     query = query.eq("status", "draft");
+  } else if (status === "creating") {
+    query = query
+      .eq("status", "generated")
+      .in("booklets.reel_status", ["pending", "rendering"]);
+  } else if (status === "ready") {
+    query = query.eq("status", "generated").eq("booklets.reel_status", "ready");
+  } else if (status === "failed") {
+    query = query.eq("status", "generated").eq("booklets.reel_status", "failed");
   } else if (isOrderStatus(status)) {
     query = query.eq("status", status);
   }

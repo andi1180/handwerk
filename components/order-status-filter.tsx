@@ -14,17 +14,28 @@ import {
 const QUICK_PLACEHOLDER = "__quick__";
 
 /**
- * Status-Filter-Wert → i18n-Label-Key. Die zwei Entwurfs-Ableitungen teilen sich
- * die `orderStatus`-Labels mit dem Badge (`draft` = „Neu", `inProgress` = „In
- * Arbeit") — eine Quelle, kein Drift.
+ * Status-Filter-Wert → i18n-Label-Key. Die abgeleiteten Filter teilen sich die
+ * `orderStatus`-Labels mit dem zusammengesetzten Badge (kein Drift): die zwei
+ * Entwurfs-Ableitungen (`draft` = „Neu", `inProgress` = „In Arbeit") und die drei
+ * Reel-Render-Zustände von `generated` (`creating` = „Wird erstellt …", `ready` =
+ * „Fertig", `failed` = „Fehler").
  */
 const FILTER_LABEL_KEY: Record<
   StatusFilter,
-  "draft" | "inProgress" | "generated" | "sent" | "viewed" | "shared"
+  | "draft"
+  | "inProgress"
+  | "creating"
+  | "ready"
+  | "failed"
+  | "sent"
+  | "viewed"
+  | "shared"
 > = {
   new: "draft",
   in_progress: "inProgress",
-  generated: "generated",
+  creating: "creating",
+  ready: "ready",
+  failed: "failed",
   sent: "sent",
   viewed: "viewed",
   shared: "shared",

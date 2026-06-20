@@ -102,11 +102,10 @@ export const de = {
   orderStatus: {
     draft: "Neu",
     inProgress: "In Arbeit",
-    generated: "Generiert",
     sent: "Gesendet",
     viewed: "Angesehen",
     shared: "Geteilt",
-    // generated → zusammengesetztes Render-Badge (aus booklets.reel_status):
+    // generated → zusammengesetztes Render-Badge/Filter (aus booklets.reel_status):
     creating: "Wird erstellt …",
     ready: "Fertig",
     failed: "Fehler",
