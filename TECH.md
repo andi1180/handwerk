@@ -1144,6 +1144,16 @@ und wird vom echten Render genutzt. `next.config` bleibt unangetastet — das Bi
   + `console.error(order_id, step, message)`. `finally` räumt nur die **Temp-Fotos +
   reel.mp4** auf — **NICHT** `/tmp/ffmpeg` (bleibt gecacht).
 
+> **Refactor (kein Verhalten):** Der eigentliche Hintergrund-Render (`renderReel(...)`)
+> + der Storage-Download-Helfer (`downloadAsset`, modul-lokal) liegen jetzt **server-only**
+> in [lib/reel/render.ts](lib/reel/render.ts) (`export async function renderReel`, plus
+> `export type MediaItem` und die vier Dauer-Konstanten `SECONDS_PER_PHOTO`/`MAX_CLIP_SECONDS`/
+> `INTRO_SECONDS`/`OUTRO_SECONDS`); die `service_role`-Client-Erzeugung (`createServiceClient()`)
+> ist mitgewandert (wird in `renderReel` aufgerufen, bleibt server-only). Die Route ist reine
+> Orchestrierung (Guards/Status-Write/202) und ruft `after(() => renderReel({...}))` mit
+> **exakt derselben Signatur**. Vorbereitung für die gemeinsame Nutzung durch den
+> `generate`-`after()`-Pfad. Bit-identisches Verhalten, kein Zirkular-Import.
+
 ### Status-Poll ([app/api/portal/orders/[id]/reel-status/route.ts](app/api/portal/orders/[id]/reel-status/route.ts))
 
 `GET`, AUTHENTICATED, Order über RLS ⇒ 404. Liest `booklets.reel_status`/`reel_url`
