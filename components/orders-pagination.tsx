@@ -17,11 +17,13 @@ export function OrdersPagination({
   totalPages,
   status,
   quick,
+  archived,
 }: {
   page: number;
   totalPages: number;
   status: StatusFilter | null;
   quick: QuickFilter | null;
+  archived?: boolean;
 }) {
   if (totalPages <= 1) return null;
 
@@ -40,7 +42,7 @@ export function OrdersPagination({
       ) : (
         <Link
           className="orders-page-btn"
-          href={buildOrdersUrl({ status, quick, page: page - 1 })}
+          href={buildOrdersUrl({ status, quick, archived, page: page - 1 })}
           rel="prev"
         >
           {t(DEFAULT_LOCALE, "orders.prevPage")}
@@ -58,7 +60,7 @@ export function OrdersPagination({
       ) : (
         <Link
           className="orders-page-btn"
-          href={buildOrdersUrl({ status, quick, page: page + 1 })}
+          href={buildOrdersUrl({ status, quick, archived, page: page + 1 })}
           rel="next"
         >
           {t(DEFAULT_LOCALE, "orders.nextPage")}

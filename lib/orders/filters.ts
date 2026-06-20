@@ -66,14 +66,17 @@ export const ORDERS_PAGE_SIZE = 20;
  * Baut die Auftragslisten-URL aus dem aktiven Filter + Seite. **Eine Quelle**
  * für die Pagination-Links (`OrdersPagination`) und den Overshoot-Redirect der
  * Seite. Quick hat Vorrang vor Status (sie schließen sich ohnehin aus); `page`
- * wird nur ab Seite 2 angehängt (Seite 1 = nackte URL).
+ * wird nur ab Seite 2 angehängt (Seite 1 = nackte URL). `archived=true` schaltet
+ * in den Archiv-Scope (`?archived=1`).
  */
 export function buildOrdersUrl(opts: {
   status?: StatusFilter | null;
   quick?: QuickFilter | null;
   page?: number;
+  archived?: boolean;
 }): string {
   const params = new URLSearchParams();
+  if (opts.archived) params.set("archived", "1");
   if (opts.quick) params.set("quick", opts.quick);
   else if (opts.status) params.set("status", opts.status);
   if (opts.page && opts.page > 1) params.set("page", String(opts.page));

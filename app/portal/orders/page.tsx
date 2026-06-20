@@ -14,6 +14,8 @@ import { OrdersPagination } from "@/components/orders-pagination";
 import { OrdersRefreshButton } from "@/components/orders-refresh-button";
 import type { ReelStatus } from "@/app/portal/orders/[id]/generate-controls";
 import { PickupPendingBadge } from "@/components/pickup-pending-badge";
+import { ArchiveToggle } from "@/components/archive-toggle";
+import { isArchivable } from "@/lib/orders/archive";
 import {
   ORDERS_PAGE_SIZE,
   buildOrdersUrl,
@@ -32,6 +34,7 @@ type OrderListRow = {
   status: OrderStatus;
   picked_up_at: string | null;
   created_at: string;
+  archived_at: string | null;
 };
 
 const DATE_FORMAT = new Intl.DateTimeFormat("de-DE", {
@@ -45,6 +48,10 @@ const DATE_FORMAT = new Intl.DateTimeFormat("de-DE", {
  * Server-Client — RLS skopiert automatisch auf den Betrieb; zusätzlich wird
  * defensiv nach `business_id` aus `getCurrentBusiness` gefiltert.
  *
+ * Zwei Scopes (gegenseitig ausschließend, über `?archived=1`):
+ *  - Hauptliste (kein Param): nur Aufträge mit `archived_at IS NULL`.
+ *  - Archiv-Ansicht (`?archived=1`): nur Aufträge mit `archived_at IS NOT NULL`.
+ *
  * Filterung **server-seitig** über zwei sich gegenseitig ausschließende Achsen:
  *  - `?status=` — Status-Dropdown (ein einzelner Status, Block B).
  *  - `?quick=`  — Quick-Filter mit Mehrfach-/Sonderbedingungen (Block C / 3).
@@ -54,7 +61,12 @@ const DATE_FORMAT = new Intl.DateTimeFormat("de-DE", {
 export default async function OrdersPage({
   searchParams,
 }: {
-  searchParams: Promise<{ status?: string; quick?: string; page?: string }>;
+  searchParams: Promise<{
+    status?: string;
+    quick?: string;
+    page?: string;
+    archived?: string;
+  }>;
 }) {
   const business = await getCurrentBusiness();
   if (!business) return null;
@@ -63,7 +75,10 @@ export default async function OrdersPage({
     status: statusParam,
     quick: quickParam,
     page: pageParam,
+    archived: archivedParam,
   } = await searchParams;
+
+  const isArchiveView = archivedParam === "1";
 
   // Zwei Filter-Achsen, mutually exclusive: Quick führt, sonst Status-Dropdown.
   // Ist ein Quick aktiv, wird der Dropdown-Wert verworfen (Dropdown zeigt „Alle").
@@ -82,29 +97,25 @@ export default async function OrdersPage({
 
   const supabase = await createClient();
 
-  // EINE Zweitquery, die das Badge UND den Filter speist (Muster wie die
-  // reel_status-Query unten): alle Entwürfe (status='draft') des Betriebs MIT
-  // ≥1 Medium. `order_media!inner` ⇒ PostgREST liefert nur Aufträge mit
-  // mindestens einem Medium (eine Zeile je Auftrag, Kinder genested). RLS
-  // skopiert auf den Betrieb; zusätzlich defensiver business_id-Filter, kein
-  // service_role. **Geschäftsweit** (nicht seiten-skopiert), weil der „Neu"-
-  // Filter unten ein `id NOT IN (…)` über die GESAMTE Entwurfs-mit-Medium-Menge
-  // braucht (die Pagination greift erst nach dem WHERE).
-  const { data: draftMediaRows } = await supabase
+  // EINE Zweitquery, die das Badge UND den Filter speist: alle Entwürfe des
+  // aktuellen Scopes (aktiv/archiviert) MIT ≥1 Medium. `order_media!inner` ⇒
+  // PostgREST liefert nur Aufträge mit mindestens einem Medium. RLS skopiert auf
+  // den Betrieb; kein service_role. **Geschäftsweit** (nicht seiten-skopiert).
+  const draftMediaBase = supabase
     .from("orders")
     .select("id, order_media!inner(id)")
     .eq("business_id", business.id)
-    .eq("status", "draft")
-    .returns<{ id: string }[]>();
+    .eq("status", "draft");
+  const { data: draftMediaRows } = await (isArchiveView
+    ? draftMediaBase.not("archived_at", "is", null)
+    : draftMediaBase.is("archived_at", null)
+  ).returns<{ id: string }[]>();
   const draftWithMedia = new Set((draftMediaRows ?? []).map((r) => r.id));
 
-  // „In Arbeit" = Entwurf MIT Medium ⇒ order_media!inner direkt in der Hauptquery
-  // (PostgREST nestet die Kinder ⇒ count + Pagination zählen Eltern-Zeilen,
-  // bleiben also korrekt). Die Medien-Bedingung MUSS so in die Query — nach dem
-  // Fetch filtern würde die server-seitige Pagination zerstören.
+  // „In Arbeit" = Entwurf MIT Medium ⇒ order_media!inner direkt in der Hauptquery.
   const mediaJoin = activeStatusFilter === "in_progress";
   const selectCols =
-    "id, customer_name, external_ref, short_summary, status, picked_up_at, created_at" +
+    "id, customer_name, external_ref, short_summary, status, picked_up_at, created_at, archived_at" +
     (mediaJoin ? ", order_media!inner(id)" : "");
 
   let query = supabase
@@ -112,28 +123,26 @@ export default async function OrdersPage({
     .select(selectCols, { count: "exact" })
     .eq("business_id", business.id);
 
+  // Archiv-Scope: zeigt nur archivierte Aufträge; Hauptliste nur aktive.
+  if (isArchiveView) {
+    query = query.not("archived_at", "is", null);
+  } else {
+    query = query.is("archived_at", null);
+  }
+
   // Filter-Übersetzung server-seitig (IN die Query, damit Pagination heil bleibt).
   if (activeQuick === "flagged") {
-    // Exakt die Warn-Badge-Bedingung (Block C / Schritt 2): abgeholt, aber noch
-    // nicht versendet. NOT IN {sent, viewed, shared} == IN {draft, generated}
-    // (kein `finalized` mehr).
     query = query
       .not("picked_up_at", "is", null)
       .in("status", ["draft", "generated"]);
   } else if (activeStatusFilter === "new") {
-    // „Neu" = Entwurf OHNE Medium ⇒ alle Entwürfe minus die mit Medium. Leere
-    // Menge ⇒ alle Entwürfe sind „neu" (kein NOT-IN nötig).
     query = query.eq("status", "draft");
     if (draftWithMedia.size > 0) {
       query = query.not("id", "in", `(${[...draftWithMedia].join(",")})`);
     }
   } else if (activeStatusFilter === "in_progress") {
-    // „In Arbeit" = Entwurf MIT Medium ⇒ status='draft' + der order_media!inner-
-    // Join aus selectCols. Hat kein Entwurf Medien, liefert der inner-Join von
-    // selbst nichts (kein Sonderfall nötig).
     query = query.eq("status", "draft");
   } else if (isOrderStatus(activeStatusFilter)) {
-    // Echte Lifecycle-Status (generated/sent/viewed/shared) direkt.
     query = query.eq("status", activeStatusFilter);
   }
 
@@ -147,27 +156,22 @@ export default async function OrdersPage({
   const total = count ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / ORDERS_PAGE_SIZE));
 
-  // Overshoot (z. B. manuell editierte URL oder veralteter Link nach Löschungen):
-  // angeforderte Seite > letzte Seite ⇒ auf die letzte Seite klemmen. So bleibt
-  // nach der Weiche `orders.length === 0` ⟺ `total === 0`.
+  // Overshoot (z. B. manuell editierte URL oder veralteter Link nach Löschungen).
   if (page > totalPages) {
     redirect(
       buildOrdersUrl({
         status: activeStatusFilter,
         quick: activeQuick,
+        archived: isArchiveView,
         page: totalPages,
       }),
     );
   }
 
   const hasActiveFilter = activeQuick !== null || activeStatusFilter !== null;
-  // Filter-Leiste zeigen, sobald es Aufträge gibt ODER ein Filter aktiv ist
-  // (damit man aus einem leeren Filter-Ergebnis wieder zurück auf „Alle" kann).
   const showFilter = total > 0 || hasActiveFilter;
 
-  // Zweite Achse: Reel-Render-Status. Nur für generierte Aufträge relevant
-  // (Booklet existiert, noch nicht versendet). booklets sind member-lesbar
-  // (RLS, AUTHENTICATED Client) — kein service_role. Map order_id → reel_status.
+  // Zweite Achse: Reel-Render-Status für generierte Aufträge.
   const generatedIds = orders
     .filter((o) => o.status === "generated")
     .map((o) => o.id);
@@ -186,10 +190,48 @@ export default async function OrdersPage({
       <div className="orders-header">
         <div className="orders-title-row">
           <h1 style={{ fontSize: 22, fontWeight: 700 }}>
-            {t(DEFAULT_LOCALE, "orders.title")}
+            {isArchiveView
+              ? t(DEFAULT_LOCALE, "orders.archiveView")
+              : t(DEFAULT_LOCALE, "orders.title")}
           </h1>
-          {/* Refresh oben rechts: holt per Webhook reingekommene Aufträge nach. */}
-          <OrdersRefreshButton />
+          {isArchiveView ? (
+            /* Archiv → Link zurück zur Hauptliste */
+            <Link
+              href="/portal/orders"
+              className="btn-outline"
+              style={{ fontSize: 13, padding: "5px 12px" }}
+            >
+              {t(DEFAULT_LOCALE, "orders.backToList")}
+            </Link>
+          ) : (
+            /* Hauptliste → Refresh + Archiv-Link */
+            <>
+              <OrdersRefreshButton />
+              <Link
+                href={buildOrdersUrl({ archived: true })}
+                className="orders-archive-link"
+                title={t(DEFAULT_LOCALE, "orders.archiveView")}
+              >
+                <svg
+                  width={18}
+                  height={18}
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={1.8}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden
+                >
+                  <rect x="2" y="3" width="20" height="5" rx="1" />
+                  <path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8" />
+                  <path d="M10 12l2 2 2-2" />
+                  <path d="M12 12v4" />
+                </svg>
+                <span>{t(DEFAULT_LOCALE, "orders.archiveView")}</span>
+              </Link>
+            </>
+          )}
         </div>
 
         {showFilter ? (
@@ -198,9 +240,11 @@ export default async function OrdersPage({
               value={activeStatusFilter ?? "all"}
               quick={activeQuick}
             />
-            <Link href="/portal/orders/new" className="btn-dark orders-new-btn">
-              {t(DEFAULT_LOCALE, "orders.new")}
-            </Link>
+            {!isArchiveView && (
+              <Link href="/portal/orders/new" className="btn-dark orders-new-btn">
+                {t(DEFAULT_LOCALE, "orders.new")}
+              </Link>
+            )}
             <OrderQuickFilters active={activeQuick} />
           </>
         ) : null}
@@ -208,13 +252,21 @@ export default async function OrdersPage({
 
       {total === 0 ? (
         hasActiveFilter ? (
-          // Aktiver Filter ohne Treffer — Hinweis, Filter-Leiste bleibt oben.
           <div
             className="card"
             style={{ textAlign: "center", padding: "32px 24px" }}
           >
             <p style={{ margin: 0, color: "var(--text-secondary)" }}>
               {t(DEFAULT_LOCALE, "orders.emptyFiltered")}
+            </p>
+          </div>
+        ) : isArchiveView ? (
+          <div
+            className="card"
+            style={{ textAlign: "center", padding: "32px 24px" }}
+          >
+            <p style={{ margin: 0, color: "var(--text-secondary)" }}>
+              {t(DEFAULT_LOCALE, "orders.emptyArchive")}
             </p>
           </div>
         ) : (
@@ -241,11 +293,6 @@ export default async function OrdersPage({
         <>
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             {orders.map((order) => {
-              // Warn-Bedingung (Block C / Schritt 2): abgeholt, aber Booklet noch
-              // nicht versendet. Doppel-Sicherung — bereits ausgelieferte Stufen
-              // (sent/viewed/shared) nie warnen, selbst wenn picked_up_at
-              // theoretisch noch gesetzt wäre. Truthy ⇒ String narrowt für die
-              // Hinweiszeile.
               const flaggedDate =
                 order.picked_up_at &&
                 order.status !== "sent" &&
@@ -253,106 +300,113 @@ export default async function OrdersPage({
                 order.status !== "shared"
                   ? order.picked_up_at
                   : null;
+
+              const canArchive =
+                !isArchiveView && isArchivable(order.status, order.picked_up_at);
+
               return (
-              <Link
-                key={order.id}
-                href={`/portal/orders/${order.id}`}
-                className={`card card-link${flaggedDate ? " card-flagged" : ""}`}
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 10,
-                }}
-              >
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    gap: 12,
-                  }}
-                >
-                <div style={{ minWidth: 0 }}>
-                  <div
-                    style={{
-                      fontSize: 15,
-                      fontWeight: 600,
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {order.customer_name}
-                  </div>
-                  {order.short_summary ? (
-                    <div
-                      style={{
-                        fontSize: 13,
-                        color: "var(--text-primary)",
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      {order.short_summary}
-                    </div>
-                  ) : (
-                    <div
-                      style={{
-                        fontSize: 13,
-                        color: "var(--text-secondary)",
-                        fontStyle: "italic",
-                        opacity: 0.7,
-                      }}
-                    >
-                      {t(DEFAULT_LOCALE, "orders.noDescription")}
-                    </div>
-                  )}
-                  {order.external_ref ? (
-                    <div
-                      style={{ fontSize: 12, color: "var(--text-secondary)" }}
-                    >
-                      {order.external_ref}
-                    </div>
-                  ) : null}
-                </div>
-                <div
+                <Link
+                  key={order.id}
+                  href={`/portal/orders/${order.id}`}
+                  className={`card card-link${flaggedDate ? " card-flagged" : ""}`}
                   style={{
                     display: "flex",
                     flexDirection: "column",
-                    alignItems: "flex-end",
-                    gap: 6,
-                    flexShrink: 0,
+                    gap: 10,
                   }}
                 >
                   <div
                     style={{
                       display: "flex",
                       alignItems: "center",
-                      justifyContent: "flex-end",
-                      flexWrap: "wrap",
-                      gap: 6,
+                      justifyContent: "space-between",
+                      gap: 12,
                     }}
                   >
-                    <OrderStatusBadge
-                      status={order.status}
-                      hasMedia={draftWithMedia.has(order.id)}
-                      reelStatus={reelByOrder.get(order.id) ?? null}
-                    />
+                    <div style={{ minWidth: 0 }}>
+                      <div
+                        style={{
+                          fontSize: 15,
+                          fontWeight: 600,
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {order.customer_name}
+                      </div>
+                      {order.short_summary ? (
+                        <div
+                          style={{
+                            fontSize: 13,
+                            color: "var(--text-primary)",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {order.short_summary}
+                        </div>
+                      ) : (
+                        <div
+                          style={{
+                            fontSize: 13,
+                            color: "var(--text-secondary)",
+                            fontStyle: "italic",
+                            opacity: 0.7,
+                          }}
+                        >
+                          {t(DEFAULT_LOCALE, "orders.noDescription")}
+                        </div>
+                      )}
+                      {order.external_ref ? (
+                        <div
+                          style={{ fontSize: 12, color: "var(--text-secondary)" }}
+                        >
+                          {order.external_ref}
+                        </div>
+                      ) : null}
+                    </div>
+                    <div
+                      style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        alignItems: "flex-end",
+                        gap: 6,
+                        flexShrink: 0,
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "flex-end",
+                          flexWrap: "wrap",
+                          gap: 6,
+                        }}
+                      >
+                        <OrderStatusBadge
+                          status={order.status}
+                          hasMedia={draftWithMedia.has(order.id)}
+                          reelStatus={reelByOrder.get(order.id) ?? null}
+                        />
+                      </div>
+                      <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+                        {DATE_FORMAT.format(new Date(order.created_at))}
+                      </div>
+                      {/* Archiv-Icon: auf archivierbaren Aufträgen der Hauptliste
+                          oder auf allen Aufträgen in der Archiv-Ansicht. */}
+                      {canArchive ? (
+                        <ArchiveToggle orderId={order.id} mode="archive" />
+                      ) : isArchiveView ? (
+                        <ArchiveToggle orderId={order.id} mode="unarchive" />
+                      ) : null}
+                    </div>
                   </div>
-                  <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>
-                    {DATE_FORMAT.format(new Date(order.created_at))}
-                  </div>
-                </div>
-                </div>
-                {/* Warn-Hinweis (Block C / Schritt 2): roapp meldete „Abgeholt",
-                    Booklet aber noch nicht versendet. Volle-Breite-Zeile am
-                    unteren Kartenrand statt überbreitem Inline-Pill; die Karte
-                    trägt zusätzlich eine rote Umrandung (.card-flagged). */}
-                {flaggedDate ? (
-                  <PickupPendingBadge pickedUpAt={flaggedDate} />
-                ) : null}
-              </Link>
+                  {flaggedDate ? (
+                    <PickupPendingBadge pickedUpAt={flaggedDate} />
+                  ) : null}
+                </Link>
               );
             })}
           </div>
@@ -362,6 +416,7 @@ export default async function OrdersPage({
             totalPages={totalPages}
             status={activeStatusFilter}
             quick={activeQuick}
+            archived={isArchiveView}
           />
         </>
       )}
