@@ -14,13 +14,16 @@ import { sendBookletSms } from "@/lib/sms/booklet-sms";
  *
  * E-Mail hat Vorrang (rich/Deliverability); SMS ist der Fallback ohne E-Mail.
  *
- * Der Aufrufer (manueller Auslieferungs-Pfad) behandelt das Ergebnis NICHT-
+ * Der Aufrufer (manueller wie Webhook-Auto-Pfad) behandelt das Ergebnis NICHT-
  * BLOCKIEREND: Status-/Billing-/sent_at-Sequenz bleibt unverändert im Route
  * Handler; dieses Modul macht NUR den eigentlichen Versand und meldet das
- * Ergebnis zurück, damit der Operator den Kanal bzw. den Fehlergrund sieht.
+ * Ergebnis zurück, damit der Operator (bzw. das Log) Kanal/Fehlergrund sieht.
  *
- * Hinweis: Der Webhook-Auto-Pfad (3b) ist NICHT Teil dieses Tickets und wird
- * hier NICHT angefasst.
+ * Feature 3b: Auch der Webhook-Auto-Pfad nutzt diesen Helfer. Der `business`-
+ * Parameter ist daher auf `name` + (normalisierte) `settings` verengt
+ * (`Pick<CurrentBusiness, …>`) — der manuelle Pfad reicht eine `CurrentBusiness`
+ * durch (strukturell zuweisbar), der Auto-Pfad einen aus `WebhookBusiness` +
+ * `normalizeSettings` gebauten Ausschnitt.
  */
 
 type ServerClient = Awaited<ReturnType<typeof createClient>>;
@@ -56,7 +59,7 @@ function errMessage(error: unknown): string {
  */
 export async function deliverBooklet(
   order: DeliverableOrder,
-  business: CurrentBusiness,
+  business: Pick<CurrentBusiness, "name" | "settings">,
   link: string,
   supabase: ServerClient,
 ): Promise<DeliveryResult> {

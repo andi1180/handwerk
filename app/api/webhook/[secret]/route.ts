@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { normalizeSettings } from "@/lib/auth/current-business";
 import { bookletShareLink } from "@/lib/booklet/share-link";
-import { sendBookletEmail } from "@/lib/email/booklet-email";
+import { deliverBooklet } from "@/lib/delivery/deliver-booklet";
 import { generateShortSummary } from "@/lib/ai/short-summary";
 import { classifyEvent, parseWebhookBody } from "@/lib/roapp/events";
 import {
@@ -24,15 +24,16 @@ import {
  *  - order.created  (event_name endet auf ".created")        → Order anlegen.
  *  - order.picked_up(event_name endet auf ".status.changed") → falls API-
  *    `status.name === ROAPP_PICKED_UP_STATUS_NAME` und unsere Order `generated`
- *    ist: deliver-Pfad replizieren (Status, Billing, E-Mail).
+ *    ist: deliver-Pfad replizieren (Status, Billing, Versand via deliverBooklet).
  *
  * Anreicherung: EIN Call `GET /orders/{object_id}` liefert client + status.name +
  * id_label (= external_ref). KEIN zweiter Contact-Call.
  *
  * ROBUSTHEIT (§12): Außer ungültigem Secret (404) IMMER 200 + kurzer
  * Status-String, damit roapp keine Retry-Stürme macht. No-op-Fälle werden
- * geloggt. Die deliver-Logik ist REPLIZIERT (nicht geteilt), weil die
- * Portal-deliver-Route session-gebunden ist.
+ * geloggt. Die Status-/Billing-/sent_at-SEQUENZ ist REPLIZIERT (nicht geteilt),
+ * weil die Portal-deliver-Route session-gebunden ist; der eigentliche VERSAND
+ * (Kanal-Wahl E-Mail/SMS) läuft über den GETEILTEN `deliverBooklet`-Helfer (3b).
  *
  * HINWEIS: Die `x-signature` (HMAC) wird im MVP NICHT geprüft — das Pfad-Secret
  * ist die Auth. Signaturprüfung ist als Folgeschritt in TECH.md notiert.
@@ -293,8 +294,8 @@ function buildCustomerName(
  * order.picked_up: NUR wenn der API-`status.name` „abgeholt" bedeutet (nie die
  * numerische Payload-ID). Order per external_ref + business finden; ist sie
  * `generated`, den deliver-Pfad replizieren (Status `generated→sent` defensiv
- * gefiltert + count-Check gegen Doppelversand; sent_at, Billing, E-Mail — alle
- * Nebenwirkungen nicht-blockierend wie im deliver-Vorbild).
+ * gefiltert + count-Check gegen Doppelversand; sent_at, Billing, Versand via
+ * deliverBooklet — alle Nebenwirkungen nicht-blockierend wie im deliver-Vorbild).
  */
 async function handleOrderPickedUp(
   request: Request,
@@ -312,7 +313,7 @@ async function handleOrderPickedUp(
   // Order per external_ref + business (service_role, strikt gescoped).
   const { data: order, error: findError } = await service
     .from("orders")
-    .select("id, status, customer_name, customer_email")
+    .select("id, status, customer_name, customer_email, customer_phone")
     .eq("business_id", business.id)
     .eq("external_ref", externalRef)
     .maybeSingle<{
@@ -320,6 +321,7 @@ async function handleOrderPickedUp(
       status: string;
       customer_name: string;
       customer_email: string | null;
+      customer_phone: string | null;
     }>();
   if (findError) {
     console.error("webhook: picked_up lookup failed", {
@@ -442,36 +444,51 @@ async function handleOrderPickedUp(
     });
   }
 
-  // 4. Booklet-E-Mail (nur wenn customer_email). NICHT-BLOCKIEREND.
-  let emailSent = false;
-  if (order.customer_email) {
-    try {
-      const settings = normalizeSettings(business.settings);
-      const base = bookletBaseUrl(request);
-      // Block C: Kurzlink (Fallback langer Link für alte Booklets), Kunden-Sicht.
-      const bookletUrl = bookletShareLink({
-        base,
-        accessToken: booklet.access_token,
-        shortCode: booklet.short_code,
-        customerView: true,
-      });
-      await sendBookletEmail({
-        to: order.customer_email,
-        customerName: order.customer_name,
-        businessName: business.name,
-        bookletUrl,
-        replyTo: settings.contact_email ?? undefined,
-      });
-      emailSent = true;
-    } catch (error) {
-      console.error("webhook: email send failed", {
-        business_id: business.id,
-        order_id: order.id,
-        step: "email",
-        message: errMessage(error),
-      });
-    }
+  // 4. Booklet ausliefern über den passenden Kanal (Feature 3b): GETEILTER
+  //    Helfer mit dem manuellen Pfad — E-Mail wenn `customer_email`, sonst SMS,
+  //    sonst nichts. NICHT-BLOCKIEREND (der Status steht bereits auf `sent`).
+  //    Kein Operator im Loop ⇒ das Ergebnis {channel, ok, error?} KLAR loggen,
+  //    damit eine fehlgeschlagene Auto-Zustellung diagnostizierbar ist.
+  const base = bookletBaseUrl(request);
+  // Block C: Kurzlink (Fallback langer Link für alte Booklets), Kunden-Sicht.
+  const bookletUrl = bookletShareLink({
+    base,
+    accessToken: booklet.access_token,
+    shortCode: booklet.short_code,
+    customerView: true,
+  });
+  const delivery = await deliverBooklet(
+    {
+      customer_name: order.customer_name,
+      customer_email: order.customer_email,
+      customer_phone: order.customer_phone,
+      external_ref: externalRef,
+    },
+    { name: business.name, settings: normalizeSettings(business.settings) },
+    bookletUrl,
+    service,
+  );
+  if (delivery.ok) {
+    console.log("webhook: auto delivery ok", {
+      business_id: business.id,
+      order_id: order.id,
+      channel: delivery.channel,
+    });
+  } else {
+    console.error("webhook: auto delivery failed", {
+      business_id: business.id,
+      order_id: order.id,
+      step: "deliver",
+      channel: delivery.channel,
+      message: delivery.error ?? "no_contact",
+    });
   }
 
-  return ok(emailSent ? "sent" : "sent_no_email");
+  return ok(
+    delivery.ok
+      ? "sent"
+      : delivery.channel === "none"
+        ? "sent_no_contact"
+        : "sent_delivery_failed",
+  );
 }

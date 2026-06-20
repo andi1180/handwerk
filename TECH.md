@@ -2829,6 +2829,24 @@ Der frühere E-Mail-Block (Schritt 4) ist durch **einen** `deliverBooklet`-Aufru
 
 ---
 
+## Feature 3b — deliverBooklet im Webhook-Auto-Pfad
+
+Der **Webhook-Auto-Pfad** ([webhook/[secret]/route.ts](app/api/webhook/[secret]/route.ts), `handleOrderPickedUp`) nutzt jetzt denselben geteilten `deliverBooklet`-Helfer wie der manuelle Pfad (3a). Damit erreicht auch ein roapp-„Abgeholt"-Auftrag den Kunden über den **passenden Kanal** (E-Mail bevorzugt, sonst SMS) statt nur per E-Mail. **NUR diese eine Stelle** (der bisherige `sendBookletEmail`-Aufruf, Schritt 4) ist ersetzt. **Keine Migration, kein neuer Status, kein `any`.**
+
+**Geändert:** der direkte `sendBookletEmail`-Aufruf wird durch **einen** `deliverBooklet(order, business, bookletUrl, service)`-Aufruf ersetzt — mit dem bereits aufgelösten `service_role`-Client.
+
+- **Status-/Billing-/`sent_at`-Sequenz UNVERÄNDERT** (Schritte 1–3 bleiben repliziert: `generated→sent` defensiv gefiltert + `count`-Check gegen Doppelversand, dann `sent_at` + Billing-Event `'booklet_sent'`, beide nicht-blockierend). `business_id` weiter **nur** aus der service_role-aufgelösten Order (§14.2).
+- Die Order-Query lädt zusätzlich `customer_phone` (für den SMS-Kanal); `external_ref` ist bereits als Funktions-Parameter vorhanden und fließt in den `DeliverableOrder` mit.
+- **business-Parameter strukturell verengt:** `deliverBooklet`/`sendBookletSms` nehmen jetzt `Pick<CurrentBusiness, "name" | "settings">` statt der vollen `CurrentBusiness`. Der manuelle Pfad reicht weiterhin eine `CurrentBusiness` durch (strukturell zuweisbar); der Auto-Pfad baut den Ausschnitt aus `{ name: business.name, settings: normalizeSettings(business.settings) }` — **keine** Duplikation der `CurrentBusiness`-Assemblierung im Webhook, keine zusätzlichen Spalten-Loads. Der `supabase`-Parameter (reserviert, ungenutzt) akzeptiert beide Clients (gleicher `SupabaseClient`-Typ).
+- **Kein Operator im Loop** ⇒ das Ergebnis `{ channel, ok, error? }` wird **klar geloggt**: Erfolg `console.log("webhook: auto delivery ok", { business_id, order_id, channel })`, Fehlschlag `console.error("webhook: auto delivery failed", { business_id, order_id, step: "deliver", channel, message })` (`message = error ?? "no_contact"`) — eine fehlgeschlagene Auto-Zustellung ist so in den Vercel-Logs diagnostizierbar.
+- **Versand bleibt NICHT-BLOCKIEREND:** `sent` steht in jedem Fall. Response-Status-String je Ergebnis: `sent` (ok) / `sent_no_contact` (Kanal `none`) / `sent_delivery_failed` (E-Mail/SMS fehlgeschlagen) — ersetzt das frühere `sent` / `sent_no_email`.
+
+**E-Mail-Auto-Zustellung unverändert:** `deliverBooklet` versendet bei gesetztem `customer_email` per `sendBookletEmail` (gleiche reply-to-Logik) — der bisherige E-Mail-Pfad ist 1:1 erhalten, SMS ist nur der Fallback ohne E-Mail.
+
+`pnpm typecheck` + `pnpm build` grün.
+
+---
+
 ## Launch-Fahrplan & deferierte Härtung
 
 Detail-Referenz für die Risikobewertung: [SECURITY_REVIEW.md](SECURITY_REVIEW.md) (bleibt im Repo). Dieser Abschnitt fasst die **Reihenfolge** des Live-Gangs und die **vor Kunde #2 verpflichtende** Härtung zusammen.

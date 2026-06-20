@@ -28,7 +28,7 @@ export type BookletSmsOrder = {
  */
 export async function sendBookletSms(
   order: BookletSmsOrder,
-  business: CurrentBusiness,
+  business: Pick<CurrentBusiness, "name" | "settings">,
   link: string,
 ): Promise<SmsSendResult> {
   const recipient = normalizePhone(order.customer_phone);
