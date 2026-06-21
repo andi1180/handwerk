@@ -2995,6 +2995,22 @@ Reiner **Lift-and-Shift**: die Datei-Teilen-Logik der Kunden-ShareBar wandert in
 
 ---
 
+## Schritt 3c — Share-Popup + business-reel-shared Route + sharedAt-State (Zustand 2/3 klickbar)
+
+Baut auf Schritt 3b (Button-Grundgerüst) und 3a (geteilte `lib/share/file-share.ts`-Helfer) auf. **Keine Migration** (0013-`business_reel_shared_at` bereits appliziert). Kunden-Reel-Pipeline, Kunden-ShareBar, Geld-Pfad (`generate`/`deliver`/Webhook) **NICHT angefasst**. Kein `<form>`, kein `any`, AUTHENTICATED + RLS (kein `service_role`).
+
+**TEIL 1 — Route `POST /api/portal/orders/[id]/business-reel-shared`** ([app/api/portal/orders/[id]/business-reel-shared/route.ts](app/api/portal/orders/[id]/business-reel-shared/route.ts), NEU): schreibt `booklets.business_reel_shared_at = now()` wenn `business_reel_status === 'ready'`. Guard-Reihenfolge: Auth (401) → `getCurrentBusiness` (403) → Order via RLS (404) → Booklet via RLS (500 `no_booklet`) → Status-Check (409 `not_ready`) → Update (500 `update_failed`). **`business_id` ausschließlich aus der RLS-geladenen Order** (§14.2), NIE aus Body; AUTHENTICATED-Client + RLS (member-update deckt die Spalte ab), kein `service_role`.
+
+**TEIL 2 — `<BusinessReelButton>` erweitert** ([components/business-reel-button.tsx](components/business-reel-button.tsx)): neuer Prop `initialSharedAt?: boolean` (Default `false`); neue State-Variablen `sharedAt`, `popupOpen`, `reelFile`, `fetching`, `fetchError`, `canShare`. `useEffect` setzt `canShare` via `canShareFiles()` (SSR-sicher, nie im Render) und registriert `mountedRef`. **Zustand 2+3 (`current === 'ready'`):** das Pill ist jetzt ein `<button onClick={openPopup}>` (vorher nicht-klickbares `<div>`); Label = `sharedAt ? reshare : share` (zwei Labels, ein Button, keine separate Klasse). **`openPopup(e)` (async):** `preventDefault`/`stopPropagation`; Zustand zurücksetzen; `setPopupOpen(true)` + `setFetching(true)`; holt frische Signed-URL via `GET business-reel-status` → `fetchAsShareFile(url,"business-reel.mp4","video/mp4")` aus `lib/share/file-share` → `setReelFile`; Fehler → `setFetchError(true)`; finally `setFetching(false)`. **`handleShare(e)` (synchron — iOS):** `void shareFile(reelFile, shareTitle)` wird **ohne `await` davor** aufgerufen (transient activation bleibt erhalten); danach fire-and-forget `void fetch(…/business-reel-shared, POST)` (kein await); `setSharedAt(true)` + schließen. **`handleDownload(e)`:** `URL.createObjectURL(reelFile)` → `downloadFile(blobUrl,"business-reel.mp4")` → `setTimeout(revokeObjectURL, 60s)` → `closePopup()`. **`closePopup(e?)`:** stoppt Propagation wenn Event vorhanden, resettet `popupOpen`/`reelFile`/`fetching`/`fetchError`. **`<ReelSharePopup>`** (inline, `position:fixed` Backdrop + Panel): Backdrop-Klick und Panel-Klick stoppen Propagation (`<Link>`-Navigate unterdrückt); zeigt `preparing` (fetching) / Fehler + Close-Button / `shareNow`-Button (wenn `canShare && reelFile`) / `download`-Button (wenn `!canShare && reelFile`); Schließen-X nutzt `reel.close` i18n-Key. Alle anderen Zustände (0, 1, 1b, F) sowie Render-Logik, Poll und `handleRender` **unverändert**.
+
+**TEIL 3 — CSS** ([app/globals.css](app/globals.css)): `.business-reel-pill--ready` auf `cursor: pointer` + `:hover { filter: brightness(0.93); }` umgestellt (kein neuer Modifier); neue Klassen `.biz-reel-backdrop` (`position:fixed; inset:0; z-index:62; background:rgba(0,0,0,0.55)`), `.biz-reel-popup` (`background:var(--surface); border; border-radius; padding; max-width:320px; flex-column; align-items:center`), `.biz-reel-popup__close` (Schließen-X, absolute top-right), `.biz-reel-popup__status` (sekundärer Text), `.biz-reel-popup__error` (Fehlertext `var(--red-text)`).
+
+**[app/portal/orders/page.tsx](app/portal/orders/page.tsx):** Booklets-Query um `business_reel_shared_at` erweitert; `BookletEntry`-Typ + `.returns<>()` ergänzt; `reelByOrder.set()` speichert `business_reel_shared_at`; `<BusinessReelButton>` bekommt `initialSharedAt={Boolean(…?.business_reel_shared_at)}`.
+
+**i18n** ([lib/i18n/de.ts](lib/i18n/de.ts)): sieben neue `businessReel.*`-Keys (`share`/`reshare`/`shareTitle`/`preparing`/`loadError`/`shareNow`/`download`) nach `gateMissing`. `pnpm typecheck` + `pnpm build` grün.
+
+---
+
 ## Launch-Fahrplan & deferierte Härtung
 
 Detail-Referenz für die Risikobewertung: [SECURITY_REVIEW.md](SECURITY_REVIEW.md) (bleibt im Repo). Dieser Abschnitt fasst die **Reihenfolge** des Live-Gangs und die **vor Kunde #2 verpflichtende** Härtung zusammen.

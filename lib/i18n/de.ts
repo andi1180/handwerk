@@ -446,6 +446,14 @@ export const de = {
     ready: "Reel fertig",
     retry: "Neu erstellen",
     gateMissing: "Vorher/Nachher fehlt",
+    // 3c: Teilen-Popup (Zustand 2/3).
+    share: "Reel teilen",
+    reshare: "Erneut teilen",
+    shareTitle: "Atelier Reel",
+    preparing: "Wird vorbereitet …",
+    loadError: "Laden fehlgeschlagen",
+    shareNow: "Jetzt teilen",
+    download: "Reel herunterladen",
   },
   reach: {
     // Reichweiten-/VIP-Analyse-Sektion auf dem Dashboard.

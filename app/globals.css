@@ -1497,11 +1497,15 @@ body {
   flex-shrink: 0;
 }
 
-/* Zustand 2: Fertig (Grün — nicht klickbar, 3c macht es klickbar). */
+/* Zustand 2+3: Fertig / Erneut teilen (Grün — 3c klickbar). */
 .business-reel-pill--ready {
   color: var(--green-text);
   border-color: var(--green-border);
   background: var(--green-light);
+  cursor: pointer;
+}
+.business-reel-pill--ready:hover {
+  filter: brightness(0.93);
 }
 
 /* Zustand F: Fehlgeschlagen (Rot — Klick = Retry). */
@@ -1517,6 +1521,59 @@ body {
 .business-reel-pill--failed:disabled {
   opacity: 0.65;
   cursor: wait;
+}
+
+/* Betriebs-Reel Teilen-Popup (3c). */
+.biz-reel-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 62;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+.biz-reel-popup {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 36px 24px 24px;
+  width: 100%;
+  max-width: 320px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  position: relative;
+}
+.biz-reel-popup__close {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  background: none;
+  border: none;
+  font-size: 15px;
+  cursor: pointer;
+  color: var(--text-secondary);
+  line-height: 1;
+  padding: 4px 6px;
+  font-family: inherit;
+}
+.biz-reel-popup__close:hover {
+  color: var(--text-primary);
+}
+.biz-reel-popup__status {
+  font-size: 14px;
+  color: var(--text-secondary);
+  margin: 0;
+  text-align: center;
+}
+.biz-reel-popup__error {
+  font-size: 14px;
+  color: var(--red-text);
+  margin: 0;
+  text-align: center;
 }
 
 /* Druck: NUR die QR-Karte. Portal-Chrome + Druck-Button raus, Karte schmal/S/W. */

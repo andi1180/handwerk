@@ -166,6 +166,7 @@ export default async function OrdersPage({
   type BookletEntry = {
     reel_status: ReelStatus | null;
     business_reel_status: BusinessReelStatus | null;
+    business_reel_shared_at: string | null;
   };
   const reelByOrder = new Map<string, BookletEntry>();
 
@@ -177,13 +178,14 @@ export default async function OrdersPage({
     const [bookletResult, gateResult] = await Promise.all([
       supabase
         .from("booklets")
-        .select("order_id, reel_status, business_reel_status")
+        .select("order_id, reel_status, business_reel_status, business_reel_shared_at")
         .in("order_id", renderableIds)
         .returns<
           {
             order_id: string;
             reel_status: ReelStatus | null;
             business_reel_status: BusinessReelStatus | null;
+            business_reel_shared_at: string | null;
           }[]
         >(),
       supabase
@@ -198,6 +200,7 @@ export default async function OrdersPage({
       reelByOrder.set(b.order_id, {
         reel_status: b.reel_status,
         business_reel_status: b.business_reel_status,
+        business_reel_shared_at: b.business_reel_shared_at,
       });
     }
 
@@ -431,6 +434,9 @@ export default async function OrdersPage({
                         gateOk={Boolean(
                           gateByOrder.get(order.id)?.hasBefore &&
                             gateByOrder.get(order.id)?.hasAfter,
+                        )}
+                        initialSharedAt={Boolean(
+                          reelByOrder.get(order.id)?.business_reel_shared_at,
                         )}
                       />
                     </div>
