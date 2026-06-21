@@ -3,6 +3,12 @@
 import { useEffect, useRef, useState } from "react";
 import { t, type Locale } from "@/lib/i18n";
 import { trackBookletEvent } from "@/lib/booklet/track";
+import {
+  canShareFiles as detectCanShareFiles,
+  downloadFile,
+  fetchAsShareFile,
+  shareFile,
+} from "@/lib/share/file-share";
 
 /** Welcher „✓ kopiert"-Flash gerade aktiv ist (immer nur einer). */
 type CopiedKey = "link" | "review";
@@ -63,17 +69,7 @@ export function ShareBar({
   // aufrufen kann. Die ShareBar rendert nur in der Kunden-Sicht (?c=1), also genau
   // für den beabsichtigten Teiler — der Prefetch-Cost fällt nicht bei Empfängern an.
   useEffect(() => {
-    let canShare = false;
-    try {
-      const probe = new File([new Blob([], { type: "video/mp4" })], "probe.mp4", {
-        type: "video/mp4",
-      });
-      canShare =
-        typeof navigator.canShare === "function" &&
-        navigator.canShare({ files: [probe] });
-    } catch {
-      canShare = false;
-    }
+    const canShare = detectCanShareFiles();
     setCanShareFiles(canShare);
 
     // Prefetch nur, wenn ein Reel vorliegt UND Datei-Sharing möglich ist
@@ -83,11 +79,14 @@ export function ShareBar({
     const controller = new AbortController();
     void (async () => {
       try {
-        const res = await fetch(reelSignedUrl, { signal: controller.signal });
-        if (!res.ok) throw new Error(`fetch ${res.status}`);
-        const blob = await res.blob();
+        const file = await fetchAsShareFile(
+          reelSignedUrl,
+          "reel.mp4",
+          "video/mp4",
+          controller.signal,
+        );
         if (cancelled) return;
-        reelFileRef.current = new File([blob], "reel.mp4", { type: "video/mp4" });
+        reelFileRef.current = file;
         setReelReady(true);
       } catch {
         // Prefetch fehlgeschlagen (Netz/CORS/Abbruch) → auf Download-Fallback
@@ -134,16 +133,6 @@ export function ShareBar({
     window.open(reviewHref(googleReviewUrl), "_blank", "noopener,noreferrer");
   }
 
-  function downloadReel(url: string) {
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "reel.mp4";
-    a.rel = "noopener";
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-  }
-
   /** „Booklet teilen" (PRIMÄR): Story-URL teilen, Fallback = Link kopieren. */
   async function handleShareBooklet() {
     trackBookletEvent(token, "shared", "story");
@@ -181,15 +170,11 @@ export function ShareBar({
       navigator.canShare({ files: [file] }) &&
       typeof navigator.share === "function"
     ) {
-      navigator
-        .share({ files: [file], title: t(locale, "share.shareTitle") })
-        .catch(() => {
-          // Abbruch durch den Nutzer ist kein Fehler — kein Toast, kein Download.
-        });
+      void shareFile(file, t(locale, "share.shareTitle"));
       return;
     }
     // Keine teilbare Datei (kein File-Sharing / Prefetch verworfen) → Download.
-    downloadReel(reelSignedUrl);
+    downloadFile(reelSignedUrl, "reel.mp4");
   }
 
   const showReview = Boolean(googleReviewUrl && reviewDraft);

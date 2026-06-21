@@ -2965,6 +2965,20 @@ Assembly per `concatSegments` (Items in Booklet-Reihenfolge before→process→a
 
 ---
 
+## Schritt 3a — Share-Mechanik extrahiert ([lib/share/file-share.ts](lib/share/file-share.ts))
+
+Reiner **Lift-and-Shift**: die Datei-Teilen-Logik der Kunden-ShareBar wandert in wiederverwendbare Helfer (Vorbereitung für eine zweite, betriebs-seitige Teilen-Stelle). **Keine Migration**, **kein** Verhaltens-Rewrite — die Kunden-ShareBar bleibt verhaltensgleich.
+
+**Neues Modul [lib/share/file-share.ts](lib/share/file-share.ts)** — plain-TS, **SSR-sicher** (`window`/`navigator`/`document` ausschließlich in den Funktionskörpern, nie auf Modul-Top-Level → beim Import läuft kein Browser-Code), **keine** React-Imports/Hooks; wird nur von Client-Komponenten importiert. Vier exportierte Funktionen, je 1:1 aus [share-bar.tsx](app/b/[token]/share-bar.tsx) verschoben:
+- `canShareFiles(): boolean` — die Capability-Probe (Dummy-`File` → `navigator.canShare({files})`), mit `typeof navigator === "undefined"`-Guard ⇒ `false`, wenn `navigator`/`canShare` fehlt.
+- `fetchAsShareFile(url, filename, mimeType, signal?): Promise<File>` — der Prefetch-Kern (`fetch(url,{signal})` → `blob()` → `new File(...)`); der optionale `AbortSignal` ersetzt den bisher inline gehaltenen `AbortController`-Pfad (Aufrufer reicht `.signal` durch).
+- `shareFile(file, title): Promise<void>` — der synchrone `navigator.share({files:[file],title})` inkl. unveränderter catch-Behandlung (Nutzer-Abbruch = kein Fehler). Aufruf aus der Geste **ohne `await` davor** ⇒ `navigator.share` wird vor dem ersten `await` ausgewertet ⇒ iOS-Safari transient activation bleibt erhalten (kein Doppel-Tap).
+- `downloadFile(url, filename): void` — der Download-Fallback (versteckter `<a download>`: erstellen/klicken/entfernen).
+
+**[share-bar.tsx](app/b/[token]/share-bar.tsx) auf die Helfer umgestellt** (nur die internen Aufrufe ersetzt): Capability-Probe-`useEffect` → `canShareFiles()` (als `detectCanShareFiles` importiert, weil der lokale State-Name `canShareFiles` heißt — Kollision vermieden, **State unberührt**); Prefetch → `fetchAsShareFile(reelSignedUrl,"reel.mp4","video/mp4",controller.signal)` (bestehender `AbortController` weiter genutzt); `handleShareReel`s `navigator.share` → `void shareFile(file, title)` (synchron aus der Geste); der lokale `downloadReel` entfernt → `downloadFile(reelSignedUrl,"reel.mp4")`. **Unverändert**: Prefetch-Timing (beim Mount), `reelFileRef`, `reelLoading`/`reelReady`-State, Label-Logik (`shareReel` vs. `download`), Tracking `trackBookletEvent(token,"shared","reel")`, „Booklet teilen"/„Google-Bewertung", `?c=1`/`p=1`-Gating, alle CSS-Klassen. **Keine** Änderung an `booklet.css`. Kein `<form>`, kein `any`. `pnpm typecheck` + `pnpm build` grün.
+
+---
+
 ## Launch-Fahrplan & deferierte Härtung
 
 Detail-Referenz für die Risikobewertung: [SECURITY_REVIEW.md](SECURITY_REVIEW.md) (bleibt im Repo). Dieser Abschnitt fasst die **Reihenfolge** des Live-Gangs und die **vor Kunde #2 verpflichtende** Härtung zusammen.
