@@ -773,6 +773,7 @@ export async function normalizeClip({
   caption,
   logoPath,
   primaryColor,
+  logoPosition = "topleft",
 }: {
   ffmpegBin: string;
   input: string;
@@ -781,6 +782,7 @@ export async function normalizeClip({
   caption: string | null;
   logoPath: string | null;
   primaryColor: string;
+  logoPosition?: "topleft" | "topright";
 }): Promise<void> {
   const accent = ffmpegColor(primaryColor, DEFAULT_BRANDING.primary_color);
   const textfiles: string[] = [];
@@ -821,6 +823,7 @@ export async function normalizeClip({
       baseLabel: "base",
       firstExtraInputIdx: 1,
       textfiles,
+      logoPosition,
     });
     const parts = [
       `[0:v]${COVER},fps=${REEL_FPS}[base]`,

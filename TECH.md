@@ -2943,6 +2943,28 @@ NUR [render-reel/route.ts](app/api/portal/orders/[id]/render-reel/route.ts) + [p
 
 ---
 
+## Schritt 2b — Betriebs-Reel Render-Kern + Routen + temporärer Test-Trigger
+
+Baut auf Schritt 2a (Migration 0013 appliziert). Kunden-Reel-Pfad (`renderReel`/`render-reel`/`reel-status`) **NICHT angefasst**.
+
+**TEIL 0 — `normalizeClip` logoPosition-Durchschleif** ([lib/reel/frames.ts](lib/reel/frames.ts)): `normalizeClip` rief intern `buildCaptionOverlay` ohne `logoPosition`-Weitergabe auf. Parameter `logoPosition?: 'topleft' | 'topright'` (Default `'topleft'`) ergänzt und an `buildCaptionOverlay` durchgereicht. Bestehende Aufrufer in `renderReel` übergeben nichts → `'topleft'` → Kunden-Reel byte-identisch.
+
+**TEIL 1 — `renderBusinessReel`** ([lib/reel/render.ts](lib/reel/render.ts)): Geschwister-Funktion neben `renderReel`. `SECONDS_PER_PHOTO_BUSINESS = 4` (etwas länger als Kunden-Reel). **Kein Intro/Outro.** Logo immer geladen (nicht per `logo_per_page` gated). Pro Item:
+- Foto `category='before'` → `bakeBusinessPhotoFrame({label:'VORHER', logoPath})` → `encodeStillSegment(4s)`
+- Foto `category='after'` → `bakeBusinessPhotoFrame({label:'NACHHER', logoPath})` → `encodeStillSegment(4s)`
+- Foto `category='process'` → `bakeBusinessPhotoFrame({label:undefined, logoPath})` → `encodeStillSegment(4s)`
+- Video → `normalizeClip({logoPosition:'topright', caption, logoPath, primaryColor})`
+
+Assembly per `concatSegments` (Items in Booklet-Reihenfolge before→process→after, kein Intro/Outro). Output: `{business_id}/{order_id}/business-reel.mp4` in `order-media`. Status-Writes gegen `booklets.business_reel_status/url/error` (0013). `fail`-Helfer analog `renderReel`. service_role für alle Storage- und booklets-Writes.
+
+**TEIL 2 — Route** `POST /api/portal/orders/[id]/render-business-reel` (`runtime="nodejs"`, `maxDuration=300`): Guard-Reihenfolge (1) Auth 401/403 + Order via RLS 404, (2) `before_after_required`: ≥1 Foto `category='before'` UND ≥1 Foto `category='after'` → 400, (3) RENDERABLE_STATUSES (generated/sent/viewed/shared) → 409, (4) ≥1 Medium → 400 `need_media`, (5) Booklet via service_role → 500 `no_booklet`. **Kein** `intro_missing`-Guard. Setzt `business_reel_status='rendering'` via service_role + gibt 202 zurück. Render in `after(() => renderBusinessReel({...}))`. `business_id` AUS DER GELADENEN ORDER (RLS-validiert), NIE aus Body.
+
+**TEIL 3 — Route** `GET /api/portal/orders/[id]/business-reel-status`: Spiegelbild von `reel-status`, aber liest `business_reel_status`/`business_reel_url`. Auth AUTHENTICATED + RLS (Order via RLS, dann Booklet via AUTHENTICATED Client). Signed-URL (3600 s) nur bei `status==='ready'`, via AUTHENTICATED Client (0002-Policy, kein service_role beim Signieren).
+
+**TEIL 4 — Temp-Trigger** `app/portal/orders/[id]/_TempBusinessReelTrigger.tsx` (Client-Komponente, Underscore-Präfix = temporär; alle Strings mit `// TEMP` markiert): Button → POST `render-business-reel` → bei 202 pollt alle 3000 ms `business-reel-status` → bei `ready` signierter Link „Betriebs-Reel öffnen"; bei `failed` Fehler + Retry. In `page.tsx` nach dem `isDelivered`-Block im `canRenderReel`-Zustand eingeblendet mit Kommentar `{/* TEMP Schritt 2b — in Schritt 3 durch echten Per-Kachel-Button ersetzen */}`. Import via `"./_TempBusinessReelTrigger"`. `pnpm typecheck` + `pnpm build` grün.
+
+---
+
 ## Launch-Fahrplan & deferierte Härtung
 
 Detail-Referenz für die Risikobewertung: [SECURITY_REVIEW.md](SECURITY_REVIEW.md) (bleibt im Repo). Dieser Abschnitt fasst die **Reihenfolge** des Live-Gangs und die **vor Kunde #2 verpflichtende** Härtung zusammen.

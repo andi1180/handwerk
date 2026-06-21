@@ -8,6 +8,7 @@ import type { MediaCategory } from "@/lib/orders/queries";
 import { ensureFfmpeg, errMessage } from "@/lib/reel/ffmpeg";
 import {
   assertReelAssets,
+  bakeBusinessPhotoFrame,
   bakeIntroFrame,
   bakeOutroFrame,
   bakePhotoFrame,
@@ -29,6 +30,9 @@ import {
 
 /** Anzeigedauer je Foto im Reel (harte Schnitte, kein Übergang). */
 const SECONDS_PER_PHOTO = 3;
+/** Betriebs-Reel (0013, renderBusinessReel): etwas länger, damit Vorher/Nachher
+ *  gut wahrnehmbar ist. */
+const SECONDS_PER_PHOTO_BUSINESS = 4;
 /** Clip-Cap (8b-2a): jeder Video-Clip wird auf min(Clip-Länge, 6 s) gekürzt — Tempo
  *  fürs Reel. In 8b-3 konfigurierbar. */
 const MAX_CLIP_SECONDS = 6;
@@ -340,6 +344,214 @@ export async function renderReel({
       cleanup.map((p) =>
         unlink(p).catch(() => {
           // ignorieren — Datei existiert evtl. nie (Fehler vor dem Schreiben).
+        }),
+      ),
+    );
+  }
+}
+
+/**
+ * Betriebs-Reel (0013, Schritt 2b): Kein Intro/Outro — nur die Medien in
+ * Booklet-Reihenfolge (before → process → after), je 4 s Stills.
+ *
+ *  - Fotos:  bakeBusinessPhotoFrame → VORHER/NACHHER-Label + Logo rechts oben
+ *            (immer, nicht per logo_per_page gated). process-Fotos kein Label.
+ *  - Clips:  normalizeClip mit logoPosition:'topright' (stumm, ≤6 s).
+ *
+ * Status-Writes gegen `booklets.business_reel_status/url/error` (0013).
+ * service_role für alle Storage- und booklets-Zugriffe.
+ */
+export async function renderBusinessReel({
+  orderId,
+  businessId,
+  bookletId,
+  media,
+  primaryColor,
+  logoPath,
+}: {
+  orderId: string;
+  businessId: string;
+  bookletId: string;
+  media: MediaItem[];
+  primaryColor: string;
+  logoPath: string | null;
+}): Promise<void> {
+  const service = createServiceClient();
+  const storagePath = `${businessId}/${orderId}/business-reel.mp4`;
+  const tmpDir = tmpdir();
+  const localMedia: string[] = [];
+  const pngFrames: string[] = [];
+  const segments: string[] = [];
+  const assets: string[] = [];
+  const outputPath = join(tmpDir, `business-reel-${randomUUID()}.mp4`);
+
+  const fail = async (step: string, error: unknown): Promise<void> => {
+    const message = errMessage(error);
+    console.error("render-business-reel: failed", {
+      order_id: orderId,
+      step,
+      message,
+    });
+    await service
+      .from("booklets")
+      .update({
+        business_reel_status: "failed",
+        business_reel_error: `${step}: ${message}`,
+      })
+      .eq("id", bookletId)
+      .eq("business_id", businessId);
+  };
+
+  try {
+    // 0) Mitgelieferte Assets prüfen.
+    try {
+      await assertReelAssets();
+    } catch (error) {
+      await fail("assets_missing", error);
+      return;
+    }
+
+    // 1) ffmpeg bereitstellen.
+    let ffmpegBin: string;
+    try {
+      ffmpegBin = await ensureFfmpeg();
+    } catch (error) {
+      await fail("ensure_ffmpeg", error);
+      return;
+    }
+
+    // 2) Logo aus dem privaten `branding`-Bucket laden (immer, nicht per
+    //    logo_per_page gated — das Betriebs-Reel trägt immer das Logo).
+    let logoLocal: string | null = null;
+    if (logoPath) {
+      try {
+        logoLocal = await downloadAsset(service, "branding", logoPath, ".png", assets);
+      } catch (error) {
+        await fail("download_assets", error);
+        return;
+      }
+    }
+
+    // 3) Alle Medien nach /tmp laden.
+    try {
+      for (const item of media) {
+        const { data, error } = await service.storage
+          .from("order-media")
+          .download(item.storage_path);
+        if (error || !data) {
+          throw new Error(
+            `download ${item.storage_path}: ${error?.message ?? "no data"}`,
+          );
+        }
+        const ext =
+          extname(item.storage_path) || (item.media_type === "video" ? ".mp4" : ".jpg");
+        const local = join(tmpDir, `biz-media-${randomUUID()}${ext}`);
+        await writeFile(local, Buffer.from(await data.arrayBuffer()));
+        localMedia.push(local);
+      }
+    } catch (error) {
+      await fail("download_media", error);
+      return;
+    }
+
+    // 4) Pro Item EIN formatgleiches Segment in Booklet-Reihenfolge (before →
+    //    process → after). Fotos mit VORHER/NACHHER-Label (bei before/after) und
+    //    Logo rechts oben; Clips normalisiert mit logoPosition:'topright'.
+    try {
+      for (let i = 0; i < media.length; i++) {
+        const item = media[i]!;
+        const local = localMedia[i]!;
+        const segment = join(tmpDir, `biz-seg-${randomUUID()}.mp4`);
+        try {
+          if (item.media_type === "video") {
+            await normalizeClip({
+              ffmpegBin,
+              input: local,
+              maxSeconds: MAX_CLIP_SECONDS,
+              output: segment,
+              caption: displayCaption(item),
+              logoPath: logoLocal,
+              primaryColor,
+              logoPosition: "topright",
+            });
+          } else {
+            const framePath = join(tmpDir, `biz-frame-${randomUUID()}.png`);
+            pngFrames.push(framePath);
+            const label =
+              item.category === "before"
+                ? "VORHER"
+                : item.category === "after"
+                  ? "NACHHER"
+                  : undefined;
+            await bakeBusinessPhotoFrame({
+              ffmpegBin,
+              input: local,
+              output: framePath,
+              caption: displayCaption(item),
+              logoPath: logoLocal,
+              primaryColor,
+              label,
+            });
+            await encodeStillSegment({
+              ffmpegBin,
+              image: framePath,
+              seconds: SECONDS_PER_PHOTO_BUSINESS,
+              output: segment,
+            });
+          }
+        } catch (error) {
+          throw new Error(`item ${i} (${item.media_type}/${item.category}): ${errMessage(error)}`);
+        }
+        segments.push(segment);
+      }
+    } catch (error) {
+      await fail("build_segments", error);
+      return;
+    }
+
+    // 5) Segmente per concat-Demuxer fügen (Items in Booklet-Reihenfolge, kein
+    //    Intro/Outro im Betriebs-Reel).
+    try {
+      await concatSegments({ ffmpegBin, segments, output: outputPath });
+    } catch (error) {
+      await fail("concat", error);
+      return;
+    }
+
+    // 6) Upload nach order-media (service_role, upsert).
+    try {
+      const fileBuffer = await readFile(outputPath);
+      const { error: uploadError } = await service.storage
+        .from("order-media")
+        .upload(storagePath, fileBuffer, {
+          contentType: "video/mp4",
+          upsert: true,
+        });
+      if (uploadError) throw new Error(uploadError.message);
+    } catch (error) {
+      await fail("upload", error);
+      return;
+    }
+
+    // 7) Erfolg.
+    const { error: doneError } = await service
+      .from("booklets")
+      .update({
+        business_reel_url: storagePath,
+        business_reel_status: "ready",
+        business_reel_error: null,
+      })
+      .eq("id", bookletId)
+      .eq("business_id", businessId);
+    if (doneError) {
+      await fail("mark_ready", doneError);
+    }
+  } finally {
+    const cleanup = [...localMedia, ...pngFrames, ...segments, ...assets, outputPath];
+    await Promise.all(
+      cleanup.map((p) =>
+        unlink(p).catch(() => {
+          /* ignorieren */
         }),
       ),
     );
