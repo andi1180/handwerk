@@ -14,9 +14,6 @@ import type { MediaCategory } from "@/lib/orders/queries";
 /** Medientyp einer Aufnahme (Foto in 4b, Video in 4c). */
 type MediaType = "photo" | "video";
 
-/** Auswählbare Bild-Kategorien in der Reihenfolge der Selektor-Buttons (0010). */
-const CATEGORY_OPTIONS: MediaCategory[] = ["before", "after", "process"];
-
 /** Browser-Client (anon-Key, RLS) — pro Komponenteninstanz einmal erzeugt. */
 type BrowserClient = ReturnType<typeof createClient>;
 
@@ -31,7 +28,8 @@ type Draft = {
   mediaType: MediaType;
   durationSeconds: number | null; // nur bei Video gesetzt
   keyword: string;
-  /** Bild-Kategorie (0010) — nur bei Foto wählbar; Video bleibt 'process'. */
+  /** Bild-Kategorie (0010) — aus dem Einstieg gesetzt (Slot/„+"), nicht im
+   *  Entwurf editierbar; Video bleibt 'process'. */
   category: MediaCategory;
 };
 
@@ -408,8 +406,8 @@ export function Capture({
       mediaType: "photo",
       durationSeconds: null,
       keyword: "",
-      // Vorgemerkte Kategorie (Button ⇒ 'process'; leerer Vorher/Nachher-Slot ⇒
-      // dessen Kategorie). Im Entwurf weiterhin wählbar.
+      // Vorgemerkte Kategorie aus dem Einstieg (Prozess-„+" ⇒ 'process'; leerer
+      // Vorher/Nachher-Slot ⇒ dessen Kategorie). Im Entwurf NICHT mehr editierbar.
       category: pendingPhotoCategoryRef.current,
     });
     pendingPhotoCategoryRef.current = "process"; // für den nächsten Upload zurücksetzen
@@ -480,16 +478,12 @@ export function Capture({
   const videoLimitReached = videoCount + inFlightVideos >= videoMax;
 
   // before/after-Slot je max 1 (0010): belegt = gespeichert (Server) ODER ein
-  // optimistisches Queue-Item dieser Kategorie. Sperrt die jeweilige Auswahl im
-  // Entwurf (reine UX — der harte Riegel ist der Server-Guard `category_taken`).
+  // optimistisches Queue-Item dieser Kategorie. Sperrt den jeweiligen Slot-Upload
+  // (openPhotoForCategory) — reine UX, der harte Riegel ist der Server-Guard
+  // `category_taken`.
   const beforeTaken =
     hasBefore || items.some((it) => it.category === "before");
   const afterTaken = hasAfter || items.some((it) => it.category === "after");
-  const categoryDisabled: Record<MediaCategory, boolean> = {
-    before: beforeTaken,
-    after: afterTaken,
-    process: false,
-  };
 
   // Leerer Vorher/Nachher-Slot (MediaList) → Foto-Upload für GENAU diese Kategorie.
   // Gemeinsamer Handler/Pipeline wie die Buttons; die Kategorie wird über
@@ -645,42 +639,9 @@ export function Capture({
             />
           )}
 
-          {/* Bild-Kategorie (0010) — nur bei Foto. Video bleibt immer 'process'.
-              Vorher/Nachher sind je max 1: belegte Slots sind deaktiviert. */}
-          {draft.mediaType === "photo" ? (
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              <span style={{ fontSize: 13, color: "var(--text-secondary)" }}>
-                {t(DEFAULT_LOCALE, "capture.category")}
-              </span>
-              <div className="capture-category">
-                {CATEGORY_OPTIONS.map((option) => {
-                  const active = draft.category === option;
-                  const disabled = !active && categoryDisabled[option];
-                  return (
-                    <button
-                      key={option}
-                      type="button"
-                      className="capture-category-btn"
-                      data-active={active}
-                      disabled={disabled}
-                      onClick={() =>
-                        setDraft((prev) =>
-                          prev ? { ...prev, category: option } : prev,
-                        )
-                      }
-                    >
-                      {t(DEFAULT_LOCALE, `mediaCategory.${option}`)}
-                      {disabled ? (
-                        <span className="capture-category-taken">
-                          {t(DEFAULT_LOCALE, "capture.categoryTaken")}
-                        </span>
-                      ) : null}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          ) : null}
+          {/* Kategorie-Selektor entfernt: die Kategorie kommt aus dem Einstieg
+              (Slot/Prozess-„+") und ist im Entwurf nicht editierbar. Umkategorisieren
+              bleibt im Vollbild-Viewer möglich. */}
 
           <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             <span style={{ fontSize: 13, color: "var(--text-secondary)" }}>

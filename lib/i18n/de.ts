@@ -233,8 +233,9 @@ export const de = {
     limitReached: "Limit erreicht: max. {max} {type} pro Auftrag.",
     photosLabel: "Fotos",
     videosLabel: "Videos",
-    // Bild-Kategorie im Aufnahme-Entwurf (0010) — nur Foto. Belegte Slots gesperrt.
-    category: "Kategorie",
+    // Kategorie-Selektor im Entwurf entfernt (Kategorie kommt aus dem Einstieg).
+    // categoryTaken: Slot-belegt-Label im Viewer-Toggle; categoryTakenNotice:
+    // Hinweis beim Slot-Upload-Guard (openPhotoForCategory).
     categoryTaken: "belegt",
     categoryTakenNotice: "Für diese Kategorie gibt es bereits ein Bild.",
   },

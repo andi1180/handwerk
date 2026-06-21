@@ -3027,6 +3027,20 @@ Baut auf Schritt 3b (Button-Grundgerüst) und 3a (geteilte `lib/share/file-share
 
 ---
 
+## Capture-Entwurf: Kategorie-Selektor entfernt (Kategorie kommt aus dem Einstieg; Umkategorisierung bleibt im Viewer)
+
+**Reines Frontend + i18n** — keine Migration, kein Backend, keine Server-Route. Betroffen: [capture.tsx](app/portal/orders/[id]/capture.tsx), [de.ts](lib/i18n/de.ts). Kein `<form>`, kein `any`.
+
+**Idee:** Der dreigliedrige Vorher/Nachher/Prozess-Selektor (inkl. „belegt"-Labels) im Aufnahme-/Upload-Entwurf (`.capture-draft`) war redundant geworden — die Kategorie steht beim Einstieg bereits fest (leerer Vorher/Nachher-Slot bzw. Prozess-„+"-Tile setzen sie über `openPhotoForCategory`; Video ist immer `process`). Der Selektor erlaubte ein nachträgliches Umschalten im Entwurf, das die Slot-/Tile-Semantik aufweichte.
+
+**capture.tsx:** Der Selektor-Block im Entwurf ist entfernt. `draft.category` wird weiter aus `pendingPhotoCategoryRef` (Foto) bzw. fix `process` (Video) gesetzt und vom Metadaten-`POST` **unverändert** mitgeschickt — nur im Dialog **nicht mehr editierbar**. **Dead Code raus:** die modul-lokale `CATEGORY_OPTIONS`-Konstante (media-list hält ihre eigene) und die `categoryDisabled`-Map (nur der Selektor las sie). **Behalten:** `beforeTaken`/`afterTaken` (+ `hasBefore`/`hasAfter`-Props), weil sie weiter die `openPhotoForCategory`-Guards (`categoryTakenNotice` / `limitReached`) als Sicherheitsnetz speisen — der harte Riegel bleibt der Server-Guard `category_taken`.
+
+**Nicht angefasst:** der Vollbild-Viewer-Kategorie-Toggle (post-upload Umkategorisierung, [media-list.tsx](app/portal/orders/[id]/media-list.tsx)), Stichwort-Feld, Vorschau, Speichern/Verwerfen, Upload-Pipeline, Server-Guards.
+
+**i18n** ([de.ts](lib/i18n/de.ts)): nur `capture.category` („Kategorie", exklusiv das Selektor-Feld-Label) entfernt. `capture.categoryTaken` („belegt") bleibt — wird vom Viewer-Kategorie-Toggle genutzt; `capture.categoryTakenNotice` bleibt — Hinweis im Slot-Upload-Guard; die geteilten `mediaCategory.*`-Labels (Vorher/Nachher/Prozess) bleiben (Slots/Viewer). `pnpm typecheck` + `pnpm build` grün.
+
+---
+
 ## Launch-Fahrplan & deferierte Härtung
 
 Detail-Referenz für die Risikobewertung: [SECURITY_REVIEW.md](SECURITY_REVIEW.md) (bleibt im Repo). Dieser Abschnitt fasst die **Reihenfolge** des Live-Gangs und die **vor Kunde #2 verpflichtende** Härtung zusammen.
