@@ -12,6 +12,10 @@ import { OrderQuickFilters } from "@/components/order-quick-filters";
 import { OrdersPagination } from "@/components/orders-pagination";
 import { OrdersRefreshButton } from "@/components/orders-refresh-button";
 import type { ReelStatus } from "@/app/portal/orders/[id]/generate-controls";
+import {
+  BusinessReelButton,
+  type BusinessReelStatus,
+} from "@/components/business-reel-button";
 import { PickupPendingBadge } from "@/components/pickup-pending-badge";
 import {
   OrderBulkSelectProvider,
@@ -151,18 +155,62 @@ export default async function OrdersPage({
   const hasActiveFilter = activeQuick !== null || activeStatusFilter !== null;
   const showFilter = total > 0 || hasActiveFilter;
 
-  // Zweite Achse: Reel-Render-Status für generierte Aufträge.
-  const generatedIds = orders
-    .filter((o) => o.status === "generated")
+  // Zweite Achse: Reel-Render-Status für generierte/ausgelieferte Aufträge.
+  // Scope: alle Aufträge mit Booklet (generated/sent/viewed/shared) — spiegelt
+  // RENDERABLE_STATUSES aus den beiden render-*-Routen.
+  const RENDERABLE = ["generated", "sent", "viewed", "shared"] as const;
+  const renderableIds = orders
+    .filter((o) => (RENDERABLE as readonly string[]).includes(o.status))
     .map((o) => o.id);
-  const reelByOrder = new Map<string, ReelStatus | null>();
-  if (generatedIds.length > 0) {
-    const { data: booklets } = await supabase
-      .from("booklets")
-      .select("order_id, reel_status")
-      .in("order_id", generatedIds)
-      .returns<{ order_id: string; reel_status: ReelStatus | null }[]>();
-    for (const b of booklets ?? []) reelByOrder.set(b.order_id, b.reel_status);
+
+  type BookletEntry = {
+    reel_status: ReelStatus | null;
+    business_reel_status: BusinessReelStatus | null;
+  };
+  const reelByOrder = new Map<string, BookletEntry>();
+
+  // Gate-Map: Vorher/Nachher-Fotos je Auftrag (Bedingung für das Betriebs-Reel).
+  const gateByOrder = new Map<string, { hasBefore: boolean; hasAfter: boolean }>();
+
+  if (renderableIds.length > 0) {
+    // Beide Queries parallel — ein Round-Trip.
+    const [bookletResult, gateResult] = await Promise.all([
+      supabase
+        .from("booklets")
+        .select("order_id, reel_status, business_reel_status")
+        .in("order_id", renderableIds)
+        .returns<
+          {
+            order_id: string;
+            reel_status: ReelStatus | null;
+            business_reel_status: BusinessReelStatus | null;
+          }[]
+        >(),
+      supabase
+        .from("order_media")
+        .select("order_id, category")
+        .in("order_id", renderableIds)
+        .in("category", ["before", "after"])
+        .returns<{ order_id: string; category: string }[]>(),
+    ]);
+
+    for (const b of bookletResult.data ?? []) {
+      reelByOrder.set(b.order_id, {
+        reel_status: b.reel_status,
+        business_reel_status: b.business_reel_status,
+      });
+    }
+
+    // Aggregiere Vorher/Nachher je Auftrag.
+    for (const row of gateResult.data ?? []) {
+      const entry = gateByOrder.get(row.order_id) ?? {
+        hasBefore: false,
+        hasAfter: false,
+      };
+      if (row.category === "before") entry.hasBefore = true;
+      if (row.category === "after") entry.hasAfter = true;
+      gateByOrder.set(row.order_id, entry);
+    }
   }
 
   return (
@@ -348,7 +396,9 @@ export default async function OrdersPage({
                         <OrderStatusBadge
                           status={order.status}
                           hasMedia={draftWithMedia.has(order.id)}
-                          reelStatus={reelByOrder.get(order.id) ?? null}
+                          reelStatus={
+                            reelByOrder.get(order.id)?.reel_status ?? null
+                          }
                         />
                       </div>
                       <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>
@@ -369,6 +419,21 @@ export default async function OrdersPage({
                   </div>
                   {flaggedDate ? (
                     <PickupPendingBadge pickedUpAt={flaggedDate} />
+                  ) : null}
+                  {(RENDERABLE as readonly string[]).includes(order.status) ? (
+                    <div style={{ display: "flex", alignItems: "center" }}>
+                      <BusinessReelButton
+                        orderId={order.id}
+                        status={
+                          reelByOrder.get(order.id)?.business_reel_status ??
+                          "pending"
+                        }
+                        gateOk={Boolean(
+                          gateByOrder.get(order.id)?.hasBefore &&
+                            gateByOrder.get(order.id)?.hasAfter,
+                        )}
+                      />
+                    </div>
                   ) : null}
                 </Link>
               );

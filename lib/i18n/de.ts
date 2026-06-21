@@ -440,6 +440,13 @@ export const de = {
     empty:
       "Noch keine Daten. Sobald Booklets ausgeliefert und angesehen werden, erscheinen hier die Kennzahlen.",
   },
+  businessReel: {
+    create: "Betriebs-Reel",
+    rendering: "Wird erstellt …",
+    ready: "Reel fertig",
+    retry: "Neu erstellen",
+    gateMissing: "Vorher/Nachher fehlt",
+  },
   reach: {
     // Reichweiten-/VIP-Analyse-Sektion auf dem Dashboard.
     title: "Reichweite / VIP-Analyse",

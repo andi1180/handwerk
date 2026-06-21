@@ -22,7 +22,6 @@ import {
 import { DeliverButton } from "./deliver-controls";
 import { getOrderById, getOrderMedia } from "@/lib/orders/queries";
 import { videoFramePaths } from "@/lib/media/video-frames";
-import { TempBusinessReelTrigger } from "./_TempBusinessReelTrigger";
 
 const DATE_FORMAT = new Intl.DateTimeFormat("de-DE", {
   day: "2-digit",
@@ -414,10 +413,6 @@ export default async function OrderDetailPage({
         </section>
       ) : null}
 
-      {/* TEMP Schritt 2b — in Schritt 3 durch echten Per-Kachel-Button ersetzen */}
-      {canRenderReel ? (
-        <TempBusinessReelTrigger orderId={order.id} />
-      ) : null}
     </div>
   );
 }

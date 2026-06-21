@@ -1441,6 +1441,84 @@ body {
   margin: 16px 20px 20px;
 }
 
+/* --- Betriebs-Reel-Button auf den Auftragskacheln (Schritt 3b) --- */
+.business-reel-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 9px;
+  border-radius: 100px;
+  border: 1px solid currentColor;
+  white-space: nowrap;
+  line-height: 1.4;
+  font-family: inherit;
+  background: transparent;
+  cursor: default;
+  /* Pill is propagation-stopping; no underline from parent Link. */
+  text-decoration: none;
+}
+
+/* Zustand 0: Vorher/Nachher fehlt (ausgegraut). */
+.business-reel-pill--disabled {
+  color: var(--text-secondary);
+  border-color: var(--border);
+  opacity: 0.65;
+}
+
+/* Zustand 1: Bereit zum Rendern (Gold — aktiv, klickbar). */
+.business-reel-pill--create {
+  color: var(--gold);
+  border-color: var(--gold-border);
+  background: var(--gold-light);
+  cursor: pointer;
+}
+.business-reel-pill--create:hover:not(:disabled) {
+  background: var(--gold-border);
+}
+.business-reel-pill--create:disabled {
+  opacity: 0.65;
+  cursor: wait;
+}
+
+/* Zustand 1b: Wird gerendert (Amber + Spinner). */
+.business-reel-pill--rendering {
+  color: var(--amber-text);
+  border-color: var(--amber-border);
+  background: var(--amber-light);
+}
+
+@keyframes business-reel-spin {
+  to { transform: rotate(360deg); }
+}
+.business-reel-spinner {
+  animation: business-reel-spin 0.9s linear infinite;
+  flex-shrink: 0;
+}
+
+/* Zustand 2: Fertig (Grün — nicht klickbar, 3c macht es klickbar). */
+.business-reel-pill--ready {
+  color: var(--green-text);
+  border-color: var(--green-border);
+  background: var(--green-light);
+}
+
+/* Zustand F: Fehlgeschlagen (Rot — Klick = Retry). */
+.business-reel-pill--failed {
+  color: var(--red-text);
+  border-color: var(--red-border);
+  background: var(--red-light);
+  cursor: pointer;
+}
+.business-reel-pill--failed:hover:not(:disabled) {
+  filter: brightness(0.93);
+}
+.business-reel-pill--failed:disabled {
+  opacity: 0.65;
+  cursor: wait;
+}
+
 /* Druck: NUR die QR-Karte. Portal-Chrome + Druck-Button raus, Karte schmal/S/W. */
 @media print {
   .portal-sidebar,

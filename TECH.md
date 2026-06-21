@@ -2961,7 +2961,23 @@ Assembly per `concatSegments` (Items in Booklet-Reihenfolge before→process→a
 
 **TEIL 3 — Route** `GET /api/portal/orders/[id]/business-reel-status`: Spiegelbild von `reel-status`, aber liest `business_reel_status`/`business_reel_url`. Auth AUTHENTICATED + RLS (Order via RLS, dann Booklet via AUTHENTICATED Client). Signed-URL (3600 s) nur bei `status==='ready'`, via AUTHENTICATED Client (0002-Policy, kein service_role beim Signieren).
 
-**TEIL 4 — Temp-Trigger** `app/portal/orders/[id]/_TempBusinessReelTrigger.tsx` (Client-Komponente, Underscore-Präfix = temporär; alle Strings mit `// TEMP` markiert): Button → POST `render-business-reel` → bei 202 pollt alle 3000 ms `business-reel-status` → bei `ready` signierter Link „Betriebs-Reel öffnen"; bei `failed` Fehler + Retry. In `page.tsx` nach dem `isDelivered`-Block im `canRenderReel`-Zustand eingeblendet mit Kommentar `{/* TEMP Schritt 2b — in Schritt 3 durch echten Per-Kachel-Button ersetzen */}`. Import via `"./_TempBusinessReelTrigger"`. `pnpm typecheck` + `pnpm build` grün.
+**TEIL 4 — Temp-Trigger** `app/portal/orders/[id]/_TempBusinessReelTrigger.tsx` (Client-Komponente, Underscore-Präfix = temporär; alle Strings mit `// TEMP` markiert): Button → POST `render-business-reel` → bei 202 pollt alle 3000 ms `business-reel-status` → bei `ready` signierter Link „Betriebs-Reel öffnen"; bei `failed` Fehler + Retry. In `page.tsx` nach dem `isDelivered`-Block im `canRenderReel`-Zustand eingeblendet. **In Schritt 3b entfernt und durch `<BusinessReelButton>` auf den Auftragskacheln ersetzt.** `pnpm typecheck` + `pnpm build` grün.
+
+---
+
+## Schritt 3b — Betriebs-Reel-Button auf den Auftragskacheln (Render/Resume/Gate)
+
+TEMP-Trigger (`_TempBusinessReelTrigger.tsx`) entfernt. Betriebs-Reel-Button direkt auf jeder Auftragskachel der Liste. **KEIN neue Route, KEINE Migration** (Render-/Status-Routen aus 2b, Migration 0013 bereits appliziert). Kunden-Reel-Pipeline (`renderReel`/`render-reel`/`reel-status`) **unangetastet**. KEIN Teilen (3c).
+
+**[components/business-reel-button.tsx](components/business-reel-button.tsx)** (NEU, `"use client"`, propagation-stoppend wie `ArchiveToggle`): exportiert `BusinessReelStatus = "pending"|"rendering"|"ready"|"failed"` + `<BusinessReelButton orderId status gateOk>`. Fünf Zustände: (0) disabled-Pill grau (`pending + !gateOk`: „Vorher/Nachher fehlt"); (1) Gold-Pill klickbar (`pending + gateOk`: „Betriebs-Reel"); (1b) Amber-Spinner (`rendering`: kein Tap); (2) Grün-Pill (`ready`, 3c macht ihn klickbar); (F) Rot-Pill klickbar (`failed`: Retry). Tap auf `<button type="button">` stoppt Propagation (`e.preventDefault()/stopPropagation()`) → kein Link-Navigate. Poll alle 3000 ms gegen `business-reel-status`; Resume: wenn `status='rendering'` beim Mount, startet Poll sofort (`useEffect(startPoll, [])`). POST `render-business-reel` → 202 → `setCurrent("rendering")` + `startPoll()`. Kein `<form>`, kein `any`. AUTHENTICATED + RLS (Routes server-seitig).
+
+**[app/portal/orders/page.tsx](app/portal/orders/page.tsx)** — drei additive Erweiterungen: (1) `reelByOrder`-Map auf **`renderableIds`** (generated/sent/viewed/shared) ausgeweitet (statt nur `generatedIds`); Map-Typ jetzt `Map<orderId, { reel_status, business_reel_status }>`. (2) Parallele **Gate-Query** `order_media` (`category ∈ {before,after}` + `.in(order_id, renderableIds)`) → `gateByOrder` Map. (3) `<BusinessReelButton>` auf jeder renderbaren Kachel als dritter Flex-Child (nach Flagged-Badge). Badge-Call auf `.reel_status` narrowed. Zwei Queries (booklets + gate) **parallel** (`Promise.all`). AUTHENTICATED + RLS, kein `service_role`. Badge/Filter/Pagination/Archiv unangetastet.
+
+**[app/portal/orders/[id]/page.tsx](app/portal/orders/[id]/page.tsx)** — TEMP-Import + TEMP-Render-Block entfernt.
+
+**[app/portal/orders/[id]/_TempBusinessReelTrigger.tsx](app/portal/orders/[id]/_TempBusinessReelTrigger.tsx)** — gelöscht (`git rm`).
+
+**i18n** `businessReel.*` (`create`/`rendering`/`ready`/`retry`/`gateMissing`). **CSS** `.business-reel-pill` + fünf Modifier-Klassen (`--disabled`/`--create`/`--rendering`/`--ready`/`--failed`) + `@keyframes business-reel-spin` + `.business-reel-spinner`; alle auf bestehenden `--amber-*`/`--gold-*`/`--green-*`/`--red-*`-Tokens. `pnpm typecheck` + `pnpm build` grün.
 
 ---
 
