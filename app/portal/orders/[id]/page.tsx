@@ -225,10 +225,14 @@ export default async function OrderDetailPage({
           <div style={{ flexShrink: 0 }}>
             {/* draft → „Neu"/„In Arbeit" abgeleitet aus der Medien-Existenz
                 (kein neuer Status). Medien sind hier ohnehin geladen ⇒ keine
-                Extra-Query. */}
+                Extra-Query. Für `generated` zusätzlich `reelStatus` durchreichen
+                (Konsistenz mit dem Listen-Badge): der Wert ist oben bereits
+                server-seitig geladen (canRenderReel deckt `generated`), sonst
+                defaultete das Badge fälschlich auf „Wird erstellt …". */}
             <OrderStatusBadge
               status={order.status}
               hasMedia={media.length > 0}
+              reelStatus={reelStatus}
             />
           </div>
         </div>
