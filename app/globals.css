@@ -711,41 +711,6 @@ body {
   }
 }
 
-/* --- Quick-Filter: dezente, gold-umrahmte Chips (Block C / Schritt 3) --- */
-.quick-filters {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  width: 100%;
-}
-
-.quick-filter {
-  display: inline-flex;
-  align-items: center;
-  padding: 7px 14px;
-  border-radius: 999px;
-  border: 1px solid var(--gold-border);
-  background: transparent;
-  color: var(--text-secondary);
-  font-size: 13px;
-  font-weight: 600;
-  line-height: 1;
-  text-decoration: none;
-  cursor: pointer;
-  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
-}
-
-.quick-filter:hover {
-  border-color: var(--gold);
-  color: var(--gold);
-}
-
-.quick-filter[data-active="true"] {
-  background: var(--gold-light);
-  border-color: var(--gold);
-  color: #8A7320;
-}
-
 /* --- Seiten-Navigation der Auftragsliste (Block C / Schritt 3) --- */
 .orders-pagination {
   display: flex;

@@ -62,8 +62,6 @@ export const de = {
     emptyFiltered: "Keine Aufträge für diese Auswahl.",
     filterLabel: "Status",
     filterAll: "Alle",
-    filterQuickActive: "Schnellfilter aktiv",
-    quickLabel: "Schnellfilter",
     quickFlagged: "Geflaggt",
     pagination: "Seiten-Navigation",
     prevPage: "Zurück",

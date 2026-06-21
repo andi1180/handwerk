@@ -10,8 +10,9 @@ import {
   type StatusFilter,
 } from "@/lib/orders/filters";
 
-/** Sentinel-Wert der deaktivierten Platzhalter-Option (kein echter Status). */
-const QUICK_PLACEHOLDER = "__quick__";
+/** Sentinel-Werte: auswählbare „Geflaggt"-Option + deaktivierter Trenner. */
+const FLAGGED_VALUE = "__flagged__";
+const SEPARATOR_VALUE = "__sep__";
 
 /**
  * Status-Filter-Wert → i18n-Label-Key. Die abgeleiteten Filter teilen sich die
@@ -50,16 +51,14 @@ const FILTER_LABEL_KEY: Record<
  * navigiert die Auswahl per Query-Param (`buildOrdersUrl`) — der Server filtert
  * dann. Kein `<form>`: reine Navigation per `onChange`.
  *
- * Sync mit den Quick-Filtern (FIX 2): Status (`?status=`) und Quick (`?quick=`)
- * sind getrennte, sich ausschließende Achsen. Jede Dropdown-Wahl baut eine
- * frische URL über `buildOrdersUrl` und droppt damit IMMER `?quick=`; „Alle"
- * liefert die nackte, ungefilterte Liste in EINEM Schritt.
- *
- * Damit „Alle" auch bei aktivem Quick-Filter wirklich wählbar ist, zeigt das
- * Dropdown dann eine deaktivierte Platzhalter-Option (statt „Alle" als aktiven
- * Wert) — sonst wäre „Alle" bereits ausgewählt und ein erneutes Wählen ein
- * No-op (das HTML-`<select>` feuert kein `onChange` für den schon gesetzten
- * Wert), und man käme nur umständlich zurück.
+ * Quick-Filter „Geflaggt" als Dropdown-Option (Schritt A): die frühere
+ * Chip-Zeile entfällt — der Filter „Abgeholt, Booklet nicht versendet" wird
+ * jetzt als letzte, auswählbare Option (Wert `__flagged__`, nach einem
+ * deaktivierten Trenner) im selben `<select>` geboten und routet weiter über
+ * `?quick=flagged`. Status (`?status=`) und Quick (`?quick=`) bleiben getrennte,
+ * sich ausschließende Achsen: jede Dropdown-Wahl baut eine frische URL über
+ * `buildOrdersUrl` und droppt damit die jeweils andere Achse; „Alle" liefert die
+ * nackte, ungefilterte Liste in EINEM Schritt.
  */
 export function OrderStatusFilter({
   value,
@@ -69,9 +68,10 @@ export function OrderStatusFilter({
   quick: QuickFilter | null;
 }) {
   const router = useRouter();
-  // Aktiver Quick ⇒ Platzhalter-Sentinel anzeigen (damit „Alle" wieder wählbar
-  // ist); sonst der echte Status bzw. „all".
-  const selectValue = value !== "all" ? value : quick ? QUICK_PLACEHOLDER : "all";
+  // Aktiver Quick `flagged` ⇒ die „Geflaggt"-Option anzeigen; sonst der echte
+  // Status bzw. „all".
+  const selectValue =
+    value !== "all" ? value : quick === "flagged" ? FLAGGED_VALUE : "all";
   return (
     <label
       style={{
@@ -88,27 +88,32 @@ export function OrderStatusFilter({
         value={selectValue}
         aria-label={t(DEFAULT_LOCALE, "orders.filterLabel")}
         onChange={(e) => {
-          // isStatusFilter filtert „all" UND den Platzhalter aus ⇒ status: null
-          // ⇒ buildOrdersUrl baut die nackte Liste (droppt ?status= und ?quick=).
-          // Ein echter Filter-Wert ⇒ ?status=X (ebenfalls ohne ?quick=).
+          // Drei Fälle: „Geflaggt" ⇒ ?quick=flagged (droppt ?status=);
+          // echter Status-Filter ⇒ ?status=X (droppt ?quick=); „all" (und der
+          // deaktivierte Trenner feuert nie) ⇒ status: null ⇒ nackte Liste.
           const next = e.target.value;
-          router.push(
-            buildOrdersUrl({ status: isStatusFilter(next) ? next : null }),
-          );
+          if (next === FLAGGED_VALUE) {
+            router.push(buildOrdersUrl({ quick: "flagged" }));
+          } else if (isStatusFilter(next)) {
+            router.push(buildOrdersUrl({ status: next }));
+          } else {
+            router.push(buildOrdersUrl({ status: null }));
+          }
         }}
         style={{ width: "auto", minWidth: 150 }}
       >
         <option value="all">{t(DEFAULT_LOCALE, "orders.filterAll")}</option>
-        {quick ? (
-          <option value={QUICK_PLACEHOLDER} disabled>
-            {t(DEFAULT_LOCALE, "orders.filterQuickActive")}
-          </option>
-        ) : null}
         {STATUS_FILTERS.map((filter) => (
           <option key={filter} value={filter}>
             {t(DEFAULT_LOCALE, `orderStatus.${FILTER_LABEL_KEY[filter]}`)}
           </option>
         ))}
+        <option value={SEPARATOR_VALUE} disabled>
+          ──────
+        </option>
+        <option value={FLAGGED_VALUE}>
+          {t(DEFAULT_LOCALE, "orders.quickFlagged")}
+        </option>
       </select>
     </label>
   );

@@ -8,7 +8,6 @@ import {
   type OrderStatus,
 } from "@/components/order-status-badge";
 import { OrderStatusFilter } from "@/components/order-status-filter";
-import { OrderQuickFilters } from "@/components/order-quick-filters";
 import { OrdersPagination } from "@/components/orders-pagination";
 import { OrdersRefreshButton } from "@/components/orders-refresh-button";
 import type { ReelStatus } from "@/app/portal/orders/[id]/generate-controls";
@@ -259,7 +258,6 @@ export default async function OrdersPage({
                 {t(DEFAULT_LOCALE, "orders.new")}
               </Link>
             )}
-            <OrderQuickFilters active={activeQuick} />
           </>
         ) : null}
       </div>
