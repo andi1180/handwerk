@@ -2974,7 +2974,7 @@ Aus [SECURITY_REVIEW.md](SECURITY_REVIEW.md), nach ROI sortiert:
 
 > Nächste Migration: **0014**.
 
-> **Migration 0013** (`booklets.business_reel_status/url/error/shared_at`, additiv) wurde **erstellt** ([supabase/migrations/0013_booklets_business_reel.sql](supabase/migrations/0013_booklets_business_reel.sql)) und ist Voraussetzung für das Betriebs-IG-Reel-Feature. **Muss manuell im Supabase-SQL-Editor angewendet werden**, bevor die neuen Spalten beschrieben werden können. Keine neue Policy/GRANT nötig: die bestehenden `booklets_select`/`booklets_update`-Policies prüfen nur die Mitgliedschaft (keine Column-List), und `grant all to service_role` deckt die neuen Spalten automatisch.
+> **Migration 0013** (`booklets.business_reel_status/url/error/shared_at`, additiv) wurde **appliziert** ([supabase/migrations/0013_booklets_business_reel.sql](supabase/migrations/0013_booklets_business_reel.sql)). Keine neue Policy/GRANT nötig: die bestehenden `booklets_select`/`booklets_update`-Policies prüfen nur die Mitgliedschaft (keine Column-List), und `grant all to service_role` deckt die neuen Spalten automatisch.
 
 > **Migration 0012** (`orders.archived_at`, nullable `timestamptz`) wurde **erstellt** ([supabase/migrations/0012_orders_archived_at.sql](supabase/migrations/0012_orders_archived_at.sql)) und ist Voraussetzung für das Archiv-Feature (Schritt 2). **Muss manuell im Supabase-SQL-Editor angewendet werden**, bevor archivierte Aufträge lesbar/schreibbar sind.
 
