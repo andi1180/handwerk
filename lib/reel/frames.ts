@@ -89,6 +89,10 @@ const LOGO_TOP = 240;
 const WATERMARK_BOX_W = 400;
 const WATERMARK_BOX_H = 116;
 const WATERMARK_MARGIN = 44;
+/** Kleineres Wasserzeichen für die topright-Variante (Business-Reel): rechts
+ *  oben, kein Konflikt mit dem VORHER/NACHHER-Label links oben. */
+const WATERMARK_TR_BOX_W = 280;
+const WATERMARK_TR_BOX_H = 80;
 /** Branding-Akzentbalken (links-bündig am SIDE_MARGIN) unter Titel/Name. */
 const CENTER_ACCENT_W = 120;
 const CENTER_ACCENT_H = 6;
@@ -320,6 +324,7 @@ async function buildCaptionOverlay({
   baseLabel,
   firstExtraInputIdx,
   textfiles,
+  logoPosition = "topleft",
 }: {
   caption: string | null;
   logoPath: string | null;
@@ -327,6 +332,10 @@ async function buildCaptionOverlay({
   baseLabel: string;
   firstExtraInputIdx: number;
   textfiles: string[];
+  /** Wo das Logo-Wasserzeichen sitzt. Default `'topleft'` → Kunden-Reel unverändert.
+   *  `'topright'` → kleinere Box (280×80) rechts oben, kein Konflikt mit dem
+   *  VORHER/NACHHER-Label (das sitzt links oben). */
+  logoPosition?: "topleft" | "topright";
 }): Promise<{ extraInputs: string[]; parts: string[]; outLabel: string }> {
   const extraInputs: string[] = [];
   const parts: string[] = [];
@@ -358,8 +367,15 @@ async function buildCaptionOverlay({
   if (logoPath) {
     extraInputs.push("-i", logoPath);
     const logoIdx = idx++;
-    parts.push(scaleLogo(`[${logoIdx}:v]`, WATERMARK_BOX_W, WATERMARK_BOX_H, "[wm]"));
-    parts.push(`[${cur}][wm]overlay=${WATERMARK_MARGIN}:${WATERMARK_MARGIN}[out]`);
+    if (logoPosition === "topright") {
+      parts.push(
+        scaleLogo(`[${logoIdx}:v]`, WATERMARK_TR_BOX_W, WATERMARK_TR_BOX_H, "[wm]"),
+      );
+      parts.push(`[${cur}][wm]overlay=W-w-${WATERMARK_MARGIN}:${WATERMARK_MARGIN}[out]`);
+    } else {
+      parts.push(scaleLogo(`[${logoIdx}:v]`, WATERMARK_BOX_W, WATERMARK_BOX_H, "[wm]"));
+      parts.push(`[${cur}][wm]overlay=${WATERMARK_MARGIN}:${WATERMARK_MARGIN}[out]`);
+    }
     cur = "out";
   }
 
@@ -835,6 +851,123 @@ export async function normalizeClip({
       ],
       { timeout: SEGMENT_TIMEOUT_MS, maxBuffer: FFMPEG_MAX_BUFFER },
     );
+  } finally {
+    await unlinkAll(textfiles);
+  }
+}
+
+/** Label-Boxfarben für VORHER/NACHHER (bakeBusinessPhotoFrame). */
+const LABEL_FONT_SIZE = 76;
+const LABEL_X = 80;
+const LABEL_Y = 80;
+const LABEL_BOX_BORDER_W = 24;
+const LABEL_BEFORE_COLOR = "0x3A3A3A"; // Anthrazit
+// NACHHER-Farbe kommt aus primaryColor (ffmpegColor-konvertiert).
+
+/**
+ * Business-Foto-Frame (1080×1920) backen — Variante für das Betriebs-IG-Reel
+ * (0013, renderBusinessReel). Unterscheidet sich von `bakePhotoFrame` in zwei
+ * Punkten:
+ *
+ *  1. Logo rechts oben (via `buildCaptionOverlay` mit `logoPosition:'topright'`,
+ *     kleinere Box 280×80) statt links oben — kein Konflikt mit dem Label.
+ *
+ *  2. Optionales VORHER/NACHHER-Label (`label`: `'VORHER'` | `'NACHHER'`):
+ *     `drawtext` mit `box=1` (gefülltes Rechteck), oben links (`x=80, y=80`),
+ *     72px, uppercase, weiß auf Anthrazit (VORHER) bzw. `primaryColor` (NACHHER),
+ *     `boxborderw=24`. Label-drawtext sitzt NACH dem Caption-Overlay → liegt
+ *     visuell ganz oben. Kein Label (process-Fotos) → kein drawtext.
+ *
+ * Ausgabe: PNG, `-frames:v 1` — identisch zu `bakePhotoFrame`, damit
+ * `encodeStillSegment` + `concatSegments` direkt wiederverwendet werden können.
+ *
+ * 6.0.1-sicher: literales `x`/`y`, `textfile`/`fontfile`, `expansion=none`.
+ */
+export async function bakeBusinessPhotoFrame({
+  ffmpegBin,
+  input,
+  output,
+  caption,
+  logoPath,
+  primaryColor,
+  label,
+}: {
+  ffmpegBin: string;
+  input: string;
+  output: string;
+  caption: string | null;
+  logoPath: string | null;
+  primaryColor: string;
+  label?: "VORHER" | "NACHHER";
+}): Promise<void> {
+  const accent = ffmpegColor(primaryColor, DEFAULT_BRANDING.primary_color);
+  const textfiles: string[] = [];
+
+  // Schneller Pfad: sauberes Foto ohne Caption, Logo oder Label.
+  if (caption === null && !logoPath && !label) {
+    await execFileAsync(
+      ffmpegBin,
+      ["-y", "-nostdin", "-loglevel", "error", "-i", input, "-vf", COVER, "-frames:v", "1", output],
+      { timeout: FRAME_TIMEOUT_MS, maxBuffer: FFMPEG_MAX_BUFFER },
+    );
+    return;
+  }
+
+  try {
+    // Caption-Overlay + Logo rechts oben (logoPosition:'topright').
+    const { extraInputs, parts: overlayParts, outLabel } = await buildCaptionOverlay({
+      caption,
+      logoPath,
+      accent,
+      baseLabel: "base",
+      firstExtraInputIdx: 1,
+      textfiles,
+      logoPosition: "topright",
+    });
+    const parts = [`[0:v]${COVER}[base]`, ...overlayParts];
+
+    // VORHER/NACHHER-Label oben links, NACH dem Caption-Overlay.
+    let finalLabel = outLabel;
+    if (label) {
+      const labelFile = await writeTmpText(label, textfiles);
+      const boxcolor =
+        label === "NACHHER" ? `${accent}@1.0` : `${LABEL_BEFORE_COLOR}@1.0`;
+      const labelDraw =
+        `drawtext=textfile=${labelFile}:fontfile=${FONT_PATH}:expansion=none:` +
+        `fontcolor=white:fontsize=${LABEL_FONT_SIZE}:line_spacing=0:` +
+        `x=${LABEL_X}:y=${LABEL_Y}:` +
+        `box=1:boxcolor=${boxcolor}:boxborderw=${LABEL_BOX_BORDER_W}:` +
+        `shadowcolor=black@0.55:shadowx=0:shadowy=2`;
+      parts.push(`[${outLabel}]${labelDraw}[lbl]`);
+      finalLabel = "lbl";
+    }
+
+    await execFileAsync(
+      ffmpegBin,
+      [
+        "-y",
+        "-nostdin",
+        "-loglevel",
+        "error",
+        "-i",
+        input,
+        ...extraInputs,
+        "-filter_complex",
+        parts.join(";"),
+        "-map",
+        `[${finalLabel}]`,
+        "-frames:v",
+        "1",
+        output,
+      ],
+      { timeout: FRAME_TIMEOUT_MS, maxBuffer: FFMPEG_MAX_BUFFER },
+    );
+  } catch (err) {
+    console.error("bakeBusinessPhotoFrame failed", {
+      step: "bake",
+      message: err instanceof Error ? err.message : String(err),
+    });
+    throw err;
   } finally {
     await unlinkAll(textfiles);
   }
