@@ -354,9 +354,15 @@ export async function renderReel({
  * Betriebs-Reel (0013, Schritt 2b): Kein Intro/Outro — nur die Medien in
  * Booklet-Reihenfolge (before → process → after), je 4 s Stills.
  *
- *  - Fotos:  bakeBusinessPhotoFrame → VORHER/NACHHER-Label + Logo rechts oben
- *            (immer, nicht per logo_per_page gated). process-Fotos kein Label.
- *  - Clips:  normalizeClip mit logoPosition:'topright' (stumm, ≤6 s).
+ *  - before/after-Fotos: bakeBusinessPhotoFrame → großes, oben ZENTRIERTES
+ *                        VORHER/NACHHER-Label, KEIN Logo.
+ *  - process-Fotos:      bakeBusinessPhotoFrame → kein Label, Logo rechts oben.
+ *  - Clips (Prozess):    normalizeClip mit logoPosition:'topright', Logo rechts
+ *                        oben (stumm, ≤6 s).
+ *
+ * Das Logo wird immer geladen (nicht per logo_per_page gated), aber nur auf
+ * Prozess-Inhalt (process-Fotos + Clips) overlayt — auf before/after trägt das
+ * Label allein die obere Zone.
  *
  * Status-Writes gegen `booklets.business_reel_status/url/error` (0013).
  * service_role für alle Storage- und booklets-Zugriffe.
@@ -455,8 +461,8 @@ export async function renderBusinessReel({
     }
 
     // 4) Pro Item EIN formatgleiches Segment in Booklet-Reihenfolge (before →
-    //    process → after). Fotos mit VORHER/NACHHER-Label (bei before/after) und
-    //    Logo rechts oben; Clips normalisiert mit logoPosition:'topright'.
+    //    process → after). before/after-Fotos: zentriertes VORHER/NACHHER-Label,
+    //    KEIN Logo. process-Fotos + Clips: Logo rechts oben (logoPosition:'topright').
     try {
       for (let i = 0; i < media.length; i++) {
         const item = media[i]!;
@@ -483,12 +489,15 @@ export async function renderBusinessReel({
                 : item.category === "after"
                   ? "NACHHER"
                   : undefined;
+            // Logo NUR auf Prozess-Fotos (kein Label) — before/after tragen das
+            // große, zentrierte VORHER/NACHHER-Label und KEIN Logo.
+            const logoForFrame = label !== undefined ? null : logoLocal;
             await bakeBusinessPhotoFrame({
               ffmpegBin,
               input: local,
               output: framePath,
               caption: displayCaption(item),
-              logoPath: logoLocal,
+              logoPath: logoForFrame,
               primaryColor,
               label,
             });

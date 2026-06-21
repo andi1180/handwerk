@@ -859,13 +859,21 @@ export async function normalizeClip({
   }
 }
 
-/** Label-Boxfarben für VORHER/NACHHER (bakeBusinessPhotoFrame). */
+/** Label-Boxfarben/-Maße für VORHER/NACHHER (bakeBusinessPhotoFrame). */
 const LABEL_FONT_SIZE = 130;
-const LABEL_X = 80;
 const LABEL_Y = 80;
 const LABEL_BOX_BORDER_W = 36;
 const LABEL_BEFORE_COLOR = "0x3A3A3A"; // Anthrazit
 // NACHHER-Farbe kommt aus primaryColor (ffmpegColor-konvertiert).
+/**
+ * Geschätzter Vorschub je Großbuchstabe (Anteil der Fontgröße) zum horizontalen
+ * ZENTRIEREN des VORHER/NACHHER-Labels. Plus Jakarta Sans SemiBold liegt für
+ * Versalien bei ~0,66. Daraus wird die Labelbreite geschätzt und x in JS als
+ * LITERAL berechnet — NIE als ffmpeg-Ausdruck `(w-text_w)/2` (rendert auf dem
+ * Production-Build 6.0.1 STILL NICHTS, s. accentBar-Bugfix oben). Perfekte
+ * Zentrierung ist unkritisch (kein Logo daneben) — optisch mittig genügt.
+ */
+const LABEL_CHAR_WIDTH_FACTOR = 0.66;
 
 /**
  * Business-Foto-Frame (1080×1920) backen — Variante für das Betriebs-IG-Reel
@@ -876,10 +884,11 @@ const LABEL_BEFORE_COLOR = "0x3A3A3A"; // Anthrazit
  *     kleinere Box 280×80) statt links oben — kein Konflikt mit dem Label.
  *
  *  2. Optionales VORHER/NACHHER-Label (`label`: `'VORHER'` | `'NACHHER'`):
- *     `drawtext` mit `box=1` (gefülltes Rechteck), oben links (`x=80, y=80`),
- *     72px, uppercase, weiß auf Anthrazit (VORHER) bzw. `primaryColor` (NACHHER),
- *     `boxborderw=24`. Label-drawtext sitzt NACH dem Caption-Overlay → liegt
- *     visuell ganz oben. Kein Label (process-Fotos) → kein drawtext.
+ *     `drawtext` mit `box=1` (gefülltes Rechteck), oben ZENTRIERT (x in JS als
+ *     LITERAL geschätzt, y=80), 130px, uppercase, weiß auf Anthrazit (VORHER)
+ *     bzw. `primaryColor` (NACHHER), `boxborderw=36`. Label-drawtext sitzt NACH
+ *     dem Caption-Overlay → liegt visuell ganz oben. Kein Label (process-Fotos)
+ *     → kein drawtext.
  *
  * Ausgabe: PNG, `-frames:v 1` — identisch zu `bakePhotoFrame`, damit
  * `encodeStillSegment` + `concatSegments` direkt wiederverwendet werden können.
@@ -929,16 +938,21 @@ export async function bakeBusinessPhotoFrame({
     });
     const parts = [`[0:v]${COVER}[base]`, ...overlayParts];
 
-    // VORHER/NACHHER-Label oben links, NACH dem Caption-Overlay.
+    // VORHER/NACHHER-Label oben ZENTRIERT, NACH dem Caption-Overlay.
     let finalLabel = outLabel;
     if (label) {
       const labelFile = await writeTmpText(label, textfiles);
       const boxcolor =
         label === "NACHHER" ? `${accent}@1.0` : `${LABEL_BEFORE_COLOR}@1.0`;
+      // x als LITERAL in JS zentrieren — KEIN ffmpeg-Ausdruck `(w-text_w)/2`
+      // (rendert auf dem Production-Build 6.0.1 still nichts). Der Box-Rand ist
+      // symmetrisch ⇒ zentrierter Text zentriert auch die Box.
+      const estWidth = label.length * LABEL_FONT_SIZE * LABEL_CHAR_WIDTH_FACTOR;
+      const labelX = Math.max(0, Math.round((REEL_W - estWidth) / 2));
       const labelDraw =
         `drawtext=textfile=${labelFile}:fontfile=${FONT_PATH}:expansion=none:` +
         `fontcolor=white:fontsize=${LABEL_FONT_SIZE}:line_spacing=0:` +
-        `x=${LABEL_X}:y=${LABEL_Y}:` +
+        `x=${labelX}:y=${LABEL_Y}:` +
         `box=1:boxcolor=${boxcolor}:boxborderw=${LABEL_BOX_BORDER_W}:` +
         `shadowcolor=black@0.55:shadowx=0:shadowy=2`;
       parts.push(`[${outLabel}]${labelDraw}[lbl]`);
