@@ -26,7 +26,7 @@ function ArchiveIcon() {
   );
 }
 
-/** Restore-Icon (Archiv-Box mit Pfeil nach oben). */
+/** Restore-Icon (Archiv-Box mit Pfeil, der oben heraus zeigt). */
 function UnarchiveIcon() {
   return (
     <svg
@@ -40,10 +40,10 @@ function UnarchiveIcon() {
       strokeLinejoin="round"
       aria-hidden
     >
-      <rect x="2" y="3" width="20" height="5" rx="1" />
-      <path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8" />
-      <path d="M10 16l2-2 2 2" />
-      <path d="M12 14v-4" />
+      <rect x="3" y="10" width="18" height="4" rx="1" />
+      <path d="M5 14v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5" />
+      <path d="M12 3v7" />
+      <path d="M8.5 6.5 12 3l3.5 3.5" />
     </svg>
   );
 }
