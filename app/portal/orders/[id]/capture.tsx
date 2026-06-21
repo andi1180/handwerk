@@ -152,6 +152,8 @@ export function Capture({
   hasAfter,
   onFramesUploaded,
   openPhotoControlRef,
+  openProcessVideoControlRef,
+  onLimitsChange,
 }: {
   businessId: string;
   orderId: string;
@@ -185,6 +187,18 @@ export function Capture({
   openPhotoControlRef?: React.RefObject<
     ((category: MediaCategory) => void) | null
   >;
+  /**
+   * Brücke zur MediaList: Capture registriert hier seinen Prozess-Video-Opener,
+   * den das Prozess-„+"-Tile triggern kann — gemeinsame Pipeline wie der frühere
+   * „Video hochladen"-Button (inkl. videoLimitReached-Guard + Notice).
+   */
+  openProcessVideoControlRef?: React.RefObject<(() => void) | null>;
+  /**
+   * Meldet den aktuellen Limit-Zustand (Foto/Video) reaktiv nach oben, damit die
+   * MediaList die Slots/„+"-Tile-Optionen entsprechend deaktivieren kann (8c). Reine
+   * UX-Sperre — der harte Riegel bleibt der Server-Guard im Media-Route-Handler.
+   */
+  onLimitsChange?: (photoReached: boolean, videoReached: boolean) => void;
 }) {
   const router = useRouter();
   const supabase = useMemo(() => createClient(), []);
@@ -377,15 +391,6 @@ export function Capture({
     [supabase, orderId, router, extractAndUploadFrames],
   );
 
-  // Foto-Picker über die Buttons öffnen — immer Kategorie 'process'. Die Variante
-  // mit Kategorie-Vorgabe (leerer Slot) ist `openPhotoForCategory` (weiter unten,
-  // mit denselben UX-Guards).
-  const openPhotoUpload = () => {
-    pendingPhotoCategoryRef.current = "process";
-    photoUploadInputRef.current?.click();
-  };
-  const openVideoUpload = () => videoUploadInputRef.current?.click();
-
   /** Verwirft einen evtl. offenen Entwurf und setzt den neuen Entwurf. */
   const replaceDraft = (next: Draft) => {
     if (draft) URL.revokeObjectURL(draft.objectUrl);
@@ -514,6 +519,22 @@ export function Capture({
     [beforeTaken, afterTaken, photoLimitReached, photoMax],
   );
 
+  // Prozess-„+"-Tile (MediaList) → Video-Upload. Gemeinsame Pipeline wie der
+  // frühere „Video hochladen"-Button: handleVideoFile erzwingt Kategorie 'process'.
+  // Derselbe videoLimitReached-Guard + Notice (reine UX; Server bleibt der Riegel).
+  const openProcessVideo = useCallback(() => {
+    if (videoLimitReached) {
+      setNotice(
+        t(DEFAULT_LOCALE, "capture.limitReached", {
+          type: t(DEFAULT_LOCALE, "capture.videosLabel"),
+          max: videoMax,
+        }),
+      );
+      return;
+    }
+    videoUploadInputRef.current?.click();
+  }, [videoLimitReached, videoMax]);
+
   // Diesen Opener der MediaList bereitstellen (Aufruf erfolgt synchron im Klick
   // der leeren Box ⇒ User-Geste bleibt erhalten, der Datei-Picker öffnet
   // zuverlässig). Auf null zurückgesetzt, sobald Capture unmountet (readOnly ⇒
@@ -527,10 +548,20 @@ export function Capture({
     };
   }, [openPhotoControlRef, openPhotoForCategory]);
 
-  const disabledBtnStyle: React.CSSProperties = {
-    opacity: 0.45,
-    pointerEvents: "none",
-  };
+  // Prozess-Video-Opener analog bereitstellen.
+  useEffect(() => {
+    const ref = openProcessVideoControlRef;
+    if (!ref) return;
+    ref.current = openProcessVideo;
+    return () => {
+      ref.current = null;
+    };
+  }, [openProcessVideoControlRef, openProcessVideo]);
+
+  // Limit-Zustand reaktiv nach oben melden (MediaList deaktiviert dann Slots/„+").
+  useEffect(() => {
+    onLimitsChange?.(photoLimitReached, videoLimitReached);
+  }, [photoLimitReached, videoLimitReached, onLimitsChange]);
 
   return (
     <div style={{ marginBottom: 12 }}>
@@ -551,80 +582,12 @@ export function Capture({
         onChange={(e) => void handleVideoFile(e)}
       />
 
-      {/* Große, klar tappbare Buttons — Foto/Video über den nativen Picker
-          (Kamera + Galerie). Identische Pipeline. */}
-      <div className="capture-actions">
-        <div className="capture-row">
-          <div
-            role="button"
-            tabIndex={photoLimitReached ? -1 : 0}
-            aria-disabled={photoLimitReached}
-            className="btn-outline capture-btn"
-            style={photoLimitReached ? disabledBtnStyle : undefined}
-            onClick={photoLimitReached ? undefined : openPhotoUpload}
-            onKeyDown={(e) => {
-              if (
-                !photoLimitReached &&
-                (e.key === "Enter" || e.key === " ")
-              )
-                openPhotoUpload();
-            }}
-          >
-            <UploadIcon />
-            {t(DEFAULT_LOCALE, "capture.uploadPhoto")}
-          </div>
-          <div
-            role="button"
-            tabIndex={videoLimitReached ? -1 : 0}
-            aria-disabled={videoLimitReached}
-            className="btn-outline capture-btn"
-            style={videoLimitReached ? disabledBtnStyle : undefined}
-            onClick={videoLimitReached ? undefined : openVideoUpload}
-            onKeyDown={(e) => {
-              if (
-                !videoLimitReached &&
-                (e.key === "Enter" || e.key === " ")
-              )
-                openVideoUpload();
-            }}
-          >
-            <UploadIcon />
-            {t(DEFAULT_LOCALE, "capture.uploadVideo")}
-          </div>
-        </div>
-      </div>
+      {/* Keine Aufnahme-/Upload-Buttons mehr: der Upload wird über die
+          Vorher/Nachher-Slots und das Prozess-„+"-Tile der MediaList angestoßen,
+          die per Brücke die obigen Opener (Foto/Video) auslösen. Capture hält nur
+          noch die versteckten Inputs, den Entwurf-Dialog und die Upload-Queue. */}
 
-      {/* Limit-Hinweis (8c): wenn das Foto-/Video-Limit erreicht ist, sind die
-          jeweiligen Buttons deaktiviert — hier der erklärende Text. */}
-      {photoLimitReached || videoLimitReached ? (
-        <div
-          style={{
-            marginTop: 8,
-            display: "flex",
-            flexDirection: "column",
-            gap: 4,
-          }}
-        >
-          {photoLimitReached ? (
-            <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>
-              {t(DEFAULT_LOCALE, "capture.limitReached", {
-                type: t(DEFAULT_LOCALE, "capture.photosLabel"),
-                max: photoMax,
-              })}
-            </span>
-          ) : null}
-          {videoLimitReached ? (
-            <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>
-              {t(DEFAULT_LOCALE, "capture.limitReached", {
-                type: t(DEFAULT_LOCALE, "capture.videosLabel"),
-                max: videoMax,
-              })}
-            </span>
-          ) : null}
-        </div>
-      ) : null}
-
-      {/* Hinweis (z. B. Video zu lang) — nur sichtbar, wenn gesetzt. */}
+      {/* Hinweis (z. B. Video zu lang, Limit erreicht) — nur sichtbar, wenn gesetzt. */}
       {notice ? (
         <div
           role="alert"
@@ -876,26 +839,5 @@ function PendingRow({
         </div>
       ) : null}
     </div>
-  );
-}
-
-/** Schlichtes Inline-SVG-Upload-Icon für die Hochladen-Buttons. Reine Deko. */
-function UploadIcon() {
-  return (
-    <svg
-      width={20}
-      height={20}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={1.8}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden
-    >
-      <path d="M12 16V4" />
-      <path d="M7 9l5-5 5 5" />
-      <path d="M5 20h14" />
-    </svg>
   );
 }

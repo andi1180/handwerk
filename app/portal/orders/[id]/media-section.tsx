@@ -101,15 +101,35 @@ export function MediaSection({
     [initialItems, extraFrames],
   );
 
-  // Brücke (0010): ein leerer Vorher/Nachher-Slot der MediaList startet den
-  // Foto-Upload des Capture für seine Kategorie. Capture registriert seinen Opener
-  // in diesem Ref; null, solange kein Capture gemountet ist (readOnly).
+  // Brücke (0010): ein leerer Vorher/Nachher-Slot bzw. das Prozess-„+"-Tile der
+  // MediaList startet den Foto-Upload des Capture für seine Kategorie. Capture
+  // registriert seinen Opener in diesem Ref; null, solange kein Capture gemountet
+  // ist (readOnly).
   const openPhotoControlRef = useRef<
     ((category: MediaCategory) => void) | null
   >(null);
-  const requestPhotoForSlot = useCallback((category: "before" | "after") => {
+  const requestPhotoForSlot = useCallback((category: MediaCategory) => {
     openPhotoControlRef.current?.(category);
   }, []);
+
+  // Brücke: das Prozess-„+"-Tile startet den Video-Upload (Kategorie process).
+  const openProcessVideoControlRef = useRef<(() => void) | null>(null);
+  const requestProcessVideo = useCallback(() => {
+    openProcessVideoControlRef.current?.();
+  }, []);
+
+  // Limit-Zustand (8c) aus Capture nach oben gespiegelt → MediaList deaktiviert die
+  // Slots/„+"-Optionen. Ohne gemountetes Capture (readOnly) bleibt beides false —
+  // die readOnly-MediaList blendet diese Bedienelemente ohnehin aus.
+  const [photoLimitReached, setPhotoLimitReached] = useState(false);
+  const [videoLimitReached, setVideoLimitReached] = useState(false);
+  const handleLimitsChange = useCallback(
+    (photoReached: boolean, videoReached: boolean) => {
+      setPhotoLimitReached(photoReached);
+      setVideoLimitReached(videoReached);
+    },
+    [],
+  );
 
   return (
     <>
@@ -126,6 +146,8 @@ export function MediaSection({
           hasAfter={hasAfter}
           onFramesUploaded={handleFramesUploaded}
           openPhotoControlRef={openPhotoControlRef}
+          openProcessVideoControlRef={openProcessVideoControlRef}
+          onLimitsChange={handleLimitsChange}
         />
       ) : null}
       <div style={{ marginTop: 16 }}>
@@ -134,6 +156,9 @@ export function MediaSection({
           items={mergedItems}
           readOnly={!isDraft}
           onRequestPhotoForSlot={requestPhotoForSlot}
+          onRequestProcessVideo={requestProcessVideo}
+          photoLimitReached={photoLimitReached}
+          videoLimitReached={videoLimitReached}
         />
       </div>
     </>

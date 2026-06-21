@@ -1028,19 +1028,80 @@ body {
   pointer-events: none;
 }
 
-/* „Prozess"-Sektionsüberschrift + leerer Prozess-Hinweis. */
+/* „Prozess"-Sektionsüberschrift. */
 .media-section-title {
   margin: 4px 0 10px;
   font-size: 14px;
   font-weight: 700;
   color: var(--text-primary);
 }
-.media-process-empty {
-  margin: 0;
-  font-size: 13px;
-  font-style: italic;
+
+/* Statisches Prozess-„+"-Tile (Upload-Refactor): füllt eine Rasterzelle wie ein
+   Thumbnail, gestrichelt, „+", Gold-Hover — analog .media-ba-empty--add. */
+.media-process-add {
+  position: relative;
+  aspect-ratio: 1 / 1;
+  border-radius: var(--radius);
+  border: 1px dashed var(--border);
+  background: var(--surface-2);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 6px;
+  text-align: center;
   color: var(--text-secondary);
-  opacity: 0.8;
+  cursor: pointer;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease;
+}
+.media-process-add:hover {
+  border-color: var(--gold-border);
+  background: var(--surface);
+}
+.media-process-add-label {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+/* Auswahl-Menü (Foto/Video) direkt im Tile gerendert — kein Overflow-Clipping.
+   Liegt (z 31) über dem Schließ-Backdrop (z 30) im Stacking-Kontext des Tiles. */
+.media-process-add-menu {
+  position: relative;
+  z-index: 31;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  padding: 6px;
+}
+.media-process-add-option {
+  width: 100%;
+  padding: 8px 6px;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: inherit;
+  color: var(--text-primary);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+.media-process-add-option:hover:not(:disabled) {
+  border-color: var(--gold-border);
+}
+.media-process-add-option:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* Backdrop schließt das Menü bei Klick daneben. */
+.media-process-add-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
 }
 
 /* Kategorie-Selektor (0010): drei gleich breite Toggle-Buttons (Aufnahme-Entwurf

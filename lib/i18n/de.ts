@@ -257,7 +257,10 @@ export const de = {
     // Leerer Slot ist im Editier-Modus tappbar → Foto-Upload für diese Kategorie.
     slotAdd: "{category}-Foto hinzufügen",
     slotAddHint: "Foto hinzufügen",
-    processEmpty: "Noch keine Prozess-Bilder.",
+    // Prozess-„+"-Tile (Upload-Refactor): Tile-Label/aria + Foto/Video-Auswahl.
+    addProcess: "Medium hinzufügen",
+    chooseFoto: "Foto",
+    chooseVideo: "Video",
     categoryLabel: "Kategorie",
     categoryError: "Kategorie konnte nicht geändert werden.",
     // Verifizier-Ansicht der extrahierten Video-Vorschau-Frames (Phase 1).

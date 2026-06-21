@@ -72,16 +72,29 @@ export function MediaList({
   items: initialItems,
   readOnly = false,
   onRequestPhotoForSlot,
+  onRequestProcessVideo,
+  photoLimitReached = false,
+  videoLimitReached = false,
 }: {
   orderId: string;
   items: MediaWithUrl[];
   readOnly?: boolean;
   /**
-   * Leeren Vorher/Nachher-Slot antippen → Foto-Upload für DIESE Kategorie (0010).
-   * Wird vom Wrapper (MediaSection) an Capture verdrahtet; fehlt der Callback oder
-   * ist `readOnly`, bleibt der Slot ein reiner Platzhalter.
+   * Leeren Vorher/Nachher-Slot bzw. das Prozess-„+"-Tile antippen → Foto-Upload
+   * für DIESE Kategorie (0010 / Upload-Refactor). Wird vom Wrapper (MediaSection)
+   * an Capture verdrahtet; fehlt der Callback oder ist `readOnly`, bleibt der Slot
+   * ein reiner Platzhalter.
    */
-  onRequestPhotoForSlot?: (category: "before" | "after") => void;
+  onRequestPhotoForSlot?: (category: MediaCategory) => void;
+  /**
+   * Prozess-„+"-Tile → Video-Upload (Kategorie process). Vom Wrapper an Capture
+   * verdrahtet; fehlt der Callback oder ist `readOnly`, entfällt die Video-Option.
+   */
+  onRequestProcessVideo?: () => void;
+  /** Foto-Limit erreicht (8c) ⇒ leere Slots gedämpft, „+"-Foto-Option gesperrt. */
+  photoLimitReached?: boolean;
+  /** Video-Limit erreicht (8c) ⇒ „+"-Video-Option gesperrt. */
+  videoLimitReached?: boolean;
 }) {
   const router = useRouter();
   const [items, setItems] = useState<MediaWithUrl[]>(initialItems);
@@ -316,7 +329,10 @@ export function MediaList({
     })();
   }, [items, selectedIds, orderId, router, showNotice]);
 
-  if (items.length === 0) {
+  // Abgeschlossen-Modus ohne Medien: nur der „Noch keine Medien"-Hinweis. Im
+  // Editier-Modus rendern wir IMMER das normale Layout (Vorher/Nachher-Slots +
+  // Prozess-„+"-Tile), damit der Upload auch bei null Medien anstoßbar ist.
+  if (items.length === 0 && readOnly) {
     return (
       <div
         className="card"
@@ -424,6 +440,7 @@ export function MediaList({
               ? () => onRequestPhotoForSlot("before")
               : undefined
           }
+          addDisabled={photoLimitReached}
         />
         <BeforeAfterSlot
           category="after"
@@ -438,15 +455,18 @@ export function MediaList({
               ? () => onRequestPhotoForSlot("after")
               : undefined
           }
+          addDisabled={photoLimitReached}
         />
       </div>
 
-      {/* Prozess: Sektions-Überschrift + das bisherige Raster (nur process-Items,
-          per Long-Press verschiebbar). */}
+      {/* Prozess: Sektions-Überschrift + das Raster (nur process-Items, per
+          Long-Press verschiebbar) mit einem statischen „+"-Tile als letztem Kind.
+          Im Editier-Modus immer sichtbar (auch bei null Prozess-Bildern), damit der
+          Upload anstoßbar bleibt; readOnly nur, wenn es Prozess-Bilder gibt. */}
       <h3 className="media-section-title">
         {t(DEFAULT_LOCALE, "mediaCategory.process")}
       </h3>
-      {processItems.length > 0 ? (
+      {!readOnly || processItems.length > 0 ? (
         <DndContext
           sensors={sensors}
           collisionDetection={closestCenter}
@@ -477,13 +497,24 @@ export function MediaList({
                   onDelete={() => handleDelete(media)}
                 />
               ))}
+              {/* „+"-Tile: NICHT im SortableContext registriert (nicht ziehbar,
+                  kein Droptarget). Versteckt, wenn Foto- UND Video-Limit erreicht
+                  sind. Nicht im Abgeschlossen-Modus. */}
+              {!readOnly && !(photoLimitReached && videoLimitReached) ? (
+                <ProcessAddTile
+                  photoLimitReached={photoLimitReached}
+                  videoLimitReached={videoLimitReached}
+                  onAddPhoto={
+                    onRequestPhotoForSlot
+                      ? () => onRequestPhotoForSlot("process")
+                      : undefined
+                  }
+                  onAddVideo={onRequestProcessVideo}
+                />
+              ) : null}
             </div>
           </SortableContext>
         </DndContext>
-      ) : !readOnly ? (
-        <p className="media-process-empty">
-          {t(DEFAULT_LOCALE, "assembler.processEmpty")}
-        </p>
       ) : null}
 
       {/* Dezenter Bedien-Hinweis unter dem Raster (kein Button) — nur wenn es
@@ -716,6 +747,7 @@ function BeforeAfterSlot({
   onView,
   onDelete,
   onAddPhoto,
+  addDisabled = false,
 }: {
   category: "before" | "after";
   media: MediaWithUrl | null;
@@ -726,14 +758,31 @@ function BeforeAfterSlot({
   onDelete: () => void;
   /** Leeren Slot antippen → Foto-Upload für DIESE Kategorie (0010). */
   onAddPhoto?: () => void;
+  /** Foto-Limit erreicht (8c) ⇒ leerer Slot gedämpft + nicht tappbar. */
+  addDisabled?: boolean;
 }) {
   const label = t(DEFAULT_LOCALE, `mediaCategory.${category}`);
 
   if (!media) {
     // Editier-Modus: der leere Slot ist tappbar und startet den Foto-Upload für
-    // genau diese Kategorie. Abgeschlossen-Modus (readOnly) bzw. ohne Handler:
-    // reiner Platzhalter wie bisher.
+    // genau diese Kategorie. Foto-Limit erreicht (addDisabled) ⇒ gedämpft + kein
+    // Tap. Abgeschlossen-Modus (readOnly) bzw. ohne Handler: reiner Platzhalter.
     if (!readOnly && onAddPhoto) {
+      if (addDisabled) {
+        return (
+          <div
+            className="media-ba-slot media-ba-empty media-ba-empty--add"
+            aria-disabled
+            style={{ opacity: 0.45, pointerEvents: "none" }}
+          >
+            <span className="media-ba-empty-label">{label}</span>
+            <PlusIcon />
+            <span className="media-ba-empty-hint">
+              {t(DEFAULT_LOCALE, "assembler.slotAddHint")}
+            </span>
+          </div>
+        );
+      }
       return (
         <div
           className="media-ba-slot media-ba-empty media-ba-empty--add"
@@ -784,6 +833,94 @@ function BeforeAfterSlot({
         onDelete={onDelete}
       />
       <span className="media-ba-label">{label}</span>
+    </div>
+  );
+}
+
+/**
+ * Statisches Prozess-„+"-Tile (Upload-Refactor): letztes Kind des Prozess-Rasters,
+ * NICHT im Sortable-Kontext registriert (nicht ziehbar, kein Droptarget). Tap öffnet
+ * eine kleine Foto/Video-Auswahl direkt im Tile (kein Clipping durch overflow). Die
+ * Optionen sind je nach erreichtem Limit deaktiviert; ein Backdrop schließt das Menü
+ * bei Klick daneben. Foto → onRequestPhotoForSlot('process'), Video → onAddVideo.
+ */
+function ProcessAddTile({
+  photoLimitReached,
+  videoLimitReached,
+  onAddPhoto,
+  onAddVideo,
+}: {
+  photoLimitReached: boolean;
+  videoLimitReached: boolean;
+  onAddPhoto?: () => void;
+  onAddVideo?: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const close = useCallback(() => setOpen(false), []);
+
+  return (
+    <div
+      className="media-process-add"
+      style={open ? { zIndex: 31 } : undefined}
+      role="button"
+      tabIndex={0}
+      aria-expanded={open}
+      aria-label={t(DEFAULT_LOCALE, "assembler.addProcess")}
+      onClick={() => setOpen((o) => !o)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          setOpen((o) => !o);
+        } else if (e.key === "Escape") {
+          close();
+        }
+      }}
+    >
+      {open ? (
+        <>
+          <div
+            className="media-process-add-backdrop"
+            onClick={(e) => {
+              e.stopPropagation();
+              close();
+            }}
+          />
+          <div
+            className="media-process-add-menu"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              className="media-process-add-option"
+              disabled={photoLimitReached || !onAddPhoto}
+              onClick={() => {
+                close();
+                onAddPhoto?.();
+              }}
+            >
+              {t(DEFAULT_LOCALE, "assembler.chooseFoto")}
+            </button>
+            <button
+              type="button"
+              className="media-process-add-option"
+              disabled={videoLimitReached || !onAddVideo}
+              onClick={() => {
+                close();
+                onAddVideo?.();
+              }}
+            >
+              {t(DEFAULT_LOCALE, "assembler.chooseVideo")}
+            </button>
+          </div>
+        </>
+      ) : (
+        <>
+          <PlusIcon />
+          <span className="media-process-add-label">
+            {t(DEFAULT_LOCALE, "assembler.addProcess")}
+          </span>
+        </>
+      )}
     </div>
   );
 }
