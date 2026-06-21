@@ -50,9 +50,10 @@ const NOTICE_TIMEOUT_MS = 4000;
  * groß), Reorder per Long-Press (dnd-kit), Löschen und **KI-Captions (6b)**.
  *
  * Captions: „Captions generieren" (Batch) beschriftet die **explizit
- * ausgewählten** (unbeschrifteten) Kacheln (6b.3) — ohne Auswahl ist der Button
- * deaktiviert. „Alle auswählen" merkt alle Medien ohne Caption vor, sodass „alle
- * captionen" zwei Taps bleibt. Das Bearbeiten/Neu-Generieren pro Item läuft im
+ * ausgewählten** (unbeschrifteten) Kacheln (6b.3); der Button erscheint nur,
+ * wenn unbeschriftete Medien existieren (bzw. während eine Generierung läuft) —
+ * ohne Auswahl ist er deaktiviert. „Alle auswählen" merkt alle Medien ohne
+ * Caption vor, sodass „alle captionen" zwei Taps bleibt. Das Bearbeiten/Neu-Generieren pro Item läuft im
  * Vollbild-Viewer (nicht in den engen Kacheln). Jede Kachel trägt oben links
  * **einen** Indikator: hat-Caption ⇒ Caption-Icon (Status); fehlt ⇒ tappbarer
  * Auswahl-Kreis (leer/gold) zum Vormerken für die Generierung.
@@ -371,8 +372,11 @@ export function MediaList({
           gleich breite Buttons („Alle auswählen" + „Captions generieren"), die auf
           schmalen Viewports umbrechen statt überzulaufen. Gilt für ALLE Medien
           (Vorher/Nachher + Prozess). Der Reorder-Hinweis sitzt als dezenter Text
-          UNTER dem Prozess-Raster (siehe unten). */}
-      {!readOnly ? (
+          UNTER dem Prozess-Raster (siehe unten).
+          Render-Bedingung: nur wenn ≥1 Medium ohne Caption existiert ODER gerade
+          eine Batch-Generierung läuft (kein deaktivierter „nichts fehlt"-Zustand;
+          während des Generierens sichtbar bleiben, auch wenn die Captions kippen). */}
+      {!readOnly && (missingCount > 0 || generating) ? (
         <div style={{ marginBottom: 10 }}>
           {selectedCount > 0 ? (
             <p

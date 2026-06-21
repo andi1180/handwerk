@@ -3041,6 +3041,18 @@ Baut auf Schritt 3b (Button-Grundgerüst) und 3a (geteilte `lib/share/file-share
 
 ---
 
+## „Captions generieren"-Button nur sichtbar, wenn fehlende Captions existieren (kein deaktivierter Zustand mehr)
+
+**Reines Frontend** — keine Migration, kein Backend, keine Server-Route. NUR [media-list.tsx](app/portal/orders/[id]/media-list.tsx) (keine i18n-Änderung nötig). Kein `<form>`, kein `any`.
+
+**Idee:** Der „Captions generieren"-Button (+ sein `.media-actions`-Aktions-Kopf) wurde im Editier-Modus **immer** gerendert und zeigte bei vollständig beschrifteten/leeren Medien einen ausgegrauten, sinnlosen „nichts zu tun"-Zustand. Stattdessen wird die bisherige „enabled"-Bedingung („es fehlt eine Caption") zur **Render-Bedingung**: nichts fehlt ⇒ Aktions-Kopf **gar nicht im DOM**.
+
+**Änderung:** Der Aktions-Kopf-Block (`<div style={{ marginBottom: 10 }}>` mit „Alle auswählen" + „Captions generieren") wird jetzt auf `!readOnly && (missingCount > 0 || generating)` gegated (vorher nur `!readOnly`). Das `|| generating` hält den Block **während einer laufenden Batch-Generierung sichtbar**, auch wenn die `missingCount`-Bedingung mittendrin kippt (Captions werden optimistisch gefüllt) — sonst verschwände er mitten im Vorgang. Behavior-äquivalent für die Geschwister-Controls: „Alle auswählen" hat weiter sein inneres `missingCount > 0`-Gate, die Auswahl-Zähler-Zeile ihr `selectedCount > 0` (Auswahl ist ohnehin auf unbeschriftete Medien gestutzt). Der **selektionsabhängige Disabled-Zustand** des Generieren-Buttons (`disableGenerate = generating || selectedCount === 0`, 6b.3-Auswahlfluss) bleibt **unverändert** — entfernt wurde nur der „nichts fehlt"-Leerlauf-Zustand.
+
+**Nicht angefasst:** Vorher/Nachher-Slots, Prozess-„+"-Tile, Upload-Pipeline, Server-Routen, Viewer (Caption-Editor/Regenerate), `readOnly`-Verhalten (Button dort weiter aus). `pnpm typecheck` + `pnpm build` grün.
+
+---
+
 ## Launch-Fahrplan & deferierte Härtung
 
 Detail-Referenz für die Risikobewertung: [SECURITY_REVIEW.md](SECURITY_REVIEW.md) (bleibt im Repo). Dieser Abschnitt fasst die **Reihenfolge** des Live-Gangs und die **vor Kunde #2 verpflichtende** Härtung zusammen.
