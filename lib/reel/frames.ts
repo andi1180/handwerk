@@ -860,10 +860,10 @@ export async function normalizeClip({
 }
 
 /** Label-Boxfarben für VORHER/NACHHER (bakeBusinessPhotoFrame). */
-const LABEL_FONT_SIZE = 76;
+const LABEL_FONT_SIZE = 130;
 const LABEL_X = 80;
 const LABEL_Y = 80;
-const LABEL_BOX_BORDER_W = 24;
+const LABEL_BOX_BORDER_W = 36;
 const LABEL_BEFORE_COLOR = "0x3A3A3A"; // Anthrazit
 // NACHHER-Farbe kommt aus primaryColor (ffmpegColor-konvertiert).
 
