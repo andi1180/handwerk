@@ -8,6 +8,7 @@ import {
   type OrderStatus,
 } from "@/components/order-status-badge";
 import { OrderStatusFilter } from "@/components/order-status-filter";
+import { OrderSearchBar } from "@/components/order-search-bar";
 import { OrdersPagination } from "@/components/orders-pagination";
 import { OrdersRefreshButton } from "@/components/orders-refresh-button";
 import type { ReelStatus } from "@/app/portal/orders/[id]/generate-controls";
@@ -76,6 +77,7 @@ export default async function OrdersPage({
     quick?: string;
     page?: string;
     archived?: string;
+    q?: string;
   }>;
 }) {
   const business = await getCurrentBusiness();
@@ -86,9 +88,16 @@ export default async function OrdersPage({
     quick: quickParam,
     page: pageParam,
     archived: archivedParam,
+    q: qParam,
   } = await searchParams;
 
   const isArchiveView = archivedParam === "1";
+
+  // Freitext-Suche (Schritt B). Roh fürs Input (`initialQ`), getrimmt für die
+  // Filter-/Anzeige-Logik. Die Sanitisierung gegen `.or()`-Injection sitzt im
+  // Builder; hier zählt nur, ob überhaupt gesucht wird.
+  const searchQuery = (qParam ?? "").trim();
+  const hasSearch = searchQuery.length > 0;
 
   // Zwei Filter-Achsen, mutually exclusive: Quick führt, sonst Status-Dropdown.
   // Ist ein Quick aktiv, wird der Dropdown-Wert verworfen (Dropdown zeigt „Alle").
@@ -130,6 +139,7 @@ export default async function OrdersPage({
     selectCols:
       "id, customer_name, external_ref, short_summary, status, picked_up_at, created_at, archived_at",
     count: "exact",
+    q: qParam,
   })
     .order("created_at", { ascending: false })
     .range(from, from + ORDERS_PAGE_SIZE - 1)
@@ -146,12 +156,16 @@ export default async function OrdersPage({
         status: activeStatusFilter,
         quick: activeQuick,
         archived: isArchiveView,
+        q: searchQuery || null,
         page: totalPages,
       }),
     );
   }
 
-  const hasActiveFilter = activeQuick !== null || activeStatusFilter !== null;
+  // Aktive Suche zählt wie ein aktiver Filter (für `showFilter` + leeren Zustand):
+  // sonst verschwände bei 0 Treffern die Suchleiste, man könnte sie nicht ändern.
+  const hasActiveFilter =
+    activeQuick !== null || activeStatusFilter !== null || hasSearch;
   const showFilter = total > 0 || hasActiveFilter;
 
   // Zweite Achse: Reel-Render-Status für generierte/ausgelieferte Aufträge.
@@ -221,6 +235,7 @@ export default async function OrdersPage({
         orderIds={orders.map((o) => o.id)}
         status={activeStatusFilter}
         quick={activeQuick}
+        q={searchQuery || null}
       >
       <div className="orders-header">
         <div className="orders-title-row">
@@ -249,6 +264,7 @@ export default async function OrdersPage({
 
         {showFilter ? (
           <>
+            <OrderSearchBar initialQ={qParam ?? ""} archived={isArchiveView} />
             <OrderStatusFilter
               value={activeStatusFilter ?? "all"}
               quick={activeQuick}
@@ -450,6 +466,7 @@ export default async function OrdersPage({
             status={activeStatusFilter}
             quick={activeQuick}
             archived={isArchiveView}
+            q={searchQuery || null}
           />
         </>
       )}

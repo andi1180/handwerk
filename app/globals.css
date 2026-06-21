@@ -525,6 +525,62 @@ body {
   border-color: var(--gold-border);
 }
 
+/* Suchleiste der Auftragsliste (Schritt B) — volle Breite, dezent, Clear-x. */
+.order-search-bar {
+  position: relative;
+  width: 100%;
+}
+.order-search-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 38px 10px 12px;
+  font-family: inherit;
+  font-size: 14px;
+  color: var(--text-primary);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.order-search-input:focus {
+  border-color: var(--gold);
+  box-shadow: 0 0 0 3px var(--gold-light);
+}
+.order-search-input::placeholder {
+  color: var(--text-secondary);
+}
+.order-search-clear {
+  position: absolute;
+  top: 50%;
+  right: 7px;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 19px;
+  line-height: 1;
+  cursor: pointer;
+}
+.order-search-clear:hover {
+  color: var(--text-primary);
+}
+
+@media (max-width: 768px) {
+  /* Größere Eingabe am Handy (verhindert iOS-Auto-Zoom bei Fokus). */
+  .order-search-input {
+    font-size: 16px;
+    padding: 12px 40px 12px 14px;
+  }
+}
+
 /* --- Kleines Dropdown-Menü (Header „Archiv ▾", wiederverwendbar) --- */
 .dropdown {
   position: relative;

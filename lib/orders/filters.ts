@@ -82,18 +82,21 @@ export const ORDERS_PAGE_SIZE = 20;
  * für die Pagination-Links (`OrdersPagination`) und den Overshoot-Redirect der
  * Seite. Quick hat Vorrang vor Status (sie schließen sich ohnehin aus); `page`
  * wird nur ab Seite 2 angehängt (Seite 1 = nackte URL). `archived=true` schaltet
- * in den Archiv-Scope (`?archived=1`).
+ * in den Archiv-Scope (`?archived=1`). `q` (Freitext-Suche, Schritt B) ist
+ * **unabhängig** von status/quick (deren Exklusivität bleibt); leer ⇒ kein `q`.
  */
 export function buildOrdersUrl(opts: {
   status?: StatusFilter | null;
   quick?: QuickFilter | null;
   page?: number;
   archived?: boolean;
+  q?: string | null;
 }): string {
   const params = new URLSearchParams();
   if (opts.archived) params.set("archived", "1");
   if (opts.quick) params.set("quick", opts.quick);
   else if (opts.status) params.set("status", opts.status);
+  if (opts.q) params.set("q", opts.q);
   if (opts.page && opts.page > 1) params.set("page", String(opts.page));
   const qs = params.toString();
   return qs ? `/portal/orders?${qs}` : "/portal/orders";

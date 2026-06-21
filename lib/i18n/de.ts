@@ -63,6 +63,8 @@ export const de = {
     filterLabel: "Status",
     filterAll: "Alle",
     quickFlagged: "Geflaggt",
+    searchPlaceholder: "Suchen: Name, Nr., E-Mail …",
+    searchClear: "Suche löschen",
     pagination: "Seiten-Navigation",
     prevPage: "Zurück",
     nextPage: "Weiter",

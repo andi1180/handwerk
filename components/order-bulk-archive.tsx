@@ -51,6 +51,8 @@ type BulkSelectContextValue = {
   /** Aktiver Listen-Filter (für „Alle auswählen" → by-filter-Bulk). */
   status: StatusFilter | null;
   quick: QuickFilter | null;
+  /** Aktiver Freitext-Suchbegriff (Schritt B) — orthogonal zu status/quick. */
+  q: string | null;
   /** Anzahl im All-gefiltert-Modus, sonst `null` (= IDs-Modus). */
   allFilteredCount: number | null;
   /** In den All-gefiltert-Modus wechseln (leert die Einzelauswahl). */
@@ -73,11 +75,13 @@ export function OrderBulkSelectProvider({
   orderIds,
   status,
   quick,
+  q,
   children,
 }: {
   orderIds: string[];
   status: StatusFilter | null;
   quick: QuickFilter | null;
+  q: string | null;
   children: React.ReactNode;
 }) {
   const [selectMode, setSelectMode] = useState(false);
@@ -88,7 +92,7 @@ export function OrderBulkSelectProvider({
   // Archivieren) Auswahl + Modus zurücksetzen — nichts wird über Seiten/Filter
   // getragen (eine All-gefiltert-Auswahl gälte sonst für den falschen Filter).
   const idsKey = orderIds.join(",");
-  const filterKey = `${status ?? ""}|${quick ?? ""}`;
+  const filterKey = `${status ?? ""}|${quick ?? ""}|${q ?? ""}`;
   useEffect(() => {
     setSelected(new Set());
     setSelectMode(false);
@@ -131,6 +135,7 @@ export function OrderBulkSelectProvider({
       clear,
       status,
       quick,
+      q,
       allFilteredCount,
       selectAllFiltered,
     }),
@@ -143,6 +148,7 @@ export function OrderBulkSelectProvider({
       clear,
       status,
       quick,
+      q,
       allFilteredCount,
       selectAllFiltered,
     ],
@@ -383,6 +389,7 @@ function BulkArchiveBar() {
     exitSelectMode,
     status,
     quick,
+    q,
     allFilteredCount,
     selectAllFiltered,
   } = useBulkSelect();
@@ -421,6 +428,7 @@ function BulkArchiveBar() {
       const params = new URLSearchParams({ scope: "filter" });
       if (quick) params.set("quick", quick);
       else if (status) params.set("status", status);
+      if (q) params.set("q", q); // Freitext-Suche orthogonal zu status/quick
       const res = await fetch(
         `/api/portal/orders/archive-bulk?${params.toString()}`,
       );
@@ -451,7 +459,7 @@ function BulkArchiveBar() {
       // All-gefiltert ⇒ `{ scope:"filter", status, quick }` (alle Seiten);
       // sonst die angetippten IDs (3a).
       const body = allFiltered
-        ? { scope: "filter", status, quick, archive: true }
+        ? { scope: "filter", status, quick, q, archive: true }
         : { ids: [...selected], archive: true };
       const res = await fetch("/api/portal/orders/archive-bulk", {
         method: "POST",

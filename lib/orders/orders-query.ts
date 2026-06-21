@@ -37,6 +37,14 @@ export type FilteredOrdersOptions = {
    * bleibt unverändert (sie übergibt `head` nicht).
    */
   head?: boolean;
+  /**
+   * Optionaler Freitext-Suchbegriff (Auftragslisten-Suche, Schritt B). ADDITIV
+   * zur Filter-Verzweigung (status/quick) — sucht über Kundenname / externe
+   * Referenz / E-Mail / Telefon. **Sanitisiert** gegen `.or()`-Injection (nur
+   * Buchstaben/Ziffern + `@ . + - _` + Leerzeichen bleiben; alle PostgREST-
+   * Sonderzeichen werden gestrippt). Leer/nur-Sonderzeichen ⇒ kein Filter.
+   */
+  q?: string;
 };
 
 /**
@@ -71,6 +79,7 @@ export function buildFilteredOrdersQuery(
     selectCols,
     count,
     head,
+    q,
   } = opts;
 
   // „In Arbeit" = Entwurf MIT Medium ⇒ order_media!inner direkt in der Query;
@@ -118,6 +127,21 @@ export function buildFilteredOrdersQuery(
     query = query.eq("status", "generated").eq("booklets.reel_status", "failed");
   } else if (isOrderStatus(status)) {
     query = query.eq("status", status);
+  }
+
+  // Freitext-Suche (Schritt B) — ADDITIV zur obigen Filter-Verzweigung.
+  // ⚠️ Das `replace` IST die Injection-Absicherung: es lässt NUR Unicode-
+  // Buchstaben/Ziffern + `@ . + - _` + Leerzeichen durch und strippt alle
+  // PostgREST-`.or()`-Sonderzeichen (`,` `(` `)` `*` `\` `:` `"` …). Bleibt nach
+  // dem Strippen nichts übrig ⇒ kein Filter. `customer_email`/`customer_phone`
+  // müssen NICHT in `selectCols` stehen (PostgREST filtert auch auf nicht
+  // selektierte Spalten).
+  const safe = (q ?? "").replace(/[^\p{L}\p{N}@.+\-_ ]/gu, "").trim();
+  if (safe) {
+    const pat = `*${safe}*`;
+    query = query.or(
+      `customer_name.ilike.${pat},external_ref.ilike.${pat},customer_email.ilike.${pat},customer_phone.ilike.${pat}`,
+    );
   }
 
   return query;

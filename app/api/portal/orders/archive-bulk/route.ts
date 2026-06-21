@@ -21,25 +21,35 @@ const MAX_BULK_IDS = 500;
  */
 const MAX_FILTER_RESOLVE = 5000;
 
-type ResolvedFilter = { status: StatusFilter | null; quick: QuickFilter | null };
+type ResolvedFilter = {
+  status: StatusFilter | null;
+  quick: QuickFilter | null;
+  q: string | null;
+};
 
 /**
- * Validiert + löst die beiden Filter-Achsen auf — MIRROR der Listen-Logik
- * (`page.tsx`): Quick (`?quick=`) hat Vorrang vor Status (`?status=`); ist ein
- * Quick aktiv, wird der Status verworfen. `null`/`undefined` = Achse nicht
- * gesetzt. Ein VORHANDENER, aber ungültiger Wert ⇒ `null`-Ergebnis (der Aufrufer
+ * Validiert + löst die Filter-Achsen auf — MIRROR der Listen-Logik (`page.tsx`):
+ * Quick (`?quick=`) hat Vorrang vor Status (`?status=`); ist ein Quick aktiv,
+ * wird der Status verworfen. `null`/`undefined` = Achse nicht gesetzt. Ein
+ * VORHANDENER, aber ungültiger Status/Quick-Wert ⇒ `null`-Ergebnis (der Aufrufer
  * antwortet 400), damit der by-filter-Bulk nur exakt rekonstruierbare Filter
  * archiviert (kein „raten").
+ *
+ * `q` (Freitext-Suche, Schritt B) wird hier nur durchgereicht — die
+ * Sanitisierung gegen `.or()`-Injection sitzt in `buildFilteredOrdersQuery`; ein
+ * Nicht-String ⇒ `null`.
  */
 function resolveFilter(
   rawStatus: unknown,
   rawQuick: unknown,
+  rawQ: unknown,
 ): ResolvedFilter | null {
   if (rawQuick != null && !isQuickFilter(rawQuick)) return null;
   if (rawStatus != null && !isStatusFilter(rawStatus)) return null;
   const quick = isQuickFilter(rawQuick) ? rawQuick : null;
   const status = !quick && isStatusFilter(rawStatus) ? rawStatus : null;
-  return { status, quick };
+  const q = typeof rawQ === "string" && rawQ.length > 0 ? rawQ : null;
+  return { status, quick, q };
 }
 
 /**
@@ -96,6 +106,7 @@ export async function GET(request: Request) {
     const filter = resolveFilter(
       url.searchParams.get("status"),
       url.searchParams.get("quick"),
+      url.searchParams.get("q"),
     );
     if (!filter) {
       return NextResponse.json({ error: "invalid_filter" }, { status: 400 });
@@ -120,6 +131,7 @@ export async function GET(request: Request) {
       selectCols: "id",
       count: "exact",
       head: true,
+      q: filter.q ?? undefined,
     }).or(
       // Eligibility-Boden — byte-identische Bedingung wie alle Bulk-Pfade.
       `status.in.(${ARCHIVABLE_STATUSES.join(",")}),picked_up_at.not.is.null`,
@@ -219,7 +231,7 @@ export async function POST(request: Request) {
   // UPDATE-WHERE ausdrücken ⇒ erst per `buildFilteredOrdersQuery` die IDs
   // auflösen, dann diese IDs updaten. `business_id` NUR aus der Session.
   if (payload.scope === "filter") {
-    const filter = resolveFilter(payload.status, payload.quick);
+    const filter = resolveFilter(payload.status, payload.quick, payload.q);
     if (!filter) {
       return NextResponse.json({ error: "invalid_filter" }, { status: 400 });
     }
@@ -243,6 +255,7 @@ export async function POST(request: Request) {
         archived: false,
         draftWithMediaIds,
         selectCols: "id",
+        q: filter.q ?? undefined,
       },
     )
       .or(
