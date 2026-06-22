@@ -129,25 +129,6 @@ async function postMetadataWithRetry(
   throw lastError ?? new Error("metadata_post_failed");
 }
 
-// ════════════════════════════════════════════════════════════════════════════
-// TEMP_FRAMEDIAG — On-Device-Diagnose der Video-Frame-Extraktion (NACH der
-// Analyse wieder entfernen, siehe Commit-Hinweis). Reine Beobachtung: Zeilen
-// landen in sessionStorage (überlebt router.refresh()), das Panel unten zeigt sie.
-// ════════════════════════════════════════════════════════════════════════════
-const FRAMEDIAG_KEY = "__framediag"; // TEMP_FRAMEDIAG
-
-/** TEMP_FRAMEDIAG — hängt eine Diagnose-Zeile (mit Zeitstempel) an sessionStorage. */
-function framediagAppend(line: string): void {
-  if (typeof window === "undefined") return; // SSR-safe
-  try {
-    const ts = new Date().toISOString().slice(11, 23); // HH:MM:SS.mmm
-    const prev = window.sessionStorage.getItem(FRAMEDIAG_KEY) ?? "";
-    window.sessionStorage.setItem(FRAMEDIAG_KEY, `${prev}${ts}  ${line}\n`);
-  } catch {
-    // sessionStorage kann fehlen/voll sein — Diagnose ist best-effort.
-  }
-}
-
 /**
  * Foto-Capture (Client Component). Native Kamera → Vorschau + Stichwort/Tag →
  * Hintergrund-Upload (zweistufig: Datei in Storage, danach Metadaten via Route
@@ -263,19 +244,13 @@ export function Capture({
   const extractAndUploadFrames = useCallback(
     async (videoFile: File, videoStoragePath: string) => {
       const ctx = `order ${orderId}, ${videoStoragePath}`;
-      const diag = framediagAppend; // TEMP_FRAMEDIAG: Diagnose-Sink (sessionStorage)
-      diag(`videoPath=${videoStoragePath}`); // TEMP_FRAMEDIAG
       let frames: Awaited<ReturnType<typeof extractVideoFrames>>;
       try {
-        frames = await extractVideoFrames(videoFile, diag); // TEMP_FRAMEDIAG: diag arg
+        frames = await extractVideoFrames(videoFile);
       } catch (err) {
-        diag(
-          `extractAndUploadFrames THROW ${err instanceof Error ? err.message : String(err)}`,
-        ); // TEMP_FRAMEDIAG
         console.error(`[capture] Frame-Extraktion fehlgeschlagen (${ctx}):`, err);
         return;
       }
-      diag(`extract -> frames=${frames.length}`); // TEMP_FRAMEDIAG
       if (frames.length === 0) return; // kein brauchbarer Frame → Video bleibt ohne
 
       // Frames hochladen und Pfade der erfolgreichen Uploads sammeln.
@@ -284,12 +259,8 @@ export function Capture({
         const path = videoFramePath(videoStoragePath, frame.index);
         try {
           await uploadWithRetry(supabase, path, frame.blob, "image/jpeg");
-          diag(`upload pos${frame.index} -> ok`); // TEMP_FRAMEDIAG
           uploadedPaths.push(path);
         } catch (err) {
-          diag(
-            `upload pos${frame.index} -> FAIL ${err instanceof Error ? err.message : String(err)}`,
-          ); // TEMP_FRAMEDIAG
           console.error(
             `[capture] Frame-Upload fehlgeschlagen (${ctx}, frame ${frame.index}):`,
             err,
@@ -732,9 +703,6 @@ export function Capture({
           ))}
         </div>
       ) : null}
-
-      {/* TEMP_FRAMEDIAG — sichtbares On-Device-Debug-Panel (nach der Analyse entfernen). */}
-      <FrameDiagPanel />
     </div>
   );
 }
@@ -831,114 +799,6 @@ function PendingRow({
           {t(DEFAULT_LOCALE, "capture.retry")}
         </div>
       ) : null}
-    </div>
-  );
-}
-
-/**
- * TEMP_FRAMEDIAG — sichtbares On-Device-Debug-Panel. Liest sessionStorage
- * ["__framediag"] alle 750 ms und zeigt die Diagnose-Zeilen der Frame-Extraktion
- * (überlebt router.refresh(), weil die Daten in sessionStorage liegen — wichtig,
- * da die Extraktion erst NACH dem refresh in runUpload startet). Text ist
- * selektierbar (iPhone-Copy); Buttons „Kopieren"/„Leeren". NACH der Analyse
- * zusammen mit den übrigen TEMP_FRAMEDIAG-Stellen wieder entfernen.
- */
-function FrameDiagPanel() {
-  const [lines, setLines] = useState<string[]>([]);
-  const [copied, setCopied] = useState(false);
-
-  useEffect(() => {
-    const read = () => {
-      if (typeof window === "undefined") return;
-      const raw = window.sessionStorage.getItem(FRAMEDIAG_KEY) ?? "";
-      setLines(raw ? raw.split("\n").filter((l) => l.length > 0) : []);
-    };
-    read();
-    const id = window.setInterval(read, 750);
-    return () => window.clearInterval(id);
-  }, []);
-
-  const copy = () => {
-    if (typeof window === "undefined") return;
-    const raw = window.sessionStorage.getItem(FRAMEDIAG_KEY) ?? "";
-    void navigator.clipboard?.writeText(raw)?.then(
-      () => {
-        setCopied(true);
-        window.setTimeout(() => setCopied(false), 1500);
-      },
-      () => {
-        // best-effort — Clipboard kann blockiert sein (Webview).
-      },
-    );
-  };
-
-  const clear = () => {
-    if (typeof window === "undefined") return;
-    window.sessionStorage.removeItem(FRAMEDIAG_KEY);
-    setLines([]);
-  };
-
-  const btnStyle: React.CSSProperties = {
-    flexShrink: 0,
-    padding: "4px 10px",
-    fontSize: 11,
-    fontFamily: "monospace",
-    color: "#0A0A0A",
-    background: "#C4A95B",
-    border: "none",
-    borderRadius: 4,
-    cursor: "pointer",
-  };
-
-  return (
-    <div
-      style={{
-        position: "fixed",
-        left: 0,
-        right: 0,
-        bottom: 0,
-        zIndex: 99999,
-        maxHeight: "40vh",
-        overflowY: "auto",
-        background: "rgba(10,10,10,0.92)",
-        color: "#9EF09E",
-        fontFamily: "monospace",
-        fontSize: 11,
-        lineHeight: 1.4,
-        padding: 8,
-        WebkitUserSelect: "text",
-        userSelect: "text",
-        borderTop: "2px solid #C4A95B",
-      }}
-    >
-      <div
-        style={{
-          display: "flex",
-          gap: 8,
-          alignItems: "center",
-          marginBottom: 6,
-          color: "#C4A95B",
-        }}
-      >
-        <strong style={{ flex: 1 }}>DEBUG · Frame-Extraktion (TEMP)</strong>
-        <button type="button" onClick={copy} style={btnStyle}>
-          {copied ? "✓ kopiert" : "Kopieren"}
-        </button>
-        <button type="button" onClick={clear} style={btnStyle}>
-          Leeren
-        </button>
-      </div>
-      {lines.length === 0 ? (
-        <div style={{ opacity: 0.6 }}>
-          — noch keine Daten — Video aufnehmen/hochladen —
-        </div>
-      ) : (
-        lines.map((l, idx) => (
-          <div key={idx} style={{ whiteSpace: "pre-wrap" }}>
-            {l}
-          </div>
-        ))
-      )}
     </div>
   );
 }

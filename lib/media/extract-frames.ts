@@ -37,14 +37,7 @@ const SAMPLE_TARGET = 4096;
  * Extrahiert die Vorschau-Frames. Liefert die gültigen (nicht-schwarzen) Frames
  * mit ihrem Positions-Index; bei Problemen ein leeres bzw. kürzeres Array.
  */
-export async function extractVideoFrames(
-  file: File,
-  diag?: (line: string) => void, // TEMP_FRAMEDIAG
-): Promise<ExtractedFrame[]> {
-  // TEMP_FRAMEDIAG
-  diag?.(
-    `start ${file.name} ${file.type || "?"} ${Math.round(file.size / 1024)}KB`,
-  );
+export async function extractVideoFrames(file: File): Promise<ExtractedFrame[]> {
   const objectUrl = URL.createObjectURL(file);
   const video = document.createElement("video");
   video.preload = "auto";
@@ -55,29 +48,19 @@ export async function extractVideoFrames(
 
   try {
     video.src = objectUrl;
-    await waitForMetadata(video, diag); // TEMP_FRAMEDIAG: diag durchgereicht
-    // TEMP_FRAMEDIAG
-    diag?.(
-      `meta ok dur=${video.duration}s vw=${video.videoWidth} vh=${video.videoHeight} rs=${video.readyState}`,
-    );
+    await waitForMetadata(video);
 
     const duration = video.duration;
     const vw = video.videoWidth;
     const vh = video.videoHeight;
-    if (!Number.isFinite(duration) || duration <= 0 || !vw || !vh) {
-      diag?.(`abort: bad dims dur=${duration} vw=${vw} vh=${vh}`); // TEMP_FRAMEDIAG
-      return [];
-    }
+    if (!Number.isFinite(duration) || duration <= 0 || !vw || !vh) return [];
 
     const { width, height } = scaledSize(vw, vh);
     const canvas = document.createElement("canvas");
     canvas.width = width;
     canvas.height = height;
     const ctx = canvas.getContext("2d", { willReadFrequently: true });
-    if (!ctx) {
-      diag?.(`abort: no canvas 2d ctx`); // TEMP_FRAMEDIAG
-      return [];
-    }
+    if (!ctx) return [];
 
     const frames: ExtractedFrame[] = [];
     for (const [i, position] of VIDEO_FRAME_POSITIONS.entries()) {
@@ -87,34 +70,18 @@ export async function extractVideoFrames(
         0.05,
         Math.max(0.05, duration - 0.1),
       );
-      diag?.(`pos${i} seek=${time.toFixed(2)}s …`); // TEMP_FRAMEDIAG
       try {
         await seekTo(video, time);
-        diag?.(`pos${i} seeked ok`); // TEMP_FRAMEDIAG
         ctx.drawImage(video, 0, 0, width, height);
-        diag?.(`pos${i} draw w=${width} h=${height}`); // TEMP_FRAMEDIAG
-        // TEMP_FRAMEDIAG: gemessenen Schwarz-Anteil mitgeben — Verwerf-Schwelle
-        // (BLACK_RATIO) bleibt unverändert beim Aufrufer.
-        const ratio = measureBlackRatio(ctx, width, height);
-        const drop = ratio > BLACK_RATIO;
-        diag?.(
-          `pos${i} black=${ratio.toFixed(3)} verdict=${drop ? "drop" : "keep"}`,
-        ); // TEMP_FRAMEDIAG
-        if (drop) continue; // leeren Frame verwerfen
+        if (isMostlyBlack(ctx, width, height)) continue; // leeren Frame verwerfen
         const blob = await canvasToJpeg(canvas);
-        diag?.(`pos${i} blob ${blob.size}B`); // TEMP_FRAMEDIAG
         frames.push({ index: i, blob });
-      } catch (err) {
+      } catch {
         // Einzelnen Frame überspringen; übrige weiter versuchen (graceful).
-        diag?.(
-          `pos${i} THROW ${err instanceof Error ? err.message : String(err)}`,
-        ); // TEMP_FRAMEDIAG (z. B. seeked TIMEOUT / blob FAIL)
       }
     }
-    diag?.(`frames=${frames.length}`); // TEMP_FRAMEDIAG
     return frames;
-  } catch (err) {
-    diag?.(`THROW ${err instanceof Error ? err.message : String(err)}`); // TEMP_FRAMEDIAG
+  } catch {
     return []; // Metadaten-/Decode-Problem ⇒ keine Frames, Video lädt trotzdem hoch.
   } finally {
     URL.revokeObjectURL(objectUrl);
@@ -128,10 +95,7 @@ export async function extractVideoFrames(
 }
 
 /** Wartet auf `loadedmetadata` (mit Timeout). */
-function waitForMetadata(
-  video: HTMLVideoElement,
-  diag?: (line: string) => void, // TEMP_FRAMEDIAG
-): Promise<void> {
+function waitForMetadata(video: HTMLVideoElement): Promise<void> {
   return new Promise<void>((resolve, reject) => {
     if (video.readyState >= 1 && Number.isFinite(video.duration)) {
       resolve();
@@ -139,7 +103,6 @@ function waitForMetadata(
     }
     const timer = setTimeout(() => {
       cleanup();
-      diag?.(`meta TIMEOUT nach ${METADATA_TIMEOUT_MS}ms`); // TEMP_FRAMEDIAG
       reject(new Error("metadata_timeout"));
     }, METADATA_TIMEOUT_MS);
     const onLoaded = () => {
@@ -148,7 +111,6 @@ function waitForMetadata(
     };
     const onError = () => {
       cleanup();
-      diag?.(`meta FAIL (error event)`); // TEMP_FRAMEDIAG
       reject(new Error("metadata_failed"));
     };
     const cleanup = () => {
@@ -192,22 +154,17 @@ function seekTo(video: HTMLVideoElement, time: number): Promise<void> {
 }
 
 /**
- * Schwarz-/Leer-Guard: misst über eine Pixel-Stichprobe den Anteil (nahezu)
- * schwarzer Pixel (0…1). Der Aufrufer verwirft den Frame bei `> BLACK_RATIO`.
- *
- * TEMP_FRAMEDIAG: aus dem früheren `isMostlyBlack` extrahiert, damit der gemessene
- * Anteil als Zahl ausgegeben werden kann — die Verwerf-Schwelle (BLACK_RATIO)
- * ist UNVERÄNDERT (das `> BLACK_RATIO` liegt jetzt beim Aufrufer). Leeres Canvas
- * (`pixels === 0`) liefert 1 ⇒ wird wie zuvor verworfen.
+ * Schwarz-/Leer-Guard: zählt über eine Pixel-Stichprobe den Anteil (nahezu)
+ * schwarzer Pixel. > BLACK_RATIO ⇒ Frame gilt als leer und wird verworfen.
  */
-function measureBlackRatio(
+function isMostlyBlack(
   ctx: CanvasRenderingContext2D,
   width: number,
   height: number,
-): number {
+): boolean {
   const { data } = ctx.getImageData(0, 0, width, height);
   const pixels = width * height;
-  if (pixels === 0) return 1;
+  if (pixels === 0) return true;
   const step = Math.max(1, Math.floor(pixels / SAMPLE_TARGET));
   let dark = 0;
   let total = 0;
@@ -220,7 +177,7 @@ function measureBlackRatio(
     if (luma < BLACK_LUMA) dark++;
     total++;
   }
-  return total > 0 ? dark / total : 0;
+  return total > 0 && dark / total > BLACK_RATIO;
 }
 
 /** Begrenzt `value` auf [min, max]. */
