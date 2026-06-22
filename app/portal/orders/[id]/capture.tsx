@@ -846,6 +846,7 @@ function PendingRow({
 function FrameDiagPanel() {
   const [text, setText] = useState("");
   const [copied, setCopied] = useState(false);
+  const [isOpen, setIsOpen] = useState(false); // initial minimiert ⇒ blockiert den Upload nicht
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -909,6 +910,8 @@ function FrameDiagPanel() {
     cursor: "pointer",
   };
 
+  const lineCount = text ? text.split("\n").length : 0;
+
   return (
     <div
       style={{
@@ -917,6 +920,7 @@ function FrameDiagPanel() {
         right: 0,
         bottom: 0,
         zIndex: 99999,
+        pointerEvents: "auto",
         background: "rgba(10,10,10,0.95)",
         padding: 8,
         borderTop: "2px solid #C4A95B",
@@ -927,49 +931,71 @@ function FrameDiagPanel() {
           display: "flex",
           gap: 8,
           alignItems: "center",
-          marginBottom: 6,
-          color: "#C4A95B",
           fontFamily: "monospace",
           fontSize: 13,
         }}
       >
-        <strong style={{ flex: 1 }}>DEBUG · Frame-Extraktion (TEMP)</strong>
-        <button type="button" onClick={copy} style={btnStyle}>
-          {copied ? "kopiert ✓" : "Kopieren"}
+        {/* Toggle: eingeklappt = nur diese Leiste (~40px), kein Layout-Block. */}
+        <button
+          type="button"
+          onClick={() => setIsOpen((v) => !v)}
+          style={{
+            flex: 1,
+            textAlign: "left",
+            padding: "6px 10px",
+            fontSize: 13,
+            fontFamily: "monospace",
+            color: "#C4A95B",
+            background: "transparent",
+            border: "1px solid #C4A95B",
+            borderRadius: 4,
+            cursor: "pointer",
+          }}
+        >
+          {isOpen ? "▼" : "▲"} DEBUG ({lineCount} Zeilen)
         </button>
-        <button type="button" onClick={clear} style={btnStyle}>
-          Leeren
-        </button>
+        {isOpen ? (
+          <>
+            <button type="button" onClick={copy} style={btnStyle}>
+              {copied ? "kopiert ✓" : "Kopieren"}
+            </button>
+            <button type="button" onClick={clear} style={btnStyle}>
+              Leeren
+            </button>
+          </>
+        ) : null}
       </div>
-      {/* Readonly-Textarea: 16px (lesbar + kein iOS-Zoom), selektierbar, eigener Scroll. */}
-      <textarea
-        ref={textareaRef}
-        readOnly
-        spellCheck={false}
-        autoCapitalize="off"
-        autoCorrect="off"
-        value={text}
-        placeholder="— noch keine Daten — Video aufnehmen/hochladen —"
-        style={{
-          width: "100%",
-          height: "40vh",
-          boxSizing: "border-box",
-          margin: 0,
-          fontFamily: "monospace",
-          fontSize: 16,
-          lineHeight: 1.4,
-          whiteSpace: "pre",
-          overflow: "auto",
-          background: "#0A0A0A",
-          color: "#9EF09E",
-          border: "1px solid #C4A95B",
-          borderRadius: 4,
-          padding: 8,
-          resize: "none",
-          WebkitUserSelect: "text",
-          userSelect: "text",
-        }}
-      />
+      {/* Ausgeklappt: Readonly-Textarea (16px, selektierbar, eigener Scroll, kein iOS-Zoom). */}
+      {isOpen ? (
+        <textarea
+          ref={textareaRef}
+          readOnly
+          spellCheck={false}
+          autoCapitalize="off"
+          autoCorrect="off"
+          value={text}
+          placeholder="— noch keine Daten — Video aufnehmen/hochladen —"
+          style={{
+            width: "100%",
+            height: "30vh",
+            boxSizing: "border-box",
+            margin: "6px 0 0",
+            fontFamily: "monospace",
+            fontSize: 16,
+            lineHeight: 1.4,
+            whiteSpace: "pre",
+            overflow: "auto",
+            background: "#0A0A0A",
+            color: "#9EF09E",
+            border: "1px solid #C4A95B",
+            borderRadius: 4,
+            padding: 8,
+            resize: "none",
+            WebkitUserSelect: "text",
+            userSelect: "text",
+          }}
+        />
+      ) : null}
     </div>
   );
 }
