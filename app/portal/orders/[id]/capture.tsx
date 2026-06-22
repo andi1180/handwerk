@@ -844,18 +844,14 @@ function PendingRow({
  * zusammen mit den übrigen TEMP_FRAMEDIAG-Stellen wieder entfernen.
  */
 function FrameDiagPanel() {
-  const [text, setText] = useState("");
+  const [lines, setLines] = useState<string[]>([]);
   const [copied, setCopied] = useState(false);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     const read = () => {
       if (typeof window === "undefined") return;
-      // NICHT aktualisieren, solange der Nutzer im Feld markiert — sonst springt
-      // die Selektion weg.
-      if (document.activeElement === textareaRef.current) return;
       const raw = window.sessionStorage.getItem(FRAMEDIAG_KEY) ?? "";
-      setText(raw.replace(/\n+$/, ""));
+      setLines(raw ? raw.split("\n").filter((l) => l.length > 0) : []);
     };
     read();
     const id = window.setInterval(read, 750);
@@ -863,44 +859,29 @@ function FrameDiagPanel() {
   }, []);
 
   const copy = () => {
-    const ta = textareaRef.current;
-    if (typeof window === "undefined" || !ta) return;
-    const value = ta.value;
-    // a) Selektion setzen — iOS braucht setSelectionRange (nicht nur .select()).
-    //    Schlägt das Kopieren fehl, ist der Text damit manuell markierbar.
-    ta.focus();
-    ta.setSelectionRange(0, value.length);
-    const flash = () => {
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1500);
-    };
-    // c) Fallback: Copy über die aktive Selektion (ältere/iOS-Webviews).
-    const execFallback = () => {
-      try {
-        if (document.execCommand("copy")) flash();
-      } catch {
-        // Selektion bleibt ⇒ manuell kopierbar.
-      }
-    };
-    // b) Moderne Clipboard-API zuerst, sonst direkt der execCommand-Fallback.
-    const p = navigator.clipboard?.writeText(value);
-    if (p) {
-      void p.then(flash, execFallback);
-    } else {
-      execFallback();
-    }
+    if (typeof window === "undefined") return;
+    const raw = window.sessionStorage.getItem(FRAMEDIAG_KEY) ?? "";
+    void navigator.clipboard?.writeText(raw)?.then(
+      () => {
+        setCopied(true);
+        window.setTimeout(() => setCopied(false), 1500);
+      },
+      () => {
+        // best-effort — Clipboard kann blockiert sein (Webview).
+      },
+    );
   };
 
   const clear = () => {
     if (typeof window === "undefined") return;
     window.sessionStorage.removeItem(FRAMEDIAG_KEY);
-    setText("");
+    setLines([]);
   };
 
   const btnStyle: React.CSSProperties = {
     flexShrink: 0,
-    padding: "6px 12px",
-    fontSize: 13,
+    padding: "4px 10px",
+    fontSize: 11,
     fontFamily: "monospace",
     color: "#0A0A0A",
     background: "#C4A95B",
@@ -917,8 +898,16 @@ function FrameDiagPanel() {
         right: 0,
         bottom: 0,
         zIndex: 99999,
-        background: "rgba(10,10,10,0.95)",
+        maxHeight: "40vh",
+        overflowY: "auto",
+        background: "rgba(10,10,10,0.92)",
+        color: "#9EF09E",
+        fontFamily: "monospace",
+        fontSize: 11,
+        lineHeight: 1.4,
         padding: 8,
+        WebkitUserSelect: "text",
+        userSelect: "text",
         borderTop: "2px solid #C4A95B",
       }}
     >
@@ -929,47 +918,27 @@ function FrameDiagPanel() {
           alignItems: "center",
           marginBottom: 6,
           color: "#C4A95B",
-          fontFamily: "monospace",
-          fontSize: 13,
         }}
       >
         <strong style={{ flex: 1 }}>DEBUG · Frame-Extraktion (TEMP)</strong>
         <button type="button" onClick={copy} style={btnStyle}>
-          {copied ? "kopiert ✓" : "Kopieren"}
+          {copied ? "✓ kopiert" : "Kopieren"}
         </button>
         <button type="button" onClick={clear} style={btnStyle}>
           Leeren
         </button>
       </div>
-      {/* Readonly-Textarea: 16px (lesbar + kein iOS-Zoom), selektierbar, eigener Scroll. */}
-      <textarea
-        ref={textareaRef}
-        readOnly
-        spellCheck={false}
-        autoCapitalize="off"
-        autoCorrect="off"
-        value={text}
-        placeholder="— noch keine Daten — Video aufnehmen/hochladen —"
-        style={{
-          width: "100%",
-          height: "40vh",
-          boxSizing: "border-box",
-          margin: 0,
-          fontFamily: "monospace",
-          fontSize: 16,
-          lineHeight: 1.4,
-          whiteSpace: "pre",
-          overflow: "auto",
-          background: "#0A0A0A",
-          color: "#9EF09E",
-          border: "1px solid #C4A95B",
-          borderRadius: 4,
-          padding: 8,
-          resize: "none",
-          WebkitUserSelect: "text",
-          userSelect: "text",
-        }}
-      />
+      {lines.length === 0 ? (
+        <div style={{ opacity: 0.6 }}>
+          — noch keine Daten — Video aufnehmen/hochladen —
+        </div>
+      ) : (
+        lines.map((l, idx) => (
+          <div key={idx} style={{ whiteSpace: "pre-wrap" }}>
+            {l}
+          </div>
+        ))
+      )}
     </div>
   );
 }
