@@ -2458,7 +2458,7 @@ Jedes **Bild** trägt eine **Kategorie**, die den festen Booklet-Aufbau steuert.
 
 ### Kategorie nachträglich wechseln
 
-[app/api/portal/orders/[id]/media/[mediaId]/category/route.ts](app/api/portal/orders/[id]/media/[mediaId]/category/route.ts) (`PATCH`): AUTHENTICATED, Media über RLS gegen `order_id` (404), Body `{ category }` (sonst 400 `invalid_category`), **Video nur `process`** (`video_process_only`), before/after max 1 über `.neq("id", media.id)`-Count (`category_taken`). UI im **Vollbild-Viewer** als Toggle-Reihe (Foto, Editier-Modus); optimistisch + `router.refresh()`; belegte Slots deaktiviert.
+[app/api/portal/orders/[id]/media/[mediaId]/category/route.ts](app/api/portal/orders/[id]/media/[mediaId]/category/route.ts) (`PATCH`): AUTHENTICATED, Media über RLS gegen `order_id` (404), Body `{ category }` (sonst 400 `invalid_category`), **Video nur `process`** (`video_process_only`), before/after max 1 über `.neq("id", media.id)`-Count (`category_taken`). **Die Route BLEIBT, hat aber keinen UI-Aufrufer mehr** — der Kategorie-Toggle im Vollbild-Viewer wurde entfernt (s. „Kategorie-Selektor aus dem Vollbild-Viewer entfernt"); die Kategorie kommt aus dem Einstieg (Slot/Prozess-„+"). Für späteres Umkategorisieren reaktivierbar.
 
 ### Gruppierte Anzeige ([app/portal/orders/[id]/media-list.tsx](app/portal/orders/[id]/media-list.tsx))
 
@@ -3038,6 +3038,18 @@ Baut auf Schritt 3b (Button-Grundgerüst) und 3a (geteilte `lib/share/file-share
 **Nicht angefasst:** der Vollbild-Viewer-Kategorie-Toggle (post-upload Umkategorisierung, [media-list.tsx](app/portal/orders/[id]/media-list.tsx)), Stichwort-Feld, Vorschau, Speichern/Verwerfen, Upload-Pipeline, Server-Guards.
 
 **i18n** ([de.ts](lib/i18n/de.ts)): nur `capture.category` („Kategorie", exklusiv das Selektor-Feld-Label) entfernt. `capture.categoryTaken` („belegt") bleibt — wird vom Viewer-Kategorie-Toggle genutzt; `capture.categoryTakenNotice` bleibt — Hinweis im Slot-Upload-Guard; die geteilten `mediaCategory.*`-Labels (Vorher/Nachher/Prozess) bleiben (Slots/Viewer). `pnpm typecheck` + `pnpm build` grün.
+
+---
+
+## Kategorie-Selektor aus dem Vollbild-Viewer entfernt (Kategorie kommt aus dem Slot; PATCH-Route bleibt)
+
+**Reines Frontend + i18n** — keine Migration, kein Backend. **Die PATCH-Route [.../media/[mediaId]/category/route.ts](app/api/portal/orders/[id]/media/[mediaId]/category/route.ts) BLEIBT** (nur die UI entfällt). Betroffen: NUR [media-list.tsx](app/portal/orders/[id]/media-list.tsx) + [de.ts](lib/i18n/de.ts). Kein `<form>`, kein `any`.
+
+**Idee:** Der Kategorie-Toggle im Vollbild-Viewer (post-upload Umkategorisierung) war nach der „Kategorie kommt aus dem Einstieg"-Entscheidung (Slot/Prozess-„+", s. Capture-Entwurf-Abschnitt oben) überflüssig — die Kategorie steht beim Upload bereits fest. Damit ist die Detailseite konsistent: kein UI-Weg mehr, die Kategorie nach dem Upload zu ändern.
+
+**media-list.tsx:** Der `<CategorySelector>`-Render im `MediaViewer` (Bedingung `!readOnly && media.media_type === "photo"`) ist entfernt. **Dead Code raus** (geprüft — alle ausschließlich Selektor-Speiser): die `CategorySelector`-Komponente, `handleCategoryChange` (war nur als `onCategoryChange`-Prop an den Viewer gereicht), die `CATEGORY_OPTIONS`-Konstante; die Viewer-Props `onCategoryChange`/`disableBefore`/`disableAfter` (Call-Site + Typ/Destructuring). `disableBefore`/`disableAfter` speisten **ausschließlich** den Selektor — **nicht** die `BeforeAfterSlot`-Belegung (die über `beforeItem`/`afterItem` als `media`-Prop + `addDisabled`/`photoLimitReached` läuft) ⇒ entfernt. **Behalten:** `beforeItem`/`afterItem` (von den Slots genutzt), `MediaCategory`-Import (von `onRequestPhotoForSlot` genutzt).
+
+**i18n** ([de.ts](lib/i18n/de.ts)): nur `capture.categoryTaken` („belegt", war exklusiv das „Slot belegt"-Label im Viewer-Toggle) entfernt. `capture.categoryTakenNotice` bleibt (Slot-Upload-Guard, capture.tsx); `assembler.categoryLabel`/`assembler.categoryError` bleiben als (jetzt ungenutzte) Dict-Einträge — bewusst nicht mitgelöscht (nicht im Auftragsumfang, ungenutzte Dict-Keys brechen den Build nicht). `pnpm typecheck` + `pnpm build` grün.
 
 ---
 

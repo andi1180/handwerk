@@ -28,9 +28,6 @@ import { DEFAULT_LOCALE, t } from "@/lib/i18n";
 import { CAPTION_MAX_LENGTH } from "@/lib/ai/caption-limits";
 import type { MediaCategory, OrderMedia } from "@/lib/orders/queries";
 
-/** Auswählbare Kategorien im Viewer-Selektor in fester Reihenfolge (0010). */
-const CATEGORY_OPTIONS: MediaCategory[] = ["before", "after", "process"];
-
 /**
  * Medien-Item samt server-seitig erzeugter, befristeter Signed-URL (page.tsx).
  * `frameUrls` (Phase 1): signierte Vorschau-Frames eines Videos (Konventions-
@@ -158,39 +155,6 @@ export function MediaList({
       prev.map((m) => (m.id === id ? { ...m, caption: value } : m)),
     );
   }, []);
-
-  /**
-   * Kategorie eines Mediums wechseln (0010): optimistisch umsortieren (Gruppe
-   * wechselt) → PATCH → bei Erfolg `router.refresh()` (server-abgeleitete Props
-   * wie der Capture-Slot-Status aktualisieren), bei Fehler Rollback + Hinweis.
-   */
-  const handleCategoryChange = useCallback(
-    (media: MediaWithUrl, category: MediaCategory) => {
-      if (media.category === category) return;
-      const previous = items;
-      setItems((prev) =>
-        prev.map((m) => (m.id === media.id ? { ...m, category } : m)),
-      );
-      void (async () => {
-        try {
-          const res = await fetch(
-            `/api/portal/orders/${orderId}/media/${media.id}/category`,
-            {
-              method: "PATCH",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ category }),
-            },
-          );
-          if (!res.ok) throw new Error("category_failed");
-          router.refresh();
-        } catch {
-          setItems(previous); // zurückrollen
-          showNotice(t(DEFAULT_LOCALE, "assembler.categoryError"));
-        }
-      })();
-    },
-    [items, orderId, router, showNotice],
-  );
 
   /** Auswahl einer (unbeschrifteten) Kachel umschalten. */
   const toggleSelect = useCallback((id: string) => {
@@ -552,9 +516,6 @@ export function MediaList({
           readOnly={readOnly}
           onClose={() => setViewingId(null)}
           onCaptionChange={applyCaption}
-          onCategoryChange={handleCategoryChange}
-          disableBefore={Boolean(beforeItem && beforeItem.id !== viewing.id)}
-          disableAfter={Boolean(afterItem && afterItem.id !== viewing.id)}
         />
       ) : null}
     </div>
@@ -939,20 +900,12 @@ function MediaViewer({
   readOnly,
   onClose,
   onCaptionChange,
-  onCategoryChange,
-  disableBefore,
-  disableAfter,
 }: {
   media: MediaWithUrl;
   orderId: string;
   readOnly: boolean;
   onClose: () => void;
   onCaptionChange: (id: string, caption: string) => void;
-  onCategoryChange: (media: MediaWithUrl, category: MediaCategory) => void;
-  /** Vorher-Slot durch ein ANDERES Medium belegt ⇒ Auswahl gesperrt (0010). */
-  disableBefore: boolean;
-  /** Nachher-Slot durch ein ANDERES Medium belegt ⇒ Auswahl gesperrt (0010). */
-  disableAfter: boolean;
 }) {
   // Escape schließt das Overlay.
   useEffect(() => {
@@ -1089,18 +1042,6 @@ function MediaViewer({
         </div>
       ) : null}
 
-      {/* Kategorie-Wechsel (0010) — nur Foto im Editier-Modus. Video bleibt
-          immer 'process' (kein Selektor). Belegte before/after-Slots sind
-          deaktiviert (Server prüft zusätzlich). */}
-      {!readOnly && media.media_type === "photo" ? (
-        <CategorySelector
-          media={media}
-          disableBefore={disableBefore}
-          disableAfter={disableAfter}
-          onCategoryChange={onCategoryChange}
-        />
-      ) : null}
-
       {/* Caption: editierbar im Entwurf, sonst read-only (Abgeschlossen-Modus, 6c).
           Eigener key pro Item, damit der Text beim Wechsel neu lädt. */}
       {readOnly ? (
@@ -1114,65 +1055,6 @@ function MediaViewer({
           onClose={onClose}
         />
       )}
-    </div>
-  );
-}
-
-/** Kategorie-Selektor im Viewer (0010): Vorher/Nachher/Prozess als Toggle-Reihe. */
-function CategorySelector({
-  media,
-  disableBefore,
-  disableAfter,
-  onCategoryChange,
-}: {
-  media: MediaWithUrl;
-  disableBefore: boolean;
-  disableAfter: boolean;
-  onCategoryChange: (media: MediaWithUrl, category: MediaCategory) => void;
-}) {
-  const disabledFor: Record<MediaCategory, boolean> = {
-    before: disableBefore,
-    after: disableAfter,
-    process: false,
-  };
-  return (
-    <div
-      onClick={(e) => e.stopPropagation()}
-      style={{
-        background: "var(--surface)",
-        borderTop: "1px solid var(--border)",
-        padding: "12px 16px",
-        display: "flex",
-        flexDirection: "column",
-        gap: 8,
-      }}
-    >
-      <span style={{ fontSize: 13, fontWeight: 600 }}>
-        {t(DEFAULT_LOCALE, "assembler.categoryLabel")}
-      </span>
-      <div className="capture-category">
-        {CATEGORY_OPTIONS.map((option) => {
-          const active = media.category === option;
-          const disabled = !active && disabledFor[option];
-          return (
-            <button
-              key={option}
-              type="button"
-              className="capture-category-btn"
-              data-active={active}
-              disabled={disabled}
-              onClick={() => onCategoryChange(media, option)}
-            >
-              {t(DEFAULT_LOCALE, `mediaCategory.${option}`)}
-              {disabled ? (
-                <span className="capture-category-taken">
-                  {t(DEFAULT_LOCALE, "capture.categoryTaken")}
-                </span>
-              ) : null}
-            </button>
-          );
-        })}
-      </div>
     </div>
   );
 }

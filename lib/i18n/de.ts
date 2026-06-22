@@ -233,10 +233,9 @@ export const de = {
     limitReached: "Limit erreicht: max. {max} {type} pro Auftrag.",
     photosLabel: "Fotos",
     videosLabel: "Videos",
-    // Kategorie-Selektor im Entwurf entfernt (Kategorie kommt aus dem Einstieg).
-    // categoryTaken: Slot-belegt-Label im Viewer-Toggle; categoryTakenNotice:
-    // Hinweis beim Slot-Upload-Guard (openPhotoForCategory).
-    categoryTaken: "belegt",
+    // Kategorie-Selektor (Entwurf + Viewer) entfernt — Kategorie kommt aus dem
+    // Einstieg (Slot/„+"). categoryTakenNotice: Hinweis beim Slot-Upload-Guard
+    // (openPhotoForCategory).
     categoryTakenNotice: "Für diese Kategorie gibt es bereits ein Bild.",
   },
   // Bild-Kategorien (0010): DB-Werte before/after/process → deutsche Labels.
