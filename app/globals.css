@@ -1594,6 +1594,9 @@ body {
 .business-reel-pill--ready:hover {
   filter: brightness(0.93);
 }
+.business-reel-pill--shared {
+  opacity: 0.55;
+}
 
 /* Zustand F: Fehlgeschlagen (Rot — Klick = Retry). */
 .business-reel-pill--failed {

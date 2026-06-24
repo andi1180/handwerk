@@ -233,7 +233,7 @@ export function BusinessReelButton({
       <>
         <button
           type="button"
-          className="business-reel-pill business-reel-pill--ready"
+          className={`business-reel-pill business-reel-pill--ready${sharedAt ? " business-reel-pill--shared" : ""}`}
           onClick={openPopup}
         >
           {label}
