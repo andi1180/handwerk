@@ -257,3 +257,7 @@ Technische Doku: siehe [TECH.md](TECH.md).
 - `HANDWERK_PFLICHTENHEFT.md` bleibt untracked (interne Strategie, public Repo) — nie committen, nicht nachfragen.
 - `b.valooro.com` = öffentliche Kunden-Booklets (`/b/[token]`). DNS: CNAME auf `b0a70b96f4f2cb9e.vercel-dns-016.com`. Kein Portal, kein Login.
 - `handwerk.valooro.com` = Betriebsportal. DNS: CNAME auf `b0a70b96f4f2cb9e.vercel-dns-016.com`. Supabase Auth: Site URL + Redirect URLs auf `https://handwerk.valooro.com/**` gesetzt.
+
+## Offene Performance-Optimierungen
+
+- **Auftragslisten-Queries zusammenführen:** Die drei parallelen Supabase-Queries auf `app/portal/orders/page.tsx` (Orders + Booklets + Gate/order_media) als DB-Join zusammenführen um Roundtrips zu reduzieren. Aktuell ~1s warme Ladezeit. Angehen vor oder nach erstem Multi-Tenant-Onboarding.
