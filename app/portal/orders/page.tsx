@@ -17,6 +17,7 @@ import {
   type BusinessReelStatus,
 } from "@/components/business-reel-button";
 import { PickupPendingBadge } from "@/components/pickup-pending-badge";
+import { PurgeMediaButton } from "@/components/purge-media-button";
 import {
   OrderBulkSelectProvider,
   OrderRowControls,
@@ -176,6 +177,12 @@ export default async function OrdersPage({
     .filter((o) => (RENDERABLE as readonly string[]).includes(o.status))
     .map((o) => o.id);
 
+  // Im Archiv-Scope werden die Booklet-Status für ALLE Karten gebraucht (nicht
+  // nur die renderbaren): der „Medien löschen"-Button und der „Medien gelöscht"-
+  // Hinweis hängen an reel_status/business_reel_status, und archivierte Aufträge
+  // können in jedem Status stehen. Die Gate-Query bleibt auf renderableIds.
+  const bookletIds = isArchiveView ? orders.map((o) => o.id) : renderableIds;
+
   type BookletEntry = {
     reel_status: ReelStatus | null;
     business_reel_status: BusinessReelStatus | null;
@@ -186,13 +193,15 @@ export default async function OrdersPage({
   // Gate-Map: Vorher/Nachher-Fotos je Auftrag (Bedingung für das Betriebs-Reel).
   const gateByOrder = new Map<string, { hasBefore: boolean; hasAfter: boolean }>();
 
-  if (renderableIds.length > 0) {
+  // bookletIds ist im Archiv-Scope eine Obermenge von renderableIds, sonst
+  // identisch — dieser eine Guard deckt daher beide Queries ab.
+  if (bookletIds.length > 0) {
     // Beide Queries parallel — ein Round-Trip.
     const [bookletResult, gateResult] = await Promise.all([
       supabase
         .from("booklets")
         .select("order_id, reel_status, business_reel_status, business_reel_shared_at")
-        .in("order_id", renderableIds)
+        .in("order_id", bookletIds)
         .returns<
           {
             order_id: string;
@@ -329,6 +338,20 @@ export default async function OrdersPage({
                   ? order.picked_up_at
                   : null;
 
+              // Medien-Purge (0014): „Medien löschen" nur im Archiv-Scope und
+              // nur solange nicht BEIDE Reel-Status bereits 'purged' sind
+              // (bereinigte Karten bekommen keinen Button mehr). Fehlt die
+              // booklets-Zeile ganz (archivierter Entwurf), ist nichts 'purged'
+              // ⇒ Button sichtbar: die order_media können trotzdem weg.
+              const bookletEntry = reelByOrder.get(order.id);
+              const purgedAny =
+                bookletEntry?.reel_status === "purged" ||
+                bookletEntry?.business_reel_status === "purged";
+              const purgedBoth =
+                bookletEntry?.reel_status === "purged" &&
+                bookletEntry?.business_reel_status === "purged";
+              const showPurge = isArchiveView && !purgedBoth;
+
               return (
                 <Link
                   key={order.id}
@@ -424,20 +447,47 @@ export default async function OrdersPage({
                       {/* Kachel-Kontrolle (Client): Auswahl-Checkbox im
                           Select-Mode, sonst Einzel-Archiv-Icon (Hauptliste,
                           archivierbar) bzw. Entarchivieren-Icon (Archiv-Scope). */}
-                      <OrderRowControls
-                        orderId={order.id}
-                        archivable={isArchivable(
-                          order.status,
-                          order.picked_up_at,
-                        )}
-                        archiveView={isArchiveView}
-                      />
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 2,
+                        }}
+                      >
+                        <OrderRowControls
+                          orderId={order.id}
+                          archivable={isArchivable(
+                            order.status,
+                            order.picked_up_at,
+                          )}
+                          archiveView={isArchiveView}
+                        />
+                        {showPurge ? (
+                          <PurgeMediaButton
+                            orderId={order.id}
+                            orderLabel={
+                              order.external_ref
+                                ? `${order.customer_name} · ${order.external_ref}`
+                                : order.customer_name
+                            }
+                          />
+                        ) : null}
+                      </div>
                     </div>
                   </div>
                   {flaggedDate ? (
                     <PickupPendingBadge pickedUpAt={flaggedDate} />
                   ) : null}
-                  {(RENDERABLE as readonly string[]).includes(order.status) ? (
+                  {/* Medien gelöscht (0014) ⇒ statt der Reel-Aktion ein klarer
+                      Hinweis. WICHTIG: das ersetzt den BusinessReelButton auch
+                      dann, wenn nur EINER der beiden Status 'purged' ist —
+                      sonst böte die Karte einen Render an, der mangels
+                      Quellmedien zwangsläufig scheitern würde. */}
+                  {purgedAny ? (
+                    <div className="order-media-purged">
+                      {t(DEFAULT_LOCALE, "orders.mediaPurged")}
+                    </div>
+                  ) : (RENDERABLE as readonly string[]).includes(order.status) ? (
                     <div style={{ display: "flex", alignItems: "center" }}>
                       <BusinessReelButton
                         orderId={order.id}

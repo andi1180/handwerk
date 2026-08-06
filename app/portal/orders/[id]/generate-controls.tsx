@@ -296,7 +296,14 @@ export function ReopenButton({ orderId }: { orderId: string }) {
 }
 
 /** Reel-Render-Status (Spiegel von booklets.reel_status, 8b-1a). */
-export type ReelStatus = "pending" | "rendering" | "ready" | "failed";
+export type ReelStatus =
+  | "pending"
+  | "rendering"
+  | "ready"
+  | "failed"
+  // 'purged' (Migration 0014): Medien bewusst gelöscht — es gab ein fertiges
+  // Reel, es existiert nicht mehr und ist NICHT neu renderbar (Endzustand).
+  | "purged";
 
 /** Poll-Intervall, solange der Render läuft. */
 const REEL_POLL_MS = 3000;

@@ -77,6 +77,16 @@ export const de = {
     backToList: "← Hauptliste",
     archiveError: "Archivieren fehlgeschlagen. Bitte erneut versuchen.",
     emptyArchive: "Das Archiv ist leer.",
+    // Medien-Purge auf archivierten Karten (0014).
+    purgeMedia: "Medien löschen",
+    purgeConfirmTitle: "Medien unwiderruflich löschen?",
+    purgeConfirmText:
+      "Auftrag und Analytics-Historie bleiben erhalten. Fotos, Videos und Reels dieses Auftrags werden endgültig entfernt und können nicht neu erstellt werden.",
+    purgeConfirm: "Endgültig löschen",
+    purgeCancel: "Abbrechen",
+    purgeBusy: "Wird gelöscht …",
+    purgeError: "Löschen fehlgeschlagen. Bitte erneut versuchen.",
+    mediaPurged: "Medien gelöscht",
     select: "Auswählen",
     cancel: "Abbrechen",
     selected: "{n} ausgewählt",
@@ -114,6 +124,8 @@ export const de = {
     creating: "Wird erstellt …",
     ready: "Fertig",
     failed: "Fehler",
+    // reel_status='purged' (0014): Medien gelöscht, nicht neu renderbar.
+    mediaPurged: "Medien gelöscht",
     pickupPendingNotice: "Abgeholt am {date} – Booklet nicht versendet",
   },
   orderDetail: {
@@ -312,6 +324,8 @@ export const de = {
     // B2a: reel_status='failed' ⇒ grober voller Neulauf (keine Diskriminierung).
     failed: "Erstellung fehlgeschlagen",
     retryFull: "Erneut erstellen",
+    mediaPurged:
+      "Medien gelöscht — Booklet und Analytics bleiben erhalten. Ein Reel kann nicht mehr erstellt werden.",
     // B2b: Fehler-Diskriminierung über intro_title. Intro stand, nur das Reel
     // scheiterte ⇒ Retry NUR Reel (POST render-reel), kein neuer Sonnet-Call.
     reelRetry: "Reel erneut",
@@ -457,6 +471,10 @@ export const de = {
     loadError: "Laden fehlgeschlagen",
     shareNow: "Jetzt teilen",
     download: "Reel herunterladen",
+    // business_reel_status='purged' (0014): Endzustand, kein Render/Teilen mehr.
+    purged: "Medien gelöscht",
+    purgedHint:
+      "Die Medien dieses Auftrags wurden gelöscht — ein Reel kann nicht mehr erstellt werden.",
   },
   reach: {
     // Reichweiten-/VIP-Analyse-Sektion auf dem Dashboard.

@@ -9,8 +9,17 @@ import {
   downloadFile,
 } from "@/lib/share/file-share";
 
-/** Render-Zustand des Betriebs-Reels — spiegelt `booklets.business_reel_status`. */
-export type BusinessReelStatus = "pending" | "rendering" | "ready" | "failed";
+/**
+ * Render-Zustand des Betriebs-Reels — spiegelt `booklets.business_reel_status`.
+ * `'purged'` (Migration 0014) ist ein ENDZUSTAND: die Medien wurden bewusst
+ * gelöscht, das Reel existiert nicht mehr und ist NICHT neu renderbar.
+ */
+export type BusinessReelStatus =
+  | "pending"
+  | "rendering"
+  | "ready"
+  | "failed"
+  | "purged";
 
 const REEL_POLL_MS = 3_000;
 
@@ -196,6 +205,21 @@ export function BusinessReelButton({
   function stopOnly(e: React.MouseEvent) {
     e.preventDefault();
     e.stopPropagation();
+  }
+
+  // Zustand P: Medien gelöscht — ENDZUSTAND, zuerst geprüft. Kein Render, kein
+  // Teilen, kein Retry: die Quellmedien existieren nicht mehr. Bewusst ein
+  // klarer Text statt eines irreführenden „fertig"/„Wird erstellt"-Pills.
+  if (current === "purged") {
+    return (
+      <div
+        className="business-reel-pill business-reel-pill--purged"
+        onClick={stopOnly}
+        title={t(DEFAULT_LOCALE, "businessReel.purgedHint")}
+      >
+        {t(DEFAULT_LOCALE, "businessReel.purged")}
+      </div>
+    );
   }
 
   // Zustand 0: Gate fehlt — dezenter Disabled-Pill.

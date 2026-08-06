@@ -404,6 +404,72 @@ body {
   color: var(--green-text);
 }
 
+/* Hinweis „Medien gelöscht" (0014) in der Aktionszone — neutral, kein Fehler. */
+.booklet-cc-purged {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+/* --- Medien-Purge auf archivierten Auftragskacheln (0014) --- */
+
+/* Der Purge-Button erbt die Geometrie von .archive-toggle und wird erst im
+   Hover rot — löschen ist die gefährlichste Aktion auf der Kachel. */
+.purge-media-toggle:hover {
+  color: var(--red-text);
+  border-color: var(--red-border);
+  background: var(--red-light);
+}
+
+/* Bestätigungs-Overlay (nutzt .biz-reel-backdrop/.biz-reel-popup als Basis). */
+.purge-media-dialog {
+  max-width: 340px;
+  align-items: stretch;
+  text-align: left;
+  gap: 10px;
+}
+.purge-media-dialog__title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+}
+.purge-media-dialog__ref {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.purge-media-dialog__text {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+.purge-media-dialog__actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+.purge-media-dialog__actions > * {
+  flex: 1 1 0;
+  font-size: 13px;
+}
+.purge-media-dialog__danger {
+  background: var(--red-text);
+  border-color: var(--red-text);
+}
+
+/* „Medien gelöscht"-Zustand auf der Kachel (ersetzt die Reel-Aktion). */
+.order-media-purged {
+  font-size: 12px;
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: 999px;
+  padding: 3px 10px;
+  align-self: flex-start;
+}
+
 /* Slot 4: Ansehen-Aktionen (Booklet ansehen · Reel ansehen · QR drucken) —
    dezente Outline-Buttons, durch eine Haarlinie vom Rest abgesetzt; wrappen
    auf schmalen Screens. */
@@ -1552,6 +1618,15 @@ body {
   color: var(--text-secondary);
   border-color: var(--border);
   opacity: 0.65;
+}
+
+/* Zustand P: Medien gelöscht (0014) — Endzustand, nicht klickbar. Bewusst
+   neutral/gedämpft: es läuft nichts, es ist aber auch nichts kaputt. */
+.business-reel-pill--purged {
+  color: var(--text-secondary);
+  border-color: var(--border);
+  background: var(--surface);
+  cursor: default;
 }
 
 /* Zustand 1: Bereit zum Rendern (Gold — aktiv, klickbar). */

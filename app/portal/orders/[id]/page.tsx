@@ -356,6 +356,23 @@ export default async function OrderDetailPage({
                 />
               ) : null}
             </>
+          ) : reelStatus === "purged" ? (
+            <>
+              {/* Medien bewusst gelöscht (0014). ENDZUSTAND: kein Render, kein
+                  Retry, kein „Reel ansehen" — die Quellmedien existieren nicht
+                  mehr. Booklet + Analytics bleiben, die Story ist weiter
+                  aufrufbar (ohne Medien-Sektionen), der QR weiter druckbar. */}
+              <p className="booklet-cc-delivered">
+                {t(DEFAULT_LOCALE, "generate.mediaPurged")}
+              </p>
+              {bookletToken ? (
+                <BookletViews
+                  orderId={order.id}
+                  bookletToken={bookletToken}
+                  reelUrl={null}
+                />
+              ) : null}
+            </>
           ) : reelStatus === "failed" ? (
             introPresent ? (
               <>
@@ -407,6 +424,15 @@ export default async function OrderDetailPage({
                 })
               : t(DEFAULT_LOCALE, "deliver.deliveredNoDate")}
           </p>
+          {/* Medien gelöscht (0014) — greift auch rückwirkend für die per
+              Migration bereinigten Aufträge. `reelUrl` ist bei 'purged' ohnehin
+              null ⇒ kein „Reel ansehen"-Link ins Leere; dieser Hinweis sagt
+              zusätzlich WARUM. */}
+          {reelStatus === "purged" ? (
+            <p className="booklet-cc-purged">
+              {t(DEFAULT_LOCALE, "generate.mediaPurged")}
+            </p>
+          ) : null}
           {bookletToken ? (
             <BookletViews
               orderId={order.id}

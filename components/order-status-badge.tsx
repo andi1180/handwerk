@@ -76,13 +76,20 @@ const STATUS_STYLES: Record<OrderStatus, BadgeStyle> = {
  * „Fehler", sonst (pending/rendering/null/unbekannt) ⇒ amber „Wird erstellt …"
  * — der Default, weil seit B1 jede generierte Order rendert.
  */
-type ReelBadge = { style: BadgeStyle; key: "creating" | "ready" | "failed" };
+type ReelBadge = {
+  style: BadgeStyle;
+  key: "creating" | "ready" | "failed" | "mediaPurged";
+};
 function reelBadge(reelStatus: string | null): ReelBadge {
   switch (reelStatus) {
     case "ready":
       return { style: GOLD, key: "ready" };
     case "failed":
       return { style: RED, key: "failed" };
+    // 'purged' (Migration 0014): Medien bewusst gelöscht, nicht neu renderbar.
+    // Neutral statt amber/gold — es läuft nichts mehr und es ist nichts kaputt.
+    case "purged":
+      return { style: NEUTRAL, key: "mediaPurged" };
     default:
       return { style: AMBER, key: "creating" };
   }
