@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentBusiness } from "@/lib/auth/current-business";
+import { videoFramePaths } from "@/lib/media/video-frames";
 
 /**
  * DELETE /api/portal/orders/[id]/media/[mediaId] — entfernt ein Medium eines
@@ -12,6 +13,14 @@ import { getCurrentBusiness } from "@/lib/auth/current-business";
  * ⇒ 404. Das Storage-Objekt wird über die Delete-Policy entfernt (erstes
  * Pfad-Segment = `business_id`); danach wird die Zeile per RLS gelöscht.
  * Reihenfolge-Lücken im `sort_order` sind unkritisch (Sortierung bleibt ASC).
+ *
+ * VIDEO-FRAMES: die client-seitig extrahierten Vorschaubilder eines Videos
+ * (`{video-pfad-ohne-endung}.frame-0/1/2.jpg`, s. `lib/media/video-frames.ts`)
+ * haben **keine** eigene `order_media`-Zeile — ihre Existenz hängt allein am
+ * Konventions-Pfad. Sie werden hier im selben `remove()`-Aufruf mitgelöscht;
+ * vorher blieben sie als Storage-Leichen zurück. Sie liegen unter demselben
+ * `{business_id}/{order_id}/`-Präfix wie das Video, die 0002-Delete-Policy
+ * greift also unverändert.
  */
 export async function DELETE(
   _request: Request,
@@ -36,20 +45,43 @@ export async function DELETE(
   // Medien-Zeile über RLS laden; muss zu DIESER Order gehören — sonst 404.
   const { data: media } = await supabase
     .from("order_media")
-    .select("id, storage_path")
+    .select("id, media_type, storage_path")
     .eq("id", mediaId)
     .eq("order_id", orderId)
-    .maybeSingle<{ id: string; storage_path: string }>();
+    .maybeSingle<{ id: string; media_type: string; storage_path: string }>();
   if (!media) {
     return NextResponse.json({ error: "not_found" }, { status: 404 });
   }
 
-  // Storage-Objekt entfernen (Delete-Policy bindet erstes Pfad-Segment an business_id).
+  // Bei Video zusätzlich die Konventions-Frames; bei Foto bleibt es beim Hauptpfad.
+  const framePaths =
+    media.media_type === "video" ? videoFramePaths(media.storage_path) : [];
+
+  // Storage-Objekte entfernen (Delete-Policy bindet erstes Pfad-Segment an business_id).
   const { error: storageError } = await supabase.storage
     .from("order-media")
-    .remove([media.storage_path]);
+    .remove([media.storage_path, ...framePaths]);
+
   if (storageError) {
-    return NextResponse.json({ error: "storage_delete_failed" }, { status: 500 });
+    // Frames sind best-effort: nicht jedes Video hat (alle) Frames, und ein
+    // Problem an einem Vorschaubild darf das Löschen des Videos nicht
+    // blockieren. Darum ein zweiter Versuch NUR mit dem Hauptpfad — erst wenn
+    // auch der scheitert, ist es ein echter Fehler.
+    if (framePaths.length === 0) {
+      return NextResponse.json({ error: "storage_delete_failed" }, { status: 500 });
+    }
+    const { error: retryError } = await supabase.storage
+      .from("order-media")
+      .remove([media.storage_path]);
+    if (retryError) {
+      return NextResponse.json({ error: "storage_delete_failed" }, { status: 500 });
+    }
+    console.error("media delete: frame cleanup failed", {
+      order_id: orderId,
+      media_id: media.id,
+      step: "remove_frames",
+      message: storageError.message,
+    });
   }
 
   // Metadaten-Zeile löschen (RLS-Policy order_media_all), defensiv auf order_id.

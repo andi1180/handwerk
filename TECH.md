@@ -369,6 +369,10 @@ AUTHENTICATED Server-Client (kein `service_role`). `getCurrentBusiness` → 401/
 
 AUTHENTICATED Server-Client. `getCurrentBusiness` → 401/403. Die Medien-Zeile wird über RLS geladen **und** gegen `order_id` (Pfad) geprüft (fremde/fehlende Kombination ⇒ 404). Reihenfolge: erst `storage.from('order-media').remove([storage_path])` (Delete-Policy bindet das erste Pfad-Segment an die `business_id`), dann die `order_media`-Zeile (RLS-Policy `order_media_all`, defensiv auf `order_id`). `sort_order`-Lücken bleiben unkritisch (Sortierung ist ASC). Die statische Route `media/reorder` und die dynamische `media/[mediaId]` liegen konfliktfrei nebeneinander (Next.js bevorzugt das statische Segment).
 
+> **Fix — Frame-Cleanup beim Video-Löschen:** [media/[mediaId]/route.ts](app/api/portal/orders/[id]/media/[mediaId]/route.ts) löscht beim Entfernen eines Videos jetzt zusätzlich die zugehörigen `.frame-0/1/2.jpg`-Vorschaubilder mit, nicht mehr nur die Hauptdatei. Vorher blieben Frames als Storage-Leichen zurück.
+>
+> Die Frame-Pfade kommen aus `videoFramePaths()` ([lib/media/video-frames.ts](lib/media/video-frames.ts)) — dieselbe Konvention, unter der sie hochgeladen werden; sie haben **keine** eigene `order_media`-Zeile, ihre Existenz hängt allein am Pfad. Bei `media_type === 'photo'` bleibt es beim Hauptpfad. Haupt- und Frame-Pfade gehen in **einem** `remove()`-Aufruf raus (gleiches `{business_id}/{order_id}/`-Präfix ⇒ 0002-Delete-Policy greift unverändert). Frames sind **best-effort**: schlägt der kombinierte Aufruf fehl, folgt ein zweiter Versuch nur mit dem Hauptpfad — ein fehlendes/fehlerhaftes Vorschaubild blockiert das Löschen des Videos also nicht (Frame-Fehler wird nur geloggt); 500 `storage_delete_failed` erst, wenn auch der Hauptpfad scheitert.
+
 ### i18n
 
 Neuer Block `assembler.*` in [lib/i18n/de.ts](lib/i18n/de.ts): `reorderHint` („Halten zum Verschieben"), `delete`, `deleteConfirm`, `play`, `close`, `reorderError`, `deleteError`.
