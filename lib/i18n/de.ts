@@ -476,6 +476,44 @@ export const de = {
     purgedHint:
       "Die Medien dieses Auftrags wurden gelöscht — ein Reel kann nicht mehr erstellt werden.",
   },
+  website: {
+    // Website-Veröffentlichung auf der Auftrags-Detailseite (Migration 0015).
+    // VORBEREITENDER BAUSTEIN: es existiert KEINE Anbindung an die Website —
+    // die Angaben werden nur in Handwerks eigener DB gespeichert. Die Texte
+    // sagen das ausdrücklich, damit niemand einen Versand vermutet.
+    sectionTitle: "Website-Veröffentlichung",
+    toggle: "Auf Website anzeigen",
+    // Hinweis VOR dem Speichern — die Sperre greift erst danach.
+    lockWarning:
+      "Nach dem Speichern kann die Anzeige hier nicht mehr entfernt werden.",
+    // Status statt Schalter, sobald gespeichert sichtbar (Schalter gesperrt).
+    lockedStatus: "Auf Website sichtbar — kann hier nicht mehr entfernt werden.",
+    lockedHint:
+      "Die Angaben unten bleiben änderbar (z. B. wenn sich der Preis korrigiert).",
+    notTransferred:
+      "Wird derzeit nur hier gespeichert — es findet keine Übertragung an die Website statt.",
+    // Die vier Pflichtangaben. „Website-Kategorie" bewusst ausgeschrieben:
+    // NICHT zu verwechseln mit der Vorher/Nachher/Prozess-Einteilung der Bilder.
+    category: "Website-Kategorie",
+    categoryHint:
+      "Art der Arbeit für die Website — nicht die Vorher/Nachher/Prozess-Einteilung der Bilder.",
+    clothingType: "Kleidungsart",
+    workHours: "Arbeitszeit (Stunden)",
+    price: "Preis (€)",
+    required: "Pflichtangabe, sobald der Auftrag auf der Website erscheint.",
+    save: "Speichern",
+    saving: "Speichern …",
+    cancel: "Abbrechen",
+    saved: "Gespeichert.",
+    // Fehler — spiegeln die Server-Codes.
+    errCategory: "Bitte eine Website-Kategorie wählen.",
+    errClothingType: "Bitte eine Kleidungsart wählen.",
+    errWorkHours: "Bitte eine Arbeitszeit größer als 0 angeben.",
+    errPrice: "Bitte einen Preis größer als 0 angeben.",
+    errLocked:
+      "Die Website-Anzeige kann hier nicht mehr entfernt werden.",
+    saveError: "Speichern fehlgeschlagen. Bitte erneut versuchen.",
+  },
   reach: {
     // Reichweiten-/VIP-Analyse-Sektion auf dem Dashboard.
     title: "Reichweite / VIP-Analyse",

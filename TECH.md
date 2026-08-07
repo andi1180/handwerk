@@ -3215,3 +3215,90 @@ Die Frame-Extraktion (Phase 1) läuft weiter **clientseitig aus der lokalen Orig
 Der Route Handler ([app/api/portal/orders/[id]/media/[mediaId]/compress/route.ts](app/api/portal/orders/[id]/media/[mediaId]/compress/route.ts), `runtime="nodejs"`, `maxDuration=300`) validiert mit dem **AUTHENTICATED** Client: kein User ⇒ 401, kein Betrieb ⇒ 403, Order über RLS ⇒ 404, Medien-Zeile über RLS gegen die Order ⇒ 404, kein Video ⇒ 400 `not_a_video`. Die `business_id` stammt **ausschließlich** aus der so geladenen Order, **nie** aus dem Request. Die Hintergrundarbeit läuft mit `service_role`, strikt auf die zuvor validierten `order_id`/`business_id`/`media_id` gescoped — `compressOrderVideo` legt sie zusätzlich als Filter auf jede Query und prüft, dass der `storage_path` im `{business_id}/{order_id}/`-Präfix liegt.
 
 `compressOrderVideo` **wirft nicht**, sondern meldet `ok: false` + `errors[]` (Schritt-Präfixe `load_media` / `invalid_path` / `ensure_ffmpeg` / `download` / `ffmpeg` / `upload`). Das Original wird **erst am Ende und nur bei Erfolg** überschrieben ⇒ jeder Fehlerpfad ist ohne Nebenwirkung, **kein Datenverlust**. Die Route loggt das Ergebnis (`ok` / `skipped` / `failed` mit Byte-Zählern), blockiert aber nichts — der Auftrag ist zu diesem Zeitpunkt längst angelegt.
+
+## Website-Veröffentlichung auf der Auftrags-Detailseite (Migration 0015)
+
+Fünf neue Spalten auf `orders` erfassen, welche Aufträge später auf der öffentlichen Website des Betriebs (Repo **atelier-dax-web**, Archiv `/verwandlungen`) erscheinen sollen — und mit welchen Angaben.
+
+> ⚠️ **VORBEREITENDER BAUSTEIN — ES EXISTIERT KEINE ANBINDUNG.** Kein API-Call, kein Webhook, kein Versand von Fotos/Videos an eine externe Stelle. Die Werte werden **ausschließlich** in Handwerks eigener DB gespeichert; nichts liest sie außer der Detailseite selbst. Eine echte Übertragung ist ein späterer, eigener Schritt — und dabei sind die zwei unter „Offen" genannten Abweichungen zum Website-Schema aufzulösen.
+
+> ⚠️ **Migration 0015 muss vor dem Live-Gang manuell im Supabase-SQL-Editor angewendet werden.** `getOrderById` selektiert die neuen Spalten — ohne angewendete Migration schlägt der Select fehl, `getOrderById` liefert `null` und die **gesamte Detailseite** läuft in `notFound()`. Reihenfolge: erst Migration, dann Deploy.
+
+### Migration 0015 ([supabase/migrations/0015_orders_website_publication.sql](supabase/migrations/0015_orders_website_publication.sql), Verify daneben)
+
+Rein additiv (`ADD COLUMN`), kein `ALTER`/`DROP` an Bestehendem. **Keine neue Policy/GRANT** — `orders` ist RLS-aktiv aus 0001, die member-Policies (`for all`, ohne Spaltenliste) und `service_role` decken die neuen Spalten automatisch.
+
+| Spalte | Typ | Default | Constraint |
+| --- | --- | --- | --- |
+| `website_visible` | `boolean not null` | `false` | — |
+| `website_category` | `text` (nullable) | `'aenderung'` | CHECK `in ('aenderung','redesign','upcycling')` |
+| `website_clothing_type` | `text` (nullable) | — | **bewusst keiner** (s. u.) |
+| `website_work_hours` | `numeric` (nullable) | — | **bewusst keiner** (s. u.) |
+| `website_price` | `numeric` (nullable) | — | **bewusst keiner** (s. u.) |
+
+**Bestandsschutz:** `website_visible not null default false` setzt alle bestehenden Aufträge korrekt auf „nicht auf der Website" — niemand landet ungefragt im öffentlichen Archiv. Dass `website_category` per Default `'aenderung'` auf allen Altzeilen steht, ist bedeutungslos, solange `website_visible = false`: der Wert wird nirgends gelesen und nichts wird sichtbar.
+
+**Warum kein CHECK auf `website_clothing_type`:** Das gespiegelte Website-Enum `kleidungsart` **wächst** drüben per Migration — 0031 `jacke_gilet`, 0032 `pullover`, 0035 `sakko`, drei Ergänzungen in zwei Wochen. Ein CHECK hier bedeutete eine Handwerk-Migration bei jeder Website-Ergänzung, und ein vergessener Nachzug würde gültige Werte abweisen. Die eine Quelle ist stattdessen die App-Liste in [lib/orders/website.ts](lib/orders/website.ts). `website_category` bekommt den CHECK sehr wohl: drei Werte, stabil.
+
+**Warum kein CHECK auf die Zahlenfelder:** „beide > 0" gilt **nur, wenn `website_visible = true`** — eine Zustandsregel, die den Zustandsübergang mitlesen muss. Sie gehört in den Route Handler, der ihn ohnehin prüft; ein DB-CHECK würde zudem alle bestehenden Zeilen (alle NULL) sofort verletzen.
+
+### ⚠️ Namenskollision: `website_category` ≠ `order_media.category`
+
+`order_media.category` (0010) ist die **Bild**-Einteilung eines Mediums für den Booklet-Aufbau (`before`/`after`/`process`). `orders.website_category` ist die **Art der Arbeit** fürs Website-Archiv (`aenderung`/`redesign`/`upcycling`) und hängt am **Auftrag**. Disjunkte Wertebereiche, verschiedene Tabellen. Die Oberfläche beschriftet das Feld deshalb durchgehend „**Website-Kategorie**" (nie nur „Kategorie") und trägt darunter den Hinweis „*Art der Arbeit für die Website — nicht die Vorher/Nachher/Prozess-Einteilung der Bilder*".
+
+### Wertebereiche — aus dem Website-Repo übernommen, nicht erfunden
+
+[lib/orders/website.ts](lib/orders/website.ts) (PLAIN-Modul ohne Server-Imports ⇒ von Client **und** Route Handler importierbar, Muster wie `lib/settings/options.ts`) ist die **eine Quelle** für Optionsliste **und** Server-Validierung.
+
+- `WEBSITE_CATEGORIES` — Spiegel des Enums `verwandlungsart` (atelier-dax-web, `lib/database.types.ts`): `aenderung` | `redesign` | `upcycling`. Deckt sich exakt mit der Vorgabe.
+- `WEBSITE_CLOTHING_TYPES` — Spiegel des Enums `kleidungsart` (atelier-dax-web, `lib/kleidungsarten.ts` + Migrationen 0005/0031/0032/0035), Stand 07.08.2026, **inklusive der dortigen Reihenfolge** (eine bewusste Entscheidung: Mantel-Cluster vorn, „Sonstiges" zuletzt); Beschriftungen = dortiges `einzahl`-Feld:
+  `mantel` · `jacke_gilet` · `kleid` · `hose` · `rock` · `anzug` · `sakko` · `bluse` · **`pullover`** · `sonstiges` — **10 Werte**.
+  > ⚠️ Die Vorgabe nannte **9** Labels und ließ **Pullover** aus. Übernommen ist die Liste des Website-Repos (die Vorgabe priorisierte „Wert exakt aus dem Website-Repo"; die 9er-Liste war nur der Rückfall ohne Repo-Zugriff). Wer nachzieht, gleicht gegen `atelier-dax-web/lib/kleidungsarten.ts` ab.
+
+Dazu die Guards `isWebsiteCategory` / `isWebsiteClothingType` / `isPositiveNumber` und `parseNumericInput` (akzeptiert Komma als Dezimaltrenner — deutsche Tastatur; leer/ungültig ⇒ `null`).
+
+### Route Handler ([app/api/portal/orders/[id]/route.ts](app/api/portal/orders/[id]/route.ts), erweitert)
+
+Die bestehende Kontakt-`PATCH`-Route bekommt die fünf Felder dazu — **keine neue Route**. Kontakt-Verhalten unverändert.
+
+**Der Website-Block wird als EINE Einheit bewertet**, ausgelöst sobald irgendein `website_*`-Key im Body steht:
+
+1. Zielzustand `nextVisible` = `website_visible` aus dem Body, sonst der **gespeicherte** Wert.
+2. **Sperre:** `order.website_visible === true && !nextVisible` ⇒ **400 `website_locked`**. Geprüft wird der DB-Zustand, nicht der Client-Wunsch.
+3. `nextVisible === true` ⇒ **alle vier Angaben Pflicht und gültig**, sonst 400 (`invalid_website_category` / `invalid_website_clothing_type` / `invalid_website_work_hours` / `invalid_website_price`); dann werden alle fünf Spalten geschrieben.
+4. `nextVisible === false` (war es auch vorher — sonst hätte 2. gegriffen) ⇒ nur das Flag; etwaige Altwerte bleiben unangetastet.
+
+Dass der Block auch bei **reinen Korrekturen** (ohne mitgeschicktes `website_visible`) greift, ist Absicht: ein sichtbarer Auftrag steht nie mit halben Angaben da.
+
+**ISOLATION unverändert:** AUTHENTICATED Server-Client (kein `service_role`), 401/403 ohne User/Betrieb, Order über RLS geladen (fremde/fehlende id ⇒ 404), `business_id` **nur** von dort, Update defensiv auf `id` + `business_id` gefiltert.
+
+### Einbahnstraße — Schalter gesperrt, Werte editierbar
+
+> Einmal mit `website_visible = true` **gespeichert**, lässt sich der Schalter aus der Handwerk-Oberfläche **nicht** mehr auf „Aus" zurückstellen (Server: 400 `website_locked`; UI: Schalter durch nicht-interaktiven Status ersetzt).
+>
+> **Die vier Werte bleiben dabei ausdrücklich EDITIERBAR** — gesperrt ist nur der Ja/Nein-Schalter selbst, nicht die Angaben. Korrigiert sich z. B. der Preis nachträglich, wird er weiterhin gespeichert.
+
+Die Sperre ist bewusst eine **App**-Regel und kein DB-Constraint: ein versehentlich veröffentlichter Auftrag muss per SQL korrigierbar bleiben (`update orders set website_visible = false where id = …`).
+
+Die Sperre greift **erst nach dem Speichern**, nicht beim Umlegen des Schalters: im Entwurf steht die Warnung „*Nach dem Speichern kann die Anzeige hier nicht mehr entfernt werden*" und ein „Abbrechen" nimmt den Schalter folgenlos zurück.
+
+### UI ([app/portal/orders/[id]/website-publication.tsx](app/portal/orders/[id]/website-publication.tsx), Client-Insel)
+
+Eigener Abschnitt „Website-Veröffentlichung" **ganz am Seitenende**, nach der Aktionszone — der bestehende Ablauf (Kopf → Stammdaten → Medien → Control-Center) bleibt damit unverändert. `div + onClick` / `<button type="button">`, **kein `<form>`**, kein `any`; die Detailseite bleibt Server Component und reicht nur die geladenen Werte als Props durch.
+
+Drei Zustände:
+
+| Zustand | Anzeige |
+| --- | --- |
+| **AUS** (Standard) | **nur** der Schalter „Auf Website anzeigen". Keine Felder, keine Pflicht, kein Speichern-Button, keine Auswirkung auf Booklet/Reel/Auslieferung. |
+| **EIN, noch nicht gespeichert** | Die vier Pflichtfelder erscheinen (Website-Kategorie mit Default „Änderung", Kleidungsart, Arbeitszeit, Preis) + Sperr-Warnung + „Speichern" / „Abbrechen". |
+| **Gespeichert sichtbar (gesperrt)** | Statt des Schalters ein nicht-interaktiver Status „✓ Auf Website sichtbar — kann hier nicht mehr entfernt werden." + „Die Angaben unten bleiben änderbar". Die vier Felder **editierbar**, „Speichern" bleibt; **kein** „Abbrechen". |
+
+Client-Validierung = Server-Validierung (dieselben Guards). Der Abschnitt trägt zusätzlich den Hinweis „*Wird derzeit nur hier gespeichert — es findet keine Übertragung an die Website statt*", damit niemand einen Versand vermutet. i18n-Block `website.*` in [lib/i18n/de.ts](lib/i18n/de.ts), keine Inline-Strings.
+
+### Offen — vor einer echten Anbindung zu klären
+
+1. **Preis-Einheit:** Hier steht ein **numerischer Euro-Betrag**; die Website führt `preis_cent` (**integer, Cent**). Eine Übertragung muss **umrechnen (× 100)**, nicht durchreichen.
+2. **Arbeitszeit-Präzision:** Hier `numeric` ohne Skala; die Website hat `stunden numeric(6,1)` (eine Nachkommastelle) — Werte mit mehr Präzision würden dort gerundet oder abgewiesen.
+3. **Enum-Nachzug:** `WEBSITE_CLOTHING_TYPES` ist eine Kopie. Wächst das Website-Enum, muss die Liste hier nachgezogen werden (eine Zeile, keine Migration).
+4. **Medien:** Welche Fotos/Videos mitgingen und unter welcher Einwilligung, ist **nicht** Teil dieses Bausteins.

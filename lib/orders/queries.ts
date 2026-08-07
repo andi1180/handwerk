@@ -24,6 +24,15 @@ export type OrderDetail = {
   item_description: string | null;
   status: OrderStatus;
   created_at: string;
+  /* Website-Veröffentlichung (Migration 0015). Reine Erfassung — es existiert
+     KEINE Anbindung an die Website (kein API-Call/Webhook/Medien-Versand).
+     `website_category` ist die Art der Arbeit am AUFTRAG und hat nichts mit
+     `OrderMedia.category` (before/after/process) zu tun. */
+  website_visible: boolean;
+  website_category: string | null;
+  website_clothing_type: string | null;
+  website_work_hours: number | null;
+  website_price: number | null;
 };
 
 /** Ein Medien-Asset eines Auftrags. */
@@ -48,7 +57,7 @@ export async function getOrderById(id: string): Promise<OrderDetail | null> {
   const { data } = await supabase
     .from("orders")
     .select(
-      "id, business_id, customer_name, customer_email, customer_phone, external_ref, item_description, status, created_at",
+      "id, business_id, customer_name, customer_email, customer_phone, external_ref, item_description, status, created_at, website_visible, website_category, website_clothing_type, website_work_hours, website_price",
     )
     .eq("id", id)
     .maybeSingle<OrderDetail>();

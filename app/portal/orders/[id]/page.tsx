@@ -9,6 +9,7 @@ import { CUSTOMER_VIEW_QUERY } from "@/lib/booklet/customer-view";
 import { NO_TRACK_QUERY } from "@/lib/booklet/events";
 import { MediaSection } from "./media-section";
 import { ContactEditor } from "./contact-editor";
+import { WebsitePublication } from "./website-publication";
 import type { MediaWithUrl } from "./media-list";
 import {
   CreateBookletButton,
@@ -443,6 +444,23 @@ export default async function OrderDetailPage({
         </section>
       ) : null}
 
+      {/* ───── Website-Veröffentlichung (Migration 0015) ─────
+          Ganz am Ende, damit der bestehende Ablauf (Medien → Aktionszone)
+          unverändert bleibt. Standard ist AUS: dann zeigt der Abschnitt nur
+          den Schalter — keine Felder, keine Pflicht, keine Auswirkung auf
+          Booklet, Reel oder Auslieferung.
+
+          ⚠️ VORBEREITENDER BAUSTEIN: Speichern schreibt ausschließlich in die
+             eigene DB. Es gibt KEINE Übertragung an die Website — kein
+             API-Call, kein Webhook, kein Versand von Fotos/Videos. */}
+      <WebsitePublication
+        orderId={order.id}
+        initialVisible={order.website_visible}
+        initialCategory={order.website_category}
+        initialClothingType={order.website_clothing_type}
+        initialWorkHours={order.website_work_hours}
+        initialPrice={order.website_price}
+      />
     </div>
   );
 }
