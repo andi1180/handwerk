@@ -9,7 +9,7 @@
 export const MAX_IMAGE_DIM = 1500;
 
 /** JPEG-Qualität beim Export der komprimierten Fotos (0…1). */
-export const JPEG_QUALITY = 0.8;
+export const JPEG_QUALITY = 0.75;
 
 /**
  * Maximale erlaubte Video-Länge (Sekunden).

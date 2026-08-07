@@ -100,7 +100,7 @@ async function uploadWithRetry(
 async function postMetadataWithRetry(
   orderId: string,
   metadata: Record<string, unknown>,
-): Promise<void> {
+): Promise<{ id?: string } | null> {
   let lastError: unknown;
   for (let attempt = 0; attempt < UPLOAD_MAX_ATTEMPTS; attempt++) {
     try {
@@ -109,7 +109,12 @@ async function postMetadataWithRetry(
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(metadata),
       });
-      if (res.ok) return;
+      // Die angelegte Zeile (inkl. `id`) zurückgeben — sie wird für den
+      // nachgelagerten Kompressions-Anstoß gebraucht. Ein unerwarteter Body ist
+      // KEIN Fehler: der Upload selbst war erfolgreich.
+      if (res.ok) {
+        return (await res.json().catch(() => null)) as { id?: string } | null;
+      }
       // 4xx ⇒ dauerhaft (Body/Pfad), nicht erneut versuchen.
       if (res.status >= 400 && res.status < 500) {
         const detail = await res.text().catch(() => "");
@@ -127,6 +132,35 @@ async function postMetadataWithRetry(
     }
   }
   throw lastError ?? new Error("metadata_post_failed");
+}
+
+/**
+ * Stößt die **serverseitige Video-Kompression** an (720p / H.264) — FIRE-AND-
+ * FORGET nach erfolgreichem Upload. Die Route antwortet sofort mit 202 und
+ * transkodiert im Hintergrund; das Original ist währenddessen unverändert
+ * verfügbar. Ein Fehlschlag wird nur geloggt und beeinflusst den Upload NICHT
+ * (das Original bleibt liegen, nur größer).
+ */
+async function requestVideoCompression(
+  orderId: string,
+  mediaId: string,
+): Promise<void> {
+  try {
+    const res = await fetch(
+      `/api/portal/orders/${orderId}/media/${mediaId}/compress`,
+      { method: "POST" },
+    );
+    if (!res.ok) {
+      console.error(
+        `[capture] Kompressions-Anstoß fehlgeschlagen (order ${orderId}, media ${mediaId}): HTTP ${res.status}`,
+      );
+    }
+  } catch (err) {
+    console.error(
+      `[capture] Kompressions-Anstoß fehlgeschlagen (order ${orderId}, media ${mediaId}):`,
+      err,
+    );
+  }
 }
 
 /**
@@ -354,8 +388,9 @@ export function Capture({
       // Schritt 2 — Metadaten-POST (eigener Retry für transiente Fehler).
       // Endgültiger Fehler ⇒ die bereits hochgeladene Datei wieder entfernen,
       // damit kein verwaistes File bleibt und ein erneuter Versuch sauber startet.
+      let inserted: { id?: string } | null = null;
       try {
-        await postMetadataWithRetry(orderId, metadata);
+        inserted = await postMetadataWithRetry(orderId, metadata);
       } catch (err) {
         console.error(`[capture] Metadaten-POST fehlgeschlagen (${ctx}):`, err);
         const { error: removeError } = await supabase.storage
@@ -384,6 +419,14 @@ export function Capture({
       // schlägt es fehl, bleibt das Video unangetastet (graceful, kein Breaking).
       if (item.mediaType === "video") {
         void extractAndUploadFrames(item.file, item.storagePath);
+
+        // Serverseitige Kompression anstoßen (720p/H.264) — ebenfalls fire-and-
+        // forget und bewusst NACH dem refresh: das Original liegt bereits
+        // vollständig im Bucket und ist sofort nutzbar. Die Frames werden aus der
+        // lokalen Originaldatei gezogen und sind vom Transkodieren unabhängig.
+        if (inserted?.id) {
+          void requestVideoCompression(orderId, inserted.id);
+        }
       }
     },
     [supabase, orderId, router, extractAndUploadFrames],

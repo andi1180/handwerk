@@ -221,7 +221,7 @@ Der Upload ist bewusst zweigeteilt, damit die große Binärdatei **nicht** durch
 
 ### Client-Kompression ([lib/media/](lib/media/))
 
-- [constants.ts](lib/media/constants.ts): `MAX_IMAGE_DIM = 1500` (längste Kante), `JPEG_QUALITY = 0.8`. Video-Limit + Konfigurierbarkeit später.
+- [constants.ts](lib/media/constants.ts): `MAX_IMAGE_DIM = 1500` (längste Kante), `JPEG_QUALITY = 0.75` (von 0.8 gesenkt — spürbar kleinere Uploads bei praktisch unverändertem Bildeindruck; wirkt auch auf die Video-Vorschau-Frames, die `canvasToJpeg` mitbenutzen). Video-Limit + Konfigurierbarkeit später.
 - [compress.ts](lib/media/compress.ts): `compressImage(file)` dekodiert (EXIF-Orientierung via `createImageBitmap({ imageOrientation: "from-image" })`), skaliert seitenverhältnis-treu auf `MAX_IMAGE_DIM`, zeichnet auf ein Canvas und exportiert als JPEG → `{ blob, width, height }`. Spart Upload-Volumen. **HEIC/HEIF-Robustheit (iOS-Kameraroll):** scheitert `createImageBitmap` (manche iOS-Versionen dekodieren HEIC darüber nicht und werfen sofort), greift ein **`<img>`-Element-Fallback** (objectURL → `onload` → Canvas), den iOS Safari für HEIC **nativ** unterstützt (derselbe Decoder wie die Vorschau). Scheitern beide ⇒ `UnsupportedImageError` (älteres iOS < 17) → `capture.tsx` zeigt den konkreten Hinweis `capture.heicUnsupported` (Kamera-Format „Maximale Kompatibilität" = JPEG) statt des generischen Upload-Fehlers. Frische Live-Aufnahmen (`capture="environment"`) sind JPEG und nehmen den schnellen Bitmap-Pfad.
 
 ### Capture-Komponente ([app/portal/orders/[id]/capture.tsx](app/portal/orders/[id]/capture.tsx), Client)
@@ -252,6 +252,8 @@ Aufbauend auf demselben Flow wie 4b — bestehende Capture-Komponente + Route Ha
 ### Keine Client-Kompression für Video
 
 Anders als Fotos wird Video **nicht** clientseitig komprimiert (Canvas-Re-Encode wäre am Handy zu schwer) — die Datei geht **unverändert** in den Storage, unter `{business_id}/{order_id}/{uuid}.{ext}` (`ext` aus dem MIME-Subtyp, `quicktime → mov`, sonst Subtyp, Fallback `mp4`). Der `contentType` des Uploads ist der `file.type`. Hintergrund-Queue, 2 Retries und optimistische Liste werden **wiederverwendet** — `runUpload` verzweigt nur auf `media_type='video'`.
+
+> **Update:** Die Kompression passiert inzwischen **serverseitig und asynchron nach dem Upload** — s. „Serverseitige Video-Kompression" am Ende dieses Dokuments. Am Client bleibt es unverändert dabei, das Original unangetastet hochzuladen.
 
 ### Route-Handler-Erweiterung
 
@@ -3159,3 +3161,57 @@ Aus [SECURITY_REVIEW.md](SECURITY_REVIEW.md), nach ROI sortiert:
 > **Betriebs-Reel — VORHER/NACHHER zentriert oben (literal-x, 6.0.1-safe) + Logo nur auf Prozess-Frames/Videos, weg von before/after:** zwei gezielte Layout-Fixes am Betriebs-Reel (0013, `renderBusinessReel`); NUR [lib/reel/frames.ts](lib/reel/frames.ts) (`bakeBusinessPhotoFrame`) + [lib/reel/render.ts](lib/reel/render.ts) (`renderBusinessReel`), keine Migration, Webhook unberührt. Das Kunden-Reel (`bakePhotoFrame`/`normalizeClip` in `renderReel`) bleibt **unangetastet** (separate Funktionen, eigenes `logoLocal`). **(A) Label horizontal zentriert:** das VORHER/NACHHER-`drawtext` saß links (`x=LABEL_X=80`); jetzt mittig — `x` wird in JS als **LITERAL** berechnet (`estWidth = label.length·LABEL_FONT_SIZE·LABEL_CHAR_WIDTH_FACTOR`, `labelX = max(0, round((REEL_W − estWidth)/2))`; neue Konstante `LABEL_CHAR_WIDTH_FACTOR=0.66` schätzt den Versalien-Vorschub, `LABEL_X` entfernt) und literal an ffmpeg gereicht — **NIE** als Ausdruck `(w-text_w)/2`/`(iw-…)/2`, der auf dem Production-Build (ffmpeg **6.0.1**) still nichts rendert (s. accentBar-Bugfix 8b-1c; lokal 8.1.1 würde es täuschend funktionieren). y(80)/fontsize(130)/box/`boxborderw`(36)/Farben unverändert; der Box-Rand ist symmetrisch ⇒ zentrierter Text zentriert auch die Box; perfekte Zentrierung ist unkritisch (kein Logo mehr daneben). **(B) Logo nur auf Prozess-Frames + Videos, weg von before/after:** im Foto-Zweig (`renderBusinessReel`) schaltet `logoForFrame = label !== undefined ? null : logoLocal` das Logo pro Kategorie — before/after (Label gesetzt) bekommen das große zentrierte VORHER/NACHHER-Label und **KEIN Logo**, process-Fotos (kein Label) das Logo rechts oben; der Video-Zweig bleibt **UNVERÄNDERT** (`logoPath: logoLocal`, `logoPosition:'topright'` — Clips sind Prozess-Inhalt). Das Logo wird weiter immer geladen (nicht per `logo_per_page` gated), aber auf before/after nicht overlayt. Stale JSDoc über `bakeBusinessPhotoFrame` (72px/`boxborderw=24`, „oben links") auf 130/36/„oben zentriert" korrigiert. Kein `any`. `pnpm typecheck` + `pnpm build` grün.
 
 > **Fix — Betriebs-Reel-Button „Erneut teilen" visuell ausgegraut:** Bei `sharedAt === true` bekommt der ready-Button zusätzlich `.business-reel-pill--shared` (`opacity: 0.55`) — bleibt klickbar, signalisiert aber dass bereits geteilt. NUR `components/business-reel-button.tsx` + `app/globals.css`. `pnpm typecheck` + `pnpm build` grün.
+
+## Serverseitige Video-Kompression ([lib/media/compress-video.ts](lib/media/compress-video.ts), geteilt, server-only)
+
+Handy-Videos kommen mit hoher Bitrate (1080p+, oft 5–10 MB/s) in den Bucket. Sie werden nach dem Upload **serverseitig auf 720p/H.264 transkodiert** und **am selben Storage-Pfad** ersetzt. **Keine Migration, keine neue Spalte.**
+
+### Ablauf (asynchron, ohne Wartezwang)
+
+1. Das Video wird wie bisher **unverändert** hochgeladen und ist **sofort** verfügbar — die UI blockiert nicht, `capture.tsx` bleibt in seinem bestehenden zweistufigen Ablauf (Storage-Upload → Metadaten-POST).
+2. Nach erfolgreichem Metadaten-POST stößt der Client **fire-and-forget** `POST …/media/[mediaId]/compress` an (`requestVideoCompression`, Fehler werden nur geloggt). Dafür gibt `postMetadataWithRetry` jetzt die angelegte Zeile zurück (`{ id }`) statt `void` — ein unerwarteter Body ist **kein** Fehler (der Upload war ja erfolgreich), dann entfällt nur der Anstoß.
+3. Der Route Handler validiert billig und antwortet **202**; die Transkodierung läuft in **`after()`** (Muster wie `render-reel`).
+4. Erfolg ⇒ die komprimierte Datei **überschreibt** das Original (`upsert`, gleicher Pfad). Fehler ⇒ das Original bleibt unangetastet.
+
+**Warum kein Poll / kein Status-Feld:** Booklets werden erst **mehrere Tage** nach der Auftragsfertigstellung versendet — der Hintergrundjob hat reichlich Zeit, und das Original ist währenddessen voll nutzbar (Web-Story, Reel, Frames). Ein Fehlschlag kostet nur Speicherplatz, nichts Funktionales. Ein Retry ist damit „irgendwann später nochmal aufrufen" — bewusst **kein Queue-System**, kein `compressed`-Flag.
+
+### Die geteilte Funktion
+
+`compressOrderVideo(client, { orderId, businessId, mediaId }) → CompressOrderVideoResult` — exakt das `purgeOrderMedia`-Muster: der Route Handler enthält **keine** Transkodier-Logik, damit der spätere **gezielte Nachlauf** für bestehende Aufträge (separater Schritt, konkrete Order-IDs) dieselbe Funktion aufruft statt sie zu duplizieren. Der `client`-Parameter ist generisch (`SupabaseClient`): die Route reicht `service_role` durch (die Cookie-Session trägt nach der Response nicht mehr), ein späterer Nachlauf ebenso.
+
+Schritte: (1) `order_media`-Zeile laden, gefiltert auf `id` + `order_id` + `business_id` + `media_type='video'`; (2) `ensureFfmpeg()` ([lib/reel/ffmpeg.ts](lib/reel/ffmpeg.ts)) — **wiederverwendet**, kein zweiter Bereitstellungs-Pfad, das Binary wird wie beim Reel zur Laufzeit nach `/tmp` geladen und warm gecacht; (3) Original nach `/tmp` laden; (4) transkodieren; (5) Größenvergleich; (6) nur bei Erfolg am selben Pfad überschreiben. `finally` räumt beide Temp-Dateien (**nicht** `/tmp/ffmpeg`).
+
+### FFmpeg-Parameter
+
+```
+-i <input> -vf scale='if(gt(iw,ih),-2,720)':'if(gt(iw,ih),720,-2)'
+-c:v libx264 -crf 23 -preset medium
+-pix_fmt yuv420p -c:a aac -b:a 128k -movflags +faststart <output>.mp4
+```
+
+- **`scale='if(gt(iw,ih),-2,720)':'if(gt(iw,ih),720,-2)'`** — cappt die **kurze Seite** auf 720, **orientierungsunabhängig**: Querformat (`iw > ih`) ⇒ Breite `-2`/Höhe 720 (1920×1080 → 1280×720), Hochformat ⇒ Breite 720/Höhe `-2` (1080×1920 → 720×1280). Die jeweils andere Seite folgt proportional und bleibt über `-2` **gerade** (libx264/yuv420p braucht gerade Kanten). `autorotate` greift vor den Filtern ⇒ Hochkant-Handyclips werden korrekt aufgerichtet, die Verzweigung sieht also die **sichtbare** Orientierung.
+  > Die einfachen Anführungszeichen sind **Teil des Arguments** und werden von ffmpegs eigenem Filtergraph-Parser gestrippt — nicht von einer Shell: `execFile` startet ohne Shell, und ohne Quoting würde das Komma in `if(gt(iw,ih),-2,720)` als Filter-Trenner gelesen. Verifiziert wurde exakt so (Node + `execFile`, ein einziges argv-Element), nicht über die Shell.
+- **Ton:** `-c:a aac -b:a 128k`. Hat der Clip **keine** Tonspur, wählt ffmpeg schlicht keine aus und die Optionen laufen ins Leere — das Ergebnis ist identisch zu `-an` (lokal mit ffmpeg 8.1.1 verifiziert: Landscape-Clip ohne Audio → Output ohne Audio-Stream).
+- **KEIN `drawtext`, KEIN `overlay`** — dieser Pfad ist eine **reine Transkodierung**. Die bekannte FFmpeg-**6.0.1**-Falle (zentrierende `(…)/2`-Ausdrücke in `drawtext`/`drawbox` rendern auf dem Production-Build still nichts) ist hier also **nicht anwendbar**: es gibt keinen einzigen Text-/Overlay-Filter in diesem Filtergraph. Die betroffenen Stellen bleiben ausschließlich `lib/reel/frames.ts`.
+
+Verifiziert (Node + `execFile`, identische Argumente) mit ffmpeg **8.1.1 UND 6.1.6**, in beiden Versionen gleiches Ergebnis: Hochkant 1080×1920 (mit Ton) → **720×1280**, AAC erhalten; Querformat 1920×1080 (ohne Ton) → **1280×720**, kein Audio-Stream (Größenordnung der Ersparnis beim ersten Messlauf: 9,2 MB → 0,32 MB bzw. 9,0 MB → 0,96 MB).
+
+> **Erledigt — Hochformat-Cap (früher offener Punkt):** Das ursprüngliche `scale=-2:720` cappte pauschal die **Höhe** und machte aus einem Hochkant-Handyvideo (1080×1920 — dem Normalfall) **406×720**; das 9:16-Reel (1080×1920) hätte einen solchen Clip um Faktor ~2,7 hochskalieren müssen. Der Cap gilt jetzt für die **kurze Seite**: Hochformat liefert **720×1280** (nur noch 1,5× Hochskalierung im Reel), Querformat bleibt unverändert bei 1280×720. `SCALE_FILTER` in [compress-video.ts](lib/media/compress-video.ts) bleibt die eine Stellschraube.
+
+> **Zur 6.0.1-Verträglichkeit des `if()`-Ausdrucks:** In `scale` ist `-2` **immer** ein Ausdrucks-Ergebnis — auch das literale `scale=-2:720` wird als Expression ausgewertet; dass der Wert aus einem `if(gt(…))` stammt, ändert am Filter-Code nichts. Beide Zweige sind komplementär, es ist also nie beides negativ (der „both dimensions negative"-Fehler kann nicht auftreten), und `if`/`gt` gehören zum Standard-Funktionsumfang des eval-Parsers. Das ist eine **andere Filterklasse** als die bekannte 6.0.1-`drawtext`-Falle. Verifiziert wurde gegen **6.1.6** (nächstverfügbare 6.x); der Production-Build ist **6.0.1** (linux-x64, lokal auf darwin/arm64 nicht ausführbar) — gegen exakt 6.0.1 ist es damit ungetestet.
+
+### Ersetzen nur, wenn spürbar kleiner
+
+`REPLACE_MAX_RATIO = 0.9`: das Ergebnis überschreibt das Original **nur**, wenn es < 90 % der Originalgröße hat — sonst `skipped: true, reason: "not_smaller"` (kein Fehler). Eine Regel deckt damit alle Grenzfälle ab: bereits kleine oder schon komprimierte Videos (ein zweiter Lauf würde nur eine weitere Encoder-Generation kosten) und niedrig aufgelöste Quellen, die der 720er-Cap hochskalieren würde. Damit ist ein wiederholter Aufruf (Nachlauf, Retry) gefahrlos.
+
+### Ersetzen am selben Pfad — warum
+
+Die komprimierte Datei geht per `upsert` unter **denselben** `storage_path` (`contentType: "video/mp4"`). Dadurch bleiben **alle** bestehenden Referenzen gültig: die `order_media`-Zeile, die Konventions-Pfade der Vorschau-Frames (`{pfad}.frame-{i}.jpg`, [video-frames.ts](lib/media/video-frames.ts)) und jede bereits erzeugte Signed-URL. Es wird **nichts umbenannt** und **keine DB-Spalte** geschrieben. Trägt der Pfad noch eine `.mov`-Endung, bleibt sie stehen — maßgeblich ist der gesetzte `contentType`.
+
+Die Frame-Extraktion (Phase 1) läuft weiter **clientseitig aus der lokalen Originaldatei** und ist vom Transkodieren unabhängig; die Frames liegen unter eigenen Pfaden, es gibt also keine Race mit dem Überschreiben.
+
+### Isolation (§14.2) + Fehlerverhalten
+
+Der Route Handler ([app/api/portal/orders/[id]/media/[mediaId]/compress/route.ts](app/api/portal/orders/[id]/media/[mediaId]/compress/route.ts), `runtime="nodejs"`, `maxDuration=300`) validiert mit dem **AUTHENTICATED** Client: kein User ⇒ 401, kein Betrieb ⇒ 403, Order über RLS ⇒ 404, Medien-Zeile über RLS gegen die Order ⇒ 404, kein Video ⇒ 400 `not_a_video`. Die `business_id` stammt **ausschließlich** aus der so geladenen Order, **nie** aus dem Request. Die Hintergrundarbeit läuft mit `service_role`, strikt auf die zuvor validierten `order_id`/`business_id`/`media_id` gescoped — `compressOrderVideo` legt sie zusätzlich als Filter auf jede Query und prüft, dass der `storage_path` im `{business_id}/{order_id}/`-Präfix liegt.
+
+`compressOrderVideo` **wirft nicht**, sondern meldet `ok: false` + `errors[]` (Schritt-Präfixe `load_media` / `invalid_path` / `ensure_ffmpeg` / `download` / `ffmpeg` / `upload`). Das Original wird **erst am Ende und nur bei Erfolg** überschrieben ⇒ jeder Fehlerpfad ist ohne Nebenwirkung, **kein Datenverlust**. Die Route loggt das Ergebnis (`ok` / `skipped` / `failed` mit Byte-Zählern), blockiert aber nichts — der Auftrag ist zu diesem Zeitpunkt längst angelegt.
