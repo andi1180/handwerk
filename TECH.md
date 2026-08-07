@@ -3220,7 +3220,7 @@ Der Route Handler ([app/api/portal/orders/[id]/media/[mediaId]/compress/route.ts
 
 Fünf neue Spalten auf `orders` erfassen, welche Aufträge später auf der öffentlichen Website des Betriebs (Repo **atelier-dax-web**, Archiv `/verwandlungen`) erscheinen sollen — und mit welchen Angaben.
 
-> ⚠️ **VORBEREITENDER BAUSTEIN — ES EXISTIERT KEINE ANBINDUNG.** Kein API-Call, kein Webhook, kein Versand von Fotos/Videos an eine externe Stelle. Die Werte werden **ausschließlich** in Handwerks eigener DB gespeichert; nichts liest sie außer der Detailseite selbst. Eine echte Übertragung ist ein späterer, eigener Schritt — und dabei sind die zwei unter „Offen" genannten Abweichungen zum Website-Schema aufzulösen.
+> ⚠️ **VORBEREITENDER BAUSTEIN — ES EXISTIERT KEINE ANBINDUNG.** Kein API-Call, kein Webhook, kein Versand von Fotos/Videos an eine externe Stelle. Die Werte werden **ausschließlich** in Handwerks eigener DB gespeichert; nichts liest sie außer der Detailseite selbst. Eine echte Übertragung ist ein späterer, eigener Schritt — und dabei sind die unter „Offen" genannten Punkte zu klären.
 
 > ⚠️ **Migration 0015 muss vor dem Live-Gang manuell im Supabase-SQL-Editor angewendet werden.** `getOrderById` selektiert die neuen Spalten — ohne angewendete Migration schlägt der Select fehl, `getOrderById` liefert `null` und die **gesamte Detailseite** läuft in `notFound()`. Reihenfolge: erst Migration, dann Deploy.
 
@@ -3298,7 +3298,86 @@ Client-Validierung = Server-Validierung (dieselben Guards). Der Abschnitt trägt
 
 ### Offen — vor einer echten Anbindung zu klären
 
-1. **Preis-Einheit:** Hier steht ein **numerischer Euro-Betrag**; die Website führt `preis_cent` (**integer, Cent**). Eine Übertragung muss **umrechnen (× 100)**, nicht durchreichen.
+1. **Preis-Einheit — geklärt, keine Umrechnung nötig:** Hier steht ein **numerischer Euro-Betrag**, und das **passt zur geplanten neuen Website-Struktur**, die den Preis ebenfalls in **Euro** erwartet (siehe `pflichtenheft-verwandlungen-handwerk-integration.md`, nicht Teil dieses Bausteins). **Keine ×100-Umrechnung.**
+   > Ein früherer Vermerk hier verlangte „× 100 umrechnen, nicht durchreichen". Der bezog sich auf das **heutige, noch nicht abgelöste** Schema des Website-Repos (`verwandlungen.preis_cent`, integer/Cent) und ist für die künftige Integration **nicht mehr maßgeblich**. Solange gegen das alte Schema geschrieben würde, gälte er weiter — die geplante Integration schreibt aber nicht dorthin.
+   > ⚠️ Derselbe überholte ×100-Hinweis steht noch im Kopf und im Spaltenkommentar von [0015_orders_website_publication.sql](supabase/migrations/0015_orders_website_publication.sql) (bewusst nicht mitgeändert — die Migration ist bereits geschrieben und soll unverändert angewendet werden). Diese Stelle hier ist die maßgebliche.
 2. **Arbeitszeit-Präzision:** Hier `numeric` ohne Skala; die Website hat `stunden numeric(6,1)` (eine Nachkommastelle) — Werte mit mehr Präzision würden dort gerundet oder abgewiesen.
 3. **Enum-Nachzug:** `WEBSITE_CLOTHING_TYPES` ist eine Kopie. Wächst das Website-Enum, muss die Liste hier nachgezogen werden (eine Zeile, keine Migration).
 4. **Medien:** Welche Fotos/Videos mitgingen und unter welcher Einwilligung, ist **nicht** Teil dieses Bausteins.
+
+---
+
+## Website-Feed: lesender Abruf durch die Website (Migration 0016)
+
+**Der erste Kanal, über den Handwerk-Daten das Repo verlassen.** Die öffentliche Website des Betriebs (Repo **atelier-dax-web**, Archiv `/verwandlungen`) **holt** sich alle 15 Minuten die Aufträge mit `website_visible = true` ab.
+
+> ⚠️ **PULL, NICHT PUSH.** Handwerk sendet nichts: kein ausgehender Call, kein Webhook, keine Benachrichtigung. Der Endpunkt liest **ausschließlich** — kein Insert, kein Update, kein Delete, insbesondere **kein „abgeholt"-Vermerk**. Handwerk bleibt von der Anbindung **zustandslos**; ob ein Stück drüben schon übernommen ist, weiß allein die Website (sie merkt sich die `id` von hier als `handwerk_order_id`).
+
+> ⚠️ **Migration 0016 muss vor dem Live-Gang manuell im Supabase-SQL-Editor angewendet werden**, und danach ist mit [supabase/scripts/set_website_pull_secret.sql](supabase/scripts/set_website_pull_secret.sql) ein Secret zu setzen. Ohne Secret ist der Betrieb über den Endpunkt **nicht erreichbar** (jede Anfrage 404) — das ist der gewollte Ausgangszustand, kein Fehler.
+
+**Phase 1 = nur Fotos.** Videos werden **nicht** ausgeliefert und nicht erwähnt; die `frame-*.jpg`-Vorschaubilder aus [lib/media/video-frames.ts](lib/media/video-frames.ts) sind hier ausdrücklich kein Gegenstand. Video ist ein eigener, späterer Schritt.
+
+### Endpoint ([app/api/website/orders/route.ts](app/api/website/orders/route.ts), `GET`)
+
+- Liegt **bewusst nicht** unter `/portal` (kein Session-Kontext) — wie der Inbound-Webhook (§12). Die Middleware leitet nur für `/portal` um und lässt ihn durch.
+- **AUTH = `Authorization: Bearer <secret>` (§14.2):** → `businesses.website_pull_secret` → `business_id`. Diese `business_id` ist die **EINZIGE Vertrauensquelle** und wird **jeder** Query als Filter mitgegeben — sie kommt **nie** aus der Anfrage. Ohne Session laufen alle Zugriffe über `service_role`.
+- **Ungültiges/fehlendes Secret ⇒ 404**, ohne Grund in der Antwort (`{"error":"not_found"}`). Ein Infrastruktur-Fehler beim Auflösen ist davon **unterschieden** (500 `lookup_failed`) — die Website soll einen Ausfall nicht für einen abgelaufenen Zugang halten.
+- **`cache-control: no-store`.** Ein Zwischenspeicher lieferte abgelaufene Foto-Adressen aus und verzögerte frisch eingeschaltete Stücke.
+
+#### ⚠️ Warum Kopfzeile und nicht Pfad-Secret — anders als beim Webhook
+
+Ein Wert im **Pfad eines GET** steht danach in jedem Server- und Proxy-Log, in Analyse-Werkzeugen und im Verlauf jedes Werkzeugs, mit dem jemand den Endpunkt einmal von Hand aufruft. Eine **Kopfzeile** wird dort nicht mitgeschrieben. Beim Webhook ist das Pfad-Secret hingenommen, weil roapps Konfiguration nur **eine URL** entgegennimmt — hier gibt es diesen Zwang nicht. Dieselbe Überlegung, aus der das Website-Repo `?token=` für seine eigenen Cron-Endpunkte abgelehnt hat.
+
+### ⚠️ Eigenes Secret — `webhook_secret` wird NICHT mitbenutzt
+
+| | `webhook_secret` (0001) | `website_pull_secret` (0016) |
+| --- | --- | --- |
+| Richtung | **eingehend** (roapp → Handwerk) | **abgerufen** (Website liest Handwerk) |
+| Liegt in | roapps Webhook-Konfiguration, in der URL | Umgebung des Website-Deployments |
+| Wirkung bei Leck | Aufträge anlegen + ausliefern lassen | Auftragsbestand + signierte Fotos lesen |
+
+Zwei Richtungen, zwei fremde Systeme, zwei Aufbewahrungsorte. Ein geteiltes Secret hieße: wer eines erbeutet, kann **beides**. Getrennt lässt sich außerdem eines rotieren, ohne das andere anzufassen.
+
+**Partieller Unique-Index** über die Nicht-NULL-Werte (`businesses_website_pull_secret_key`): Das Secret ist die Vertrauensquelle — zwei Betriebe mit demselben Wert wären eine **stille Mandanten-Verletzung**, weil der Endpunkt über `maybeSingle()` auflöst und je nach Reihenfolge den **falschen** Betrieb bekäme. ⚠️ `webhook_secret` hat diesen Schutz aus 0001 **nicht**; das ist eine bestehende Lücke und wurde hier bewusst nicht mitgeändert (fremder Pfad).
+
+### Nutzlast
+
+```jsonc
+{
+  "signed_url_ttl_seconds": 3600,
+  "orders": [
+    {
+      "id": "…uuid…",              // Handwerks Auftrags-ID → drüben handwerk_order_id
+      "external_ref": "N1460",
+      "updated_at": "2026-…",      // Trigger aus 0001 — daran erkennt die Website Änderungen
+      "work_category": "redesign", // orders.website_category
+      "clothing_type": "mantel",   // orders.website_clothing_type
+      "work_hours": 4.5,
+      "price_eur": 180,            // ⚠️ EURO, nicht Cent
+      "item_description": "…",     // Rohtext aus roapp — Material für die Texterzeugung
+      "photos": [
+        { "id": "…", "kind": "before", "caption": "…", "sort_order": 1, "url": "https://…" }
+      ],
+      "photos_incomplete": false
+    }
+  ]
+}
+```
+
+- **`price_eur` trägt die Einheit im Namen.** Genau hier war schon einmal eine ×100-Verwechslung dokumentiert (Abschnitt „Website-Veröffentlichung", Offen-Punkt 1) — der Feldname ist die billigste Absicherung dagegen.
+- **`work_category` statt `category`.** Migration 0015 widmet der Verwechslung mit `order_media.category` einen eigenen Block; ein bloßes `category` neben `photos[].kind` würde sie in der Nutzlast wieder aufmachen.
+- **`photos[].kind` ist `before` oder `after` — nie `process`.** Prozessbilder bleiben in Handwerk: die Website hat dafür keine Bildkategorie. Als Aufzählung gefiltert (`UEBERNOMMENE_BILDARTEN`) und nicht als `!== "process"` — käme je eine vierte Einteilung dazu, soll sie eine Entscheidung erzwingen statt stillschweigend mitzufahren.
+- **`signed_url_ttl_seconds: 3600`** — die Adressen überdauern mehrere 15-Minuten-Läufe. Sie sind trotzdem **nicht zum Verlinken** gedacht: die Website lädt die Datei herunter und legt sie in ihrem eigenen Speicher ab.
+
+#### ⚠️ `order_media.category` ist die Quelle, `order_media.tag` NICHT
+
+Die Tabellenübersicht oben nennt für `order_media` das Feld `tag` (`vorher`/`nachher`/`prozess`, aus 0001). **Es trägt die Einteilung nicht mehr:** seit 6b.2 wird es nicht mehr gesetzt und ist nur in wenigen Altzeilen befüllt (live gemessen 07.08.2026: **5 von 137** Zeilen — 2 `nachher`, 3 `prozess`). Live ist `order_media.category` (`before`/`after`/`process`, Migration 0010, `not null`, alle 137 Zeilen befüllt). Der Feed liest **ausschließlich `category`**.
+
+#### ⚠️ Zwei Fälle, die die Website kennen muss
+
+1. **`photos: []` bei gepurgtem Auftrag.** [purge-order-media.ts](lib/media/purge-order-media.ts) löscht die `order_media`-**Zeilen** *und* die Storage-Dateien, lässt die `orders`-Zeile aber stehen. Ein gepurgter, sichtbarer Auftrag erscheint damit **ohne Fotos**. Es gibt keine verwaisten Zeilen auf fehlende Dateien.
+2. **`photos_incomplete: true`.** Konnte ein Foto nicht signiert werden, fehlt es in `photos` und das Flag steht. Der Auftrag geht trotzdem mit — ein einzelner Speicher-Schluckauf soll nicht das ganze Stück verschwinden lassen —, aber die Website kann die Übernahme aufschieben, statt ein halbes Stück anzulegen. Im Normalfall `false`.
+
+### Verify
+
+[supabase/verify/0016_website_pull_secret_checks.sql](supabase/verify/0016_website_pull_secret_checks.sql) — Spalte, partieller Unique-Index (mit Nachweis am Fall, in einer zurückgerollten Transaktion), Trennung von `webhook_secret`, keine `anon`-Grants.
