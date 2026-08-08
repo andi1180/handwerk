@@ -3392,7 +3392,7 @@ Die Tabellenübersicht oben nennt für `order_media` das Feld `tag` (`vorher`/`n
 
 ## Website-Text: „Was wurde gemacht" (Migration 0017)
 
-> ⚠️ **Migration 0017 muss manuell im Supabase-SQL-Editor angewendet werden**, bevor der Feed wieder antwortet. Die Spalte steht in der `select`-Liste von [app/api/website/orders/route.ts](app/api/website/orders/route.ts) — solange sie fehlt, liefert der Endpunkt **500 `orders_failed`** (am Fall gemessen, 08.08.2026). Das ist folgenlos, solange die Website nichts abruft, und muss vor deren Inbetriebnahme erledigt sein.
+> **Migration 0017 ist angewendet (08.08.2026).** Bis dahin lieferte der Feed **500 `orders_failed`**, weil die Spalte in der `select`-Liste von [app/api/website/orders/route.ts](app/api/website/orders/route.ts) steht — am Fall gemessen. ⚠️ **Merksatz für den nächsten Feed-Umbau:** Ein neues Feld in der `select`-Liste macht den Endpunkt zwischen Commit und angewendeter Migration unbrauchbar. Solange die Website nichts abruft, ist das folgenlos; sobald sie es tut, gehört die Migration **vor** die Bereitstellung.
 
 ### ⚠️ Warum es dieses Feld gibt — ein gemessener Befund, keine Vorliebe
 
@@ -3441,3 +3441,39 @@ Ein **Zähler** erscheint nur, solange der Text zu kurz ist (`website.textCounte
 ### Verify
 
 [supabase/verify/0017_orders_website_text_checks.sql](supabase/verify/0017_orders_website_text_checks.sql) — Spalte (text, nullable, kein Default), Gegenprobe auf **keinen** CHECK, Bestand alle NULL, Spaltenkommentar. Dazu Prüfung 4: **sichtbare Aufträge ohne ausreichenden Text** — solche Zeilen sind vor 0017 entstanden, lassen sich über die Oberfläche nicht mehr abschalten und müssen von Hand nachgetextet werden, sonst schiebt die Website ihre Übernahme dauerhaft auf. (Live am 08.08.2026: **0 sichtbare Aufträge**, der Fall tritt derzeit nicht ein.)
+
+### Abnahme am laufenden Server (08.08.2026, 19/19)
+
+Gegen den echten Route Handler gefahren, nicht am Quelltext beurteilt:
+
+| Fall | Erwartet | Gemessen |
+|---|---|---|
+| ohne Cookie | 401 | ✓ |
+| Umlegen ohne Text | 400 `invalid_website_text` | ✓ |
+| nur Leerzeichen | 400 | ✓ |
+| **79 Zeichen** | **400** | ✓ |
+| 79 nach Trim (mit Rand) | 400 | ✓ |
+| **exakt 80 Zeichen** | **200** | ✓ (Text + Preis gespeichert) |
+| Abschalten nach dem Umlegen | 400 `website_locked` | ✓ (Sperre unangetastet) |
+| Text nachträglich ändern | 200 | ✓ |
+| Feed | 200 mit `website_text` | ✓ |
+
+Die Grenze ist mit **echten Sätzen** angefahren (79 und exakt 80 Zeichen), nicht mit `AAAA…` — geprüft wird das Material, das dort später wirklich steht.
+
+⚠️ **Der Prüfauftrag (N1425) wurde dafür kurz sichtbar geschaltet und per `service_role` zurückgesetzt** — genau der Weg, den 0015 für die Einbahn-Sperre vorsieht („der Betreiber muss den Zustand per SQL korrigieren können, wenn es einmal nötig ist"). Gegengeprüft: **0 sichtbare Aufträge, 0 Zeilen mit `website_text`.**
+
+### ⚠️ Zwei Betriebe — beim Messen aufgefallen
+
+| Betrieb | Aufträge | Pull-Secret | Owner |
+|---|---|---|---|
+| `Schneideratelier Alina Dax` | 10 | **nein** | `andreas.dax@gmail.com` |
+| `Atelier Alina Dax` | **86** | **ja** | `office@alinadax.com` |
+
+Der erste Messversuch lief als `andreas.dax` gegen einen Auftrag des **anderen** Betriebs und bekam durchgehend **404** — RLS, korrekt, kein Fehler. **Für den Website-seitigen Abruf heißt das: Das eine Secret zieht genau einen Betrieb** (`Atelier Alina Dax`); Aufträge im anderen kommen dort nie an. Das ist die gewollte Mandanten-Trennung und gehört gewusst, bevor jemand einen fehlenden Auftrag für einen Fehler hält.
+
+### ⚠️ Zwei Beobachtungen aus der gemessenen Nutzlast
+
+Beide stützen den Befund, der zu diesem Feld geführt hat:
+
+1. `item_description` von N1425 lautet `Escada corset schaun ob kann besse machen` — wieder eine Annahmenotiz, kein Arbeitsbericht.
+2. Die `caption` des `after`-Fotos ist **`null`**; die des `before`-Fotos enthält „… bei andere Schneiderei in Wien" — also **Betriebs-Kontext, der in einem öffentlichen Alt-Text nichts zu suchen hat**. Wer drüben Alt-Texte aus Captions ableitet, braucht beides: einen Ersatzweg für den `null`-Fall **und** eine Prüfung des Inhalts.
