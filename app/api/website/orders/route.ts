@@ -86,6 +86,8 @@ type FeedOrderRow = {
   website_clothing_type: string | null;
   website_work_hours: number | null;
   website_price: number | null;
+  consent_given: boolean;
+  consent_at: string | null;
 };
 
 /** Eine Medienzeile, wie sie aus `order_media` gelesen wird. */
@@ -153,6 +155,27 @@ type FeedOrder = {
    *    sondern nur erfinden. Geht als Nebeninformation weiterhin mit.
    */
   item_description: string | null;
+  /**
+   * Einwilligung des Kunden in die Veröffentlichung (`orders.consent_given`,
+   * aus 0001). Grundlage ist das schriftliche, unterschriebene Formular an der
+   * Kassa — Handwerk hält hier nur fest, DASS es vorliegt.
+   *
+   * ⚠️ Die Website entscheidet damit, ob ein Stück ohne Wartezeit sichtbar sein
+   *    darf. Handwerk prüft NICHT gegen dieses Feld: `website_visible` und
+   *    `consent_given` sind zwei getrennte Angaben, der Feed gibt beide
+   *    unverändert weiter.
+   *
+   * ⚠️ Stand 08.08.2026 ist der Wert bei allen über den roapp-Webhook
+   *    angelegten Aufträgen `false` — §13.5 setzt ihn dort fest so, und es gibt
+   *    danach keine Stelle, an der er noch umgestellt werden könnte. Nur von
+   *    Hand angelegte Aufträge können `true` tragen.
+   */
+  consent_given: boolean;
+  /**
+   * Wann die Einwilligung erfasst wurde (`orders.consent_at`). Gesetzt genau
+   * dann, wenn `consent_given` gesetzt wurde; sonst `null`.
+   */
+  consent_at: string | null;
   photos: FeedPhoto[];
   /**
    * `true`, wenn zu diesem Auftrag mindestens ein Foto NICHT signiert werden
@@ -220,7 +243,7 @@ export async function GET(request: Request) {
   const { data: orderRows, error: ordersError } = await service
     .from("orders")
     .select(
-      "id, external_ref, item_description, website_text, updated_at, website_category, website_clothing_type, website_work_hours, website_price",
+      "id, external_ref, item_description, website_text, updated_at, website_category, website_clothing_type, website_work_hours, website_price, consent_given, consent_at",
     )
     .eq("business_id", business.id)
     .eq("website_visible", true)
@@ -332,6 +355,8 @@ export async function GET(request: Request) {
     price_eur: o.website_price,
     website_text: o.website_text,
     item_description: o.item_description,
+    consent_given: o.consent_given,
+    consent_at: o.consent_at,
     photos: photosByOrder.get(o.id) ?? [],
     photos_incomplete: incompleteOrders.has(o.id),
   }));
