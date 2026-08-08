@@ -24,15 +24,24 @@ export type OrderDetail = {
   item_description: string | null;
   status: OrderStatus;
   created_at: string;
-  /* Website-Veröffentlichung (Migration 0015). Reine Erfassung — es existiert
-     KEINE Anbindung an die Website (kein API-Call/Webhook/Medien-Versand).
+  /* Website-Veröffentlichung (Migration 0015 + 0017).
      `website_category` ist die Art der Arbeit am AUFTRAG und hat nichts mit
-     `OrderMedia.category` (before/after/process) zu tun. */
+     `OrderMedia.category` (before/after/process) zu tun.
+
+     ⚠️ Hier stand „es existiert KEINE Anbindung an die Website". Das gilt seit
+     Migration 0016 nicht mehr: `app/api/website/orders/route.ts` liefert diese
+     Werte an die Website aus. Handwerk SENDET weiterhin nichts (Pull, kein
+     Push) — aber die Spalten werden gelesen. */
   website_visible: boolean;
   website_category: string | null;
   website_clothing_type: string | null;
   website_work_hours: number | null;
   website_price: number | null;
+  /* „Was wurde gemacht" — von Hand geschrieben (Migration 0017). Pflicht ab 80
+     Zeichen, sobald sichtbar. NICHT `item_description`: das ist die
+     Annahmenotiz vom Tresen (Maße, Kürzel) und taugt nachweislich nicht als
+     Textquelle. */
+  website_text: string | null;
 };
 
 /** Ein Medien-Asset eines Auftrags. */
@@ -57,7 +66,7 @@ export async function getOrderById(id: string): Promise<OrderDetail | null> {
   const { data } = await supabase
     .from("orders")
     .select(
-      "id, business_id, customer_name, customer_email, customer_phone, external_ref, item_description, status, created_at, website_visible, website_category, website_clothing_type, website_work_hours, website_price",
+      "id, business_id, customer_name, customer_email, customer_phone, external_ref, item_description, status, created_at, website_visible, website_category, website_clothing_type, website_work_hours, website_price, website_text",
     )
     .eq("id", id)
     .maybeSingle<OrderDetail>();

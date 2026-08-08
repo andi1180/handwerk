@@ -7,7 +7,9 @@ import {
   DEFAULT_WEBSITE_CATEGORY,
   WEBSITE_CATEGORIES,
   WEBSITE_CLOTHING_TYPES,
+  WEBSITE_TEXT_MIN_LENGTH,
   isPositiveNumber,
+  isValidWebsiteText,
   isWebsiteCategory,
   isWebsiteClothingType,
   parseNumericInput,
@@ -44,6 +46,7 @@ export function WebsitePublication({
   initialClothingType,
   initialWorkHours,
   initialPrice,
+  initialText,
 }: {
   orderId: string;
   initialVisible: boolean;
@@ -51,6 +54,7 @@ export function WebsitePublication({
   initialClothingType: string | null;
   initialWorkHours: number | null;
   initialPrice: number | null;
+  initialText: string | null;
 }) {
   const router = useRouter();
 
@@ -74,6 +78,10 @@ export function WebsitePublication({
   const [price, setPrice] = useState(
     initialPrice === null ? "" : String(initialPrice),
   );
+  /* „Was wurde gemacht" (0017). Bewusst NICHT aus `item_description`
+     vorbefüllt: Ein vorbefülltes Feld wird bestätigt statt geschrieben — und
+     genau die Annahmenotiz mit Maßen und Kürzeln soll hier nicht landen. */
+  const [text, setText] = useState(initialText ?? "");
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -128,6 +136,10 @@ export function WebsitePublication({
       setError(t(DEFAULT_LOCALE, "website.errPrice"));
       return;
     }
+    if (!isValidWebsiteText(text)) {
+      setError(t(DEFAULT_LOCALE, "website.errText"));
+      return;
+    }
 
     setBusy(true);
     void (async () => {
@@ -141,6 +153,7 @@ export function WebsitePublication({
             website_clothing_type: clothingType,
             website_work_hours: hours,
             website_price: parsedPrice,
+            website_text: text,
           }),
         });
         if (!res.ok) {
@@ -161,6 +174,7 @@ export function WebsitePublication({
           website_clothing_type: string | null;
           website_work_hours: number | null;
           website_price: number | null;
+          website_text: string | null;
         };
         // Server-Wahrheit übernehmen (macht die Sperre wirksam).
         setSavedVisible(data.website_visible);
@@ -177,6 +191,11 @@ export function WebsitePublication({
         if (data.website_price !== null) {
           setPrice(String(data.website_price));
         }
+        // Getrimmte Server-Fassung übernehmen — sonst stünde im Feld eine
+        // andere Zeichenkette als in der Datenbank.
+        if (data.website_text !== null) {
+          setText(data.website_text);
+        }
         setSavedNotice(true);
         setBusy(false);
         router.refresh();
@@ -186,7 +205,17 @@ export function WebsitePublication({
         setBusy(false);
       }
     })();
-  }, [busy, category, clear, clothingType, orderId, price, router, workHours]);
+  }, [
+    busy,
+    category,
+    clear,
+    clothingType,
+    orderId,
+    price,
+    router,
+    text,
+    workHours,
+  ]);
 
   const categoryOptions = useMemo(
     () => WEBSITE_CATEGORIES.map((c) => ({ value: c.value, label: c.label })),
@@ -311,6 +340,21 @@ export function WebsitePublication({
             }}
           />
 
+          {/* „Was wurde gemacht" — die Textquelle fürs öffentliche Archiv.
+              Steht bewusst UNTER den vier Zahlen-/Auswahlfeldern: die sind in
+              Sekunden erledigt, dieses will einen Moment Nachdenken. */}
+          <TextField
+            label={t(DEFAULT_LOCALE, "website.text")}
+            hint={t(DEFAULT_LOCALE, "website.textHint")}
+            value={text}
+            minLength={WEBSITE_TEXT_MIN_LENGTH}
+            disabled={busy}
+            onChange={(v) => {
+              clear();
+              setText(v);
+            }}
+          />
+
           <span style={hintStyle}>{t(DEFAULT_LOCALE, "website.required")}</span>
 
           {/* Sperr-Warnung nur VOR dem Speichern — danach steht der Status oben. */}
@@ -373,6 +417,8 @@ function errorMessage(code: string): string {
       return t(DEFAULT_LOCALE, "website.errWorkHours");
     case "invalid_website_price":
       return t(DEFAULT_LOCALE, "website.errPrice");
+    case "invalid_website_text":
+      return t(DEFAULT_LOCALE, "website.errText");
     case "website_locked":
       return t(DEFAULT_LOCALE, "website.errLocked");
     default:
@@ -417,6 +463,57 @@ function SelectField({
         ))}
       </select>
       {hint ? <span style={hintStyle}>{hint}</span> : null}
+    </label>
+  );
+}
+
+/**
+ * Mehrzeiliges Textfeld für „Was wurde gemacht" (Migration 0017).
+ *
+ * Der Zähler erscheint NUR, solange der Text zu kurz ist. Dauerhaft sichtbar
+ * würde er beim Schreiben mitgezählt werden, statt dass jemand schreibt; ganz
+ * ohne ihn wäre „mindestens 80 Zeichen" eine Bedingung, deren Erfüllung man
+ * raten muss. Gezählt wird der GETRIMMTE Text — genau der wird geprüft.
+ */
+function TextField({
+  label,
+  value,
+  onChange,
+  hint,
+  minLength,
+  disabled,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  hint?: string;
+  minLength: number;
+  disabled?: boolean;
+}) {
+  const laenge = value.trim().length;
+  const fehlend = minLength - laenge;
+
+  return (
+    <label style={labelStyle}>
+      <span style={captionStyle}>{label}</span>
+      <textarea
+        className="form-input"
+        rows={4}
+        value={value}
+        disabled={disabled}
+        style={{ resize: "vertical", minHeight: 96, lineHeight: 1.5 }}
+        onChange={(e) => onChange(e.target.value)}
+      />
+      {hint ? <span style={hintStyle}>{hint}</span> : null}
+      {fehlend > 0 ? (
+        <span style={hintStyle}>
+          {t(DEFAULT_LOCALE, "website.textCounter", {
+            fehlend,
+            laenge,
+            min: minLength,
+          })}
+        </span>
+      ) : null}
     </label>
   );
 }

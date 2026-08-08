@@ -1,0 +1,76 @@
+-- 0017_orders_website_text.sql — Valooro Handwerk: Website-Text zum Auftrag.
+-- ANWENDUNG: manuell im Supabase-SQL-Editor des Handwerk-Projekts. NICHT lokal ausführen.
+--
+-- ═══════════════════════════════════════════════════════════════════════════
+-- WARUM ES DIESES FELD GIBT — ein gemessener Befund, keine Vorliebe
+-- ═══════════════════════════════════════════════════════════════════════════
+--
+-- Bis 0016 war der Plan, den öffentlichen Text drüben aus `item_description`
+-- erzeugen zu lassen. Die Messung an echten Aufträgen (VORAB-Erhebung zum
+-- Website-Feed, 07.08.2026) hat gezeigt, dass das nicht trägt. Ein echter Wert
+-- aus dem Bestand:
+--
+--     'Kleid Les Historis Gummi K M L 26 R 26 ,5 armale kurzen Armal lang 26 cm'
+--
+-- Maße, Kürzel, Tippfehler — eine ANNAHMENOTIZ vom Tresen, keine Beschreibung
+-- der geleisteten Arbeit. Dazu die Streuung: `item_description` reicht von 11
+-- bis 157 Zeichen, und `order_media.caption` ist nur bei 46 % der Fotos
+-- gesetzt (im obigen Auftrag bei keinem). Aus diesem Material könnte ein
+-- Sprachmodell nicht beschreiben, was gemacht wurde — es könnte es nur
+-- ERFINDEN.
+--
+-- Entschieden am 07.08.2026: Alina schreibt den Text beim Umlegen des
+-- Schalters selbst, zwei bis drei Sätze. Die KI auf der Website-Seite GLÄTTET
+-- ihn und erzeugt daraus den Titel; sie erfindet nichts mehr.
+--
+-- `item_description` bleibt unangetastet und geht weiterhin im Feed mit — als
+-- Nebeninformation, ausdrücklich nicht mehr als Textquelle.
+--
+-- ═══════════════════════════════════════════════════════════════════════════
+-- PFLICHT AB 80 ZEICHEN — App-Regel, kein DB-CHECK
+-- ═══════════════════════════════════════════════════════════════════════════
+--
+-- Sobald `website_visible = true` gesetzt wird, ist `website_text` Pflicht mit
+-- mindestens 80 Zeichen (nach dem Trimmen). Bei `website_visible = false` ist
+-- das Feld beliebig, auch leer.
+--
+-- ⚠️ Woher die 80 kommen: Der ERSTE SATZ dieses Textes wird auf der Website
+--    automatisch zur Bildunterschrift unter dem Vorher/Nachher-Paar. Die dort
+--    gemessene Zielgröße für Bildunterschriften liegt bei 60–95 Zeichen
+--    (atelier-dax-web, Etappe 4). Eine Untergrenze von 80 stellt sicher, dass
+--    überhaupt ein ganzer Satz plus etwas dahinter vorhanden ist — sonst
+--    verbraucht die Bildunterschrift den gesamten Text und für „Was wurde
+--    gemacht" bleibt nichts übrig.
+--
+--    KEINE Obergrenze: Für die Glättung drüben ist zu viel Material besser als
+--    zu wenig.
+--
+-- KEIN CHECK-Constraint — dieselbe Begründung wie bei `website_work_hours` und
+-- `website_price` in 0015: Die Pflicht ist eine ZUSTANDSREGEL, die nur im
+-- Zusammenspiel mit `website_visible` gilt. Ein DB-CHECK müsste
+-- `website_visible` mitlesen und würde alle bestehenden Zeilen (alle NULL)
+-- sofort verletzen. Die Regel gehört in den Route Handler, der den
+-- Zustandsübergang ohnehin prüft.
+--
+-- ═══════════════════════════════════════════════════════════════════════════
+-- ÄNDERBAR NACH DEM UMLEGEN — wie die vier Zahlenfelder
+-- ═══════════════════════════════════════════════════════════════════════════
+--
+-- Die Einbahn-Sperre aus 0015 gilt ausschließlich dem SCHALTER
+-- (`website_visible`), nicht den Angaben. `website_text` verhält sich wie
+-- `website_price`: nach dem Umlegen weiter korrigierbar.
+--
+-- ⚠️ Ob die Website eine spätere Änderung NACHZIEHT, entscheidet sie selbst.
+--    Handwerk liefert im Feed nur den jeweils aktuellen Stand und weiß nicht,
+--    was drüben daraus geworden ist (der Feed ist zustandslos, siehe
+--    app/api/website/orders/route.ts).
+--
+-- KEINE neue Policy/GRANT nötig: `orders` ist RLS-aktiv aus 0001; die
+-- bestehenden member-Policies (`for all`) und `service_role` decken die neue
+-- Spalte automatisch ab — die Policies führen keine Spaltenliste.
+
+alter table public.orders
+  add column website_text text;
+
+comment on column public.orders.website_text is
+  'Was wurde gemacht — von Hand geschriebener Text fürs öffentliche Website-Archiv. Pflicht (>= 80 Zeichen getrimmt), sobald website_visible = true — App-Regel, kein DB-CHECK. Der erste Satz wird drüben zur Bildunterschrift (Zielgröße 60-95 Zeichen). NICHT identisch mit item_description: das ist die Annahmenotiz vom Tresen (Maße, Kürzel) und taugt nachweislich nicht als Textquelle.';

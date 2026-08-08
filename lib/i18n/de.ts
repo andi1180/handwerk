@@ -492,7 +492,7 @@ export const de = {
       "Die Angaben unten bleiben änderbar (z. B. wenn sich der Preis korrigiert).",
     notTransferred:
       "Wird derzeit nur hier gespeichert — es findet keine Übertragung an die Website statt.",
-    // Die vier Pflichtangaben. „Website-Kategorie" bewusst ausgeschrieben:
+    // Die fünf Pflichtangaben. „Website-Kategorie" bewusst ausgeschrieben:
     // NICHT zu verwechseln mit der Vorher/Nachher/Prozess-Einteilung der Bilder.
     category: "Website-Kategorie",
     categoryHint:
@@ -500,6 +500,12 @@ export const de = {
     clothingType: "Kleidungsart",
     workHours: "Arbeitszeit (Stunden)",
     price: "Preis (€)",
+    // „Was wurde gemacht" (Migration 0017). Der Hinweis nennt beide Fallen: die
+    // Bildunterschrift (deshalb ein kurzer erster Satz) und die Annahmenotiz
+    // (item_description taugt nachweislich nicht als Textquelle).
+    text: "Was wurde gemacht (für die Website)",
+    textHint:
+      "Zwei bis drei Sätze in ganzen Worten — dieser Text erscheint im öffentlichen Archiv. Der erste Satz steht als Bildunterschrift unter dem Bildpaar, also kurz und für sich verständlich. Nicht die Maßnotiz von der Annahme.",
     required: "Pflichtangabe, sobald der Auftrag auf der Website erscheint.",
     save: "Speichern",
     saving: "Speichern …",
@@ -510,6 +516,11 @@ export const de = {
     errClothingType: "Bitte eine Kleidungsart wählen.",
     errWorkHours: "Bitte eine Arbeitszeit größer als 0 angeben.",
     errPrice: "Bitte einen Preis größer als 0 angeben.",
+    // Nennt die Zahl, weil „zu kurz" allein niemandem sagt, wie viel fehlt.
+    errText:
+      "Bitte beschreiben, was gemacht wurde — mindestens 80 Zeichen, zwei bis drei Sätze.",
+    // Zähler unter dem Textfeld — erscheint nur, solange der Text zu kurz ist.
+    textCounter: "Noch {fehlend} Zeichen ({laenge}/{min}).",
     errLocked:
       "Die Website-Anzeige kann hier nicht mehr entfernt werden.",
     saveError: "Speichern fehlgeschlagen. Bitte erneut versuchen.",

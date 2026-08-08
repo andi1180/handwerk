@@ -109,3 +109,50 @@ export function parseNumericInput(value: unknown): number | null {
   const parsed = Number(trimmed);
   return Number.isFinite(parsed) ? parsed : null;
 }
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Website-Text — „Was wurde gemacht" (Migration 0017).
+   ───────────────────────────────────────────────────────────────────────── */
+
+/**
+ * Mindestlänge des Website-Textes in Zeichen, nach dem Trimmen.
+ *
+ * ⚠️ DIE ZAHL IST NICHT GEGRIFFEN: Der ERSTE SATZ dieses Textes wird drüben
+ *    automatisch zur Bildunterschrift unter dem Vorher/Nachher-Paar. Die dort
+ *    gemessene Zielgröße für Bildunterschriften liegt bei 60–95 Zeichen
+ *    (atelier-dax-web, Etappe 4). Bei einer Untergrenze unterhalb davon
+ *    verbrauchte die Bildunterschrift den gesamten Text, und für „Was wurde
+ *    gemacht" bliebe nichts übrig. 80 sichert einen ganzen Satz plus etwas
+ *    dahinter.
+ *
+ * KEINE Obergrenze — für die Glättung drüben ist zu viel Material besser als
+ * zu wenig.
+ */
+export const WEBSITE_TEXT_MIN_LENGTH = 80;
+
+/**
+ * Prüft den Website-Text: String mit mindestens `WEBSITE_TEXT_MIN_LENGTH`
+ * Zeichen nach dem Trimmen.
+ *
+ * Die Regel gilt nur, WENN `website_visible = true` — bei ausgeschaltetem
+ * Schalter ist das Feld beliebig, auch leer. In der DB steht die Spalte ohne
+ * CHECK (Begründung im Kopf von Migration 0017), genau wie die zwei
+ * Zahlenfelder aus 0015.
+ */
+export function isValidWebsiteText(value: unknown): value is string {
+  return (
+    typeof value === "string" && value.trim().length >= WEBSITE_TEXT_MIN_LENGTH
+  );
+}
+
+/**
+ * Trimmt den Website-Text für die Speicherung. Setzt voraus, dass
+ * `isValidWebsiteText` bereits zugestimmt hat.
+ *
+ * Gespeichert wird die getrimmte Fassung, weil genau sie geprüft wurde — sonst
+ * stünden 80 geprüfte Zeichen und ein davon abweichender Datenbankinhalt
+ * nebeneinander.
+ */
+export function normalizeWebsiteText(value: string): string {
+  return value.trim();
+}

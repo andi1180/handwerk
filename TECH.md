@@ -1,5 +1,9 @@
 # Valooro Handwerk — Technische Dokumentation
 
+**Version 1.0 · Stand 08.08.2026 · Lebendiges Dokument**
+
+> **Zum Versionskopf, ab 08.08.2026:** Diese Datei und [CLAUDE.md](CLAUDE.md) trugen bis dahin **keinen**. Eine Session konnte damit nicht prüfen, ob der Stand vor ihr aktuell ist — und die Kopplung mit dem Website-Repo (`atelier-dax-web`, dort seit jeher `Version X.Y · Stand TT.MM.JJJJ`) lief einseitig: Drüben ist verlangt, den hiesigen Stand zu nennen, hier gab es keinen zu nennen. Die Zählung beginnt bei 1.0 und beschreibt **nicht** den Reifegrad des Projekts, sondern nur die Fassung dieser Datei; der Bau steht zu diesem Zeitpunkt bei Migration 0017.
+
 Eigenständiges Repo & **eigenes Supabase-Projekt** (keine geteilte Codebasis/DB mit dem Hotel-Projekt). Migrationen starten frisch ab `0001`. Migrationen werden **manuell** über das Supabase-Dashboard (SQL Editor) angewendet — nie lokal ausgeführt, nie `supabase db reset`.
 
 ---
@@ -3354,7 +3358,8 @@ Zwei Richtungen, zwei fremde Systeme, zwei Aufbewahrungsorte. Ein geteiltes Secr
       "clothing_type": "mantel",   // orders.website_clothing_type
       "work_hours": 4.5,
       "price_eur": 180,            // ⚠️ EURO, nicht Cent
-      "item_description": "…",     // Rohtext aus roapp — Material für die Texterzeugung
+      "website_text": "…",         // „Was wurde gemacht" (0017) — DIE Textquelle
+      "item_description": "…",     // Annahmenotiz aus roapp — NICHT die Textquelle
       "photos": [
         { "id": "…", "kind": "before", "caption": "…", "sort_order": 1, "url": "https://…" }
       ],
@@ -3365,6 +3370,7 @@ Zwei Richtungen, zwei fremde Systeme, zwei Aufbewahrungsorte. Ein geteiltes Secr
 ```
 
 - **`price_eur` trägt die Einheit im Namen.** Genau hier war schon einmal eine ×100-Verwechslung dokumentiert (Abschnitt „Website-Veröffentlichung", Offen-Punkt 1) — der Feldname ist die billigste Absicherung dagegen.
+- **⚠️ `website_text` ist die Textquelle, `item_description` NICHT** (seit Migration 0017, 08.08.2026). Hier stand für `item_description` einmal „Material für die Texterzeugung"; die Messung an echten Aufträgen hat das widerlegt — Begründung im Abschnitt „Website-Text" unten. `website_text` kann bei Aufträgen, die **vor** 0017 sichtbar geschaltet wurden, `null` sein: Die Einbahn-Sperre lässt sie nicht mehr abschalten, und die Pflicht greift erst beim nächsten Speichern. Die Website schiebt solche Aufträge auf, statt sie ohne Text anzulegen.
 - **`work_category` statt `category`.** Migration 0015 widmet der Verwechslung mit `order_media.category` einen eigenen Block; ein bloßes `category` neben `photos[].kind` würde sie in der Nutzlast wieder aufmachen.
 - **`photos[].kind` ist `before` oder `after` — nie `process`.** Prozessbilder bleiben in Handwerk: die Website hat dafür keine Bildkategorie. Als Aufzählung gefiltert (`UEBERNOMMENE_BILDARTEN`) und nicht als `!== "process"` — käme je eine vierte Einteilung dazu, soll sie eine Entscheidung erzwingen statt stillschweigend mitzufahren.
 - **`signed_url_ttl_seconds: 3600`** — die Adressen überdauern mehrere 15-Minuten-Läufe. Sie sind trotzdem **nicht zum Verlinken** gedacht: die Website lädt die Datei herunter und legt sie in ihrem eigenen Speicher ab.
@@ -3381,3 +3387,57 @@ Die Tabellenübersicht oben nennt für `order_media` das Feld `tag` (`vorher`/`n
 ### Verify
 
 [supabase/verify/0016_website_pull_secret_checks.sql](supabase/verify/0016_website_pull_secret_checks.sql) — Spalte, partieller Unique-Index (mit Nachweis am Fall, in einer zurückgerollten Transaktion), Trennung von `webhook_secret`, keine `anon`-Grants.
+
+---
+
+## Website-Text: „Was wurde gemacht" (Migration 0017)
+
+> ⚠️ **Migration 0017 muss manuell im Supabase-SQL-Editor angewendet werden**, bevor der Feed wieder antwortet. Die Spalte steht in der `select`-Liste von [app/api/website/orders/route.ts](app/api/website/orders/route.ts) — solange sie fehlt, liefert der Endpunkt **500 `orders_failed`** (am Fall gemessen, 08.08.2026). Das ist folgenlos, solange die Website nichts abruft, und muss vor deren Inbetriebnahme erledigt sein.
+
+### ⚠️ Warum es dieses Feld gibt — ein gemessener Befund, keine Vorliebe
+
+Bis 0016 war der Plan, den öffentlichen Text drüben aus `item_description` erzeugen zu lassen; die Nutzlast-Doku nannte es „Material für die Texterzeugung". **Die Messung an echten Aufträgen (07.08.2026) hat das widerlegt.** Ein Wert aus dem Bestand, wörtlich:
+
+```
+Kleid Les Historis Gummi K M L 26 R 26 ,5 armale kurzen Armal lang 26 cm
+```
+
+Maße, Kürzel, Tippfehler — eine **Annahmenotiz vom Tresen**, keine Beschreibung der geleisteten Arbeit. Dazu die Streuung: `item_description` reicht von **11 bis 157 Zeichen**, und `order_media.caption` ist nur bei **46 %** der Fotos gesetzt (im obigen Auftrag bei keinem). Aus diesem Material könnte ein Sprachmodell nicht beschreiben, was gemacht wurde — es könnte es nur **erfinden**.
+
+Das ist derselbe Befund, den [TECH.md](TECH.md) im Abschnitt „Webhook handleCreated befüllt item_description" bereits festhält: Der Wert ist **Roh-Text, bewusst unverändert**, weil „die KI Zahlen/Maße/Kürzel erst bei der Generierung filtert". Für den Booklet-Kontext reicht das; als alleinige Quelle eines öffentlichen Archivtextes nicht.
+
+**Entschieden am 07.08.2026:** Alina schreibt den Text beim Umlegen des Schalters selbst, zwei bis drei Sätze. Die KI auf der Website-Seite **glättet** ihn sprachlich und leitet den **Titel** daraus ab; sie erfindet nichts mehr. `item_description` bleibt unangetastet und geht weiterhin im Feed mit — als Nebeninformation.
+
+### Spalte
+
+`orders.website_text text` — nullable, **kein CHECK**. Dieselbe Begründung wie bei `website_work_hours`/`website_price` in 0015: Die Pflicht ist eine **Zustandsregel**, die nur im Zusammenspiel mit `website_visible` gilt; ein DB-CHECK müsste `website_visible` mitlesen und würde alle bestehenden Zeilen (alle NULL) sofort verletzen.
+
+### ⚠️ Pflicht ab 80 Zeichen — und woher die Zahl kommt
+
+Sobald `website_visible = true` gesetzt wird, ist `website_text` Pflicht mit **mindestens 80 Zeichen nach dem Trimmen** (`WEBSITE_TEXT_MIN_LENGTH` in [lib/orders/website.ts](lib/orders/website.ts), geteilt zwischen Oberfläche und Route Handler). Bei `website_visible = false` ist das Feld beliebig, auch leer.
+
+**Die 80 sind nicht gegriffen:** Der **erste Satz** dieses Textes wird auf der Website automatisch zur **Bildunterschrift** unter dem Vorher/Nachher-Paar. Die dort gemessene Zielgröße für Bildunterschriften liegt bei **60–95 Zeichen** (`atelier-dax-web`, Etappe 4). Bei einer Untergrenze unterhalb davon verbrauchte die Bildunterschrift den gesamten Text, und für „Was wurde gemacht" bliebe nichts übrig. 80 sichert einen ganzen Satz plus etwas dahinter.
+
+**Keine Obergrenze** — für die Glättung drüben ist zu viel Material besser als zu wenig.
+
+Gespeichert wird die **getrimmte** Fassung (`normalizeWebsiteText`): Genau sie wurde geprüft, sonst stünden 80 geprüfte Zeichen und ein davon abweichender Datenbankinhalt nebeneinander.
+
+### Änderbar nach dem Umlegen
+
+Die **Einbahn-Sperre aus 0015 gilt ausschließlich dem Schalter**, nicht den Angaben. `website_text` verhält sich wie `website_price`: nach dem Umlegen weiter korrigierbar. ⚠️ Ob die Website eine spätere Änderung **nachzieht**, entscheidet sie selbst — Handwerk liefert im Feed nur den jeweils aktuellen Stand und bleibt zustandslos.
+
+### Oberfläche
+
+Textarea im bestehenden Website-Block, **unter** den vier Zahlen-/Auswahlfeldern (die sind in Sekunden erledigt, dieses Feld will einen Moment Nachdenken). Beschriftung „Was wurde gemacht (für die Website)", Hinweis nennt beide Fallen: kurzer erster Satz wegen der Bildunterschrift, und **nicht die Maßnotiz von der Annahme**.
+
+⚠️ **Bewusst NICHT aus `item_description` vorbefüllt.** Ein vorbefülltes Feld wird bestätigt statt geschrieben — und genau die Annahmenotiz soll hier nicht landen.
+
+Ein **Zähler** erscheint nur, solange der Text zu kurz ist (`website.textCounter`, über `t()` interpoliert). Dauerhaft sichtbar würde beim Schreiben mitgezählt, statt dass jemand schreibt; ganz ohne ihn wäre „mindestens 80 Zeichen" eine Bedingung, deren Erfüllung man raten muss.
+
+### Fehlercode
+
+`invalid_website_text` (400), eingereiht bei den vier bestehenden. Die Meldung nennt die Zahl — „zu kurz" allein sagt niemandem, wie viel fehlt.
+
+### Verify
+
+[supabase/verify/0017_orders_website_text_checks.sql](supabase/verify/0017_orders_website_text_checks.sql) — Spalte (text, nullable, kein Default), Gegenprobe auf **keinen** CHECK, Bestand alle NULL, Spaltenkommentar. Dazu Prüfung 4: **sichtbare Aufträge ohne ausreichenden Text** — solche Zeilen sind vor 0017 entstanden, lassen sich über die Oberfläche nicht mehr abschalten und müssen von Hand nachgetextet werden, sonst schiebt die Website ihre Übernahme dauerhaft auf. (Live am 08.08.2026: **0 sichtbare Aufträge**, der Fall tritt derzeit nicht ein.)

@@ -80,6 +80,7 @@ type FeedOrderRow = {
   id: string;
   external_ref: string | null;
   item_description: string | null;
+  website_text: string | null;
   updated_at: string;
   website_category: string | null;
   website_clothing_type: string | null;
@@ -129,7 +130,28 @@ type FeedOrder = {
    * einmal eine ×100-Verwechslung dokumentiert war.
    */
   price_eur: number | null;
-  /** Rohtext aus roapp — Ausgangsmaterial für die Texterzeugung der Website. */
+  /**
+   * „Was wurde gemacht" — von Alina beim Umlegen des Schalters von Hand
+   * geschrieben (Migration 0017), mindestens 80 Zeichen. DAS ist die
+   * Textquelle: Die Website glättet ihn sprachlich und leitet den Titel daraus
+   * ab; erfunden wird nichts.
+   *
+   * ⚠️ Kann bei Aufträgen, die VOR 0017 sichtbar geschaltet wurden, `null`
+   *    sein — die Einbahn-Sperre lässt sie nicht mehr abschalten, und die
+   *    Pflicht greift erst beim nächsten Speichern. Die Website schiebt solche
+   *    Aufträge auf, statt sie ohne Text anzulegen.
+   */
+  website_text: string | null;
+  /**
+   * Annahmenotiz aus roapp.
+   *
+   * ⚠️ NICHT die Textquelle — hier stand einmal „Ausgangsmaterial für die
+   *    Texterzeugung". Die Messung an echten Aufträgen (07.08.2026) hat das
+   *    widerlegt: typische Werte sind Maße und Kürzel („Kleid Les Historis
+   *    Gummi K M L 26 R 26 ,5 armale kurzen Armal lang 26 cm"), Länge 11 bis
+   *    157 Zeichen. Daraus ließe sich nicht beschreiben, was gemacht wurde,
+   *    sondern nur erfinden. Geht als Nebeninformation weiterhin mit.
+   */
   item_description: string | null;
   photos: FeedPhoto[];
   /**
@@ -198,7 +220,7 @@ export async function GET(request: Request) {
   const { data: orderRows, error: ordersError } = await service
     .from("orders")
     .select(
-      "id, external_ref, item_description, updated_at, website_category, website_clothing_type, website_work_hours, website_price",
+      "id, external_ref, item_description, website_text, updated_at, website_category, website_clothing_type, website_work_hours, website_price",
     )
     .eq("business_id", business.id)
     .eq("website_visible", true)
@@ -308,6 +330,7 @@ export async function GET(request: Request) {
     clothing_type: o.website_clothing_type,
     work_hours: o.website_work_hours,
     price_eur: o.website_price,
+    website_text: o.website_text,
     item_description: o.item_description,
     photos: photosByOrder.get(o.id) ?? [],
     photos_incomplete: incompleteOrders.has(o.id),

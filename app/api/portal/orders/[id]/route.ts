@@ -4,8 +4,10 @@ import { getCurrentBusiness } from "@/lib/auth/current-business";
 import { isEmailFormat } from "@/lib/settings/options";
 import {
   isPositiveNumber,
+  isValidWebsiteText,
   isWebsiteCategory,
   isWebsiteClothingType,
+  normalizeWebsiteText,
   parseNumericInput,
 } from "@/lib/orders/website";
 
@@ -16,13 +18,17 @@ function trimmedOrNull(value: unknown): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
-/** Die fünf Website-Spalten (0015) — ein zusammengehöriger Block, siehe unten. */
+/**
+ * Die Website-Spalten (0015 + `website_text` aus 0017) — ein zusammengehöriger
+ * Block, siehe unten.
+ */
 const WEBSITE_KEYS = [
   "website_visible",
   "website_category",
   "website_clothing_type",
   "website_work_hours",
   "website_price",
+  "website_text",
 ] as const;
 
 /**
@@ -37,9 +43,12 @@ const WEBSITE_KEYS = [
  *
  * ── Website-Veröffentlichung: ein ZUSAMMENGEHÖRIGER Block ──────────────────
  * Sobald IRGENDEIN `website_*`-Key im Body steht, wird der Block als Einheit
- * bewertet — die vier Angaben sind genau dann Pflicht, wenn der Auftrag danach
+ * bewertet — die fünf Angaben sind genau dann Pflicht, wenn der Auftrag danach
  * sichtbar ist. Das gilt auch für spätere Korrekturen (z. B. Preis ändern),
  * damit ein sichtbarer Auftrag nie mit halben Angaben dasteht.
+ *
+ * Die fünfte Angabe ist `website_text` („Was wurde gemacht", 0017) — der von
+ * Hand geschriebene Text fürs öffentliche Archiv, Pflicht ab 80 Zeichen.
  *
  * ⚠️ EINBAHNSTRASSE: Ein bereits gespeichertes `website_visible = true` kann
  *    über diese Route NICHT auf false zurückgesetzt werden (400
@@ -103,6 +112,7 @@ export async function PATCH(
     website_clothing_type?: string;
     website_work_hours?: number;
     website_price?: number;
+    website_text?: string;
   } = {};
 
   if ("customer_email" in payload) {
@@ -138,7 +148,7 @@ export async function PATCH(
     }
 
     if (nextVisible) {
-      // Sichtbar ⇒ alle vier Angaben Pflicht und gültig.
+      // Sichtbar ⇒ alle fünf Angaben Pflicht und gültig.
       const category = payload.website_category;
       if (!isWebsiteCategory(category)) {
         return NextResponse.json(
@@ -172,14 +182,27 @@ export async function PATCH(
         );
       }
 
+      // „Was wurde gemacht" (0017): Pflicht ab 80 Zeichen getrimmt. Der erste
+      // Satz wird drüben zur Bildunterschrift — deshalb die Untergrenze, nicht
+      // bloß „nicht leer". Begründung im Kopf von lib/orders/website.ts.
+      const websiteText = payload.website_text;
+      if (!isValidWebsiteText(websiteText)) {
+        return NextResponse.json(
+          { error: "invalid_website_text" },
+          { status: 400 },
+        );
+      }
+
       updates.website_visible = true;
       updates.website_category = category;
       updates.website_clothing_type = clothingType;
       updates.website_work_hours = workHours;
       updates.website_price = price;
+      // Getrimmt speichern: genau diese Fassung wurde geprüft.
+      updates.website_text = normalizeWebsiteText(websiteText);
     } else {
       // Nicht sichtbar (war es auch vorher nicht — sonst hätte die Sperre oben
-      // gegriffen): nur das Flag schreiben. Etwaige Altwerte in den vier
+      // gegriffen): nur das Flag schreiben. Etwaige Altwerte in den fünf
       // Spalten bleiben unangetastet; sie sind unsichtbar und bedeutungslos,
       // solange website_visible = false.
       updates.website_visible = false;
@@ -196,7 +219,7 @@ export async function PATCH(
     .eq("id", order.id)
     .eq("business_id", order.business_id)
     .select(
-      "customer_email, customer_phone, website_visible, website_category, website_clothing_type, website_work_hours, website_price",
+      "customer_email, customer_phone, website_visible, website_category, website_clothing_type, website_work_hours, website_price, website_text",
     )
     .single<{
       customer_email: string | null;
@@ -206,6 +229,7 @@ export async function PATCH(
       website_clothing_type: string | null;
       website_work_hours: number | null;
       website_price: number | null;
+      website_text: string | null;
     }>();
 
   if (error || !data) {
