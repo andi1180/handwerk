@@ -463,6 +463,8 @@ export default async function OrderDetailPage({
         initialWorkHours={order.website_work_hours}
         initialPrice={order.website_price}
         initialText={order.website_text}
+        initialConsent={order.consent_given}
+        initialConsentAt={order.consent_at}
       />
     </div>
   );

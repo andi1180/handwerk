@@ -497,6 +497,12 @@ export const de = {
     category: "Website-Kategorie",
     categoryHint:
       "Art der Arbeit für die Website — nicht die Vorher/Nachher/Prozess-Einteilung der Bilder.",
+    // Einwilligung (Spalten aus 0001). Voraussetzung fürs Veröffentlichen —
+    // Aufträge aus dem roapp-Webhook kommen nach §13.5 immer ohne sie an.
+    consent: "Einwilligung liegt vor (schriftlich, Kassa)",
+    consentHint:
+      "Das unterschriebene Formular liegt im Atelier. Ohne diese Bestätigung erscheint der Auftrag nicht auf der Website.",
+    consentRecorded: "Erfasst am {datum}.",
     clothingType: "Kleidungsart",
     workHours: "Arbeitszeit (Stunden)",
     price: "Preis (€)",
@@ -521,6 +527,8 @@ export const de = {
       "Bitte beschreiben, was gemacht wurde — mindestens 80 Zeichen, zwei bis drei Sätze.",
     // Zähler unter dem Textfeld — erscheint nur, solange der Text zu kurz ist.
     textCounter: "Noch {fehlend} Zeichen ({laenge}/{min}).",
+    errConsent:
+      "Ohne bestätigte Einwilligung kann der Auftrag nicht auf der Website erscheinen.",
     errLocked:
       "Die Website-Anzeige kann hier nicht mehr entfernt werden.",
     saveError: "Speichern fehlgeschlagen. Bitte erneut versuchen.",

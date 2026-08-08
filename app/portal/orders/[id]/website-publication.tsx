@@ -47,6 +47,8 @@ export function WebsitePublication({
   initialWorkHours,
   initialPrice,
   initialText,
+  initialConsent,
+  initialConsentAt,
 }: {
   orderId: string;
   initialVisible: boolean;
@@ -55,6 +57,8 @@ export function WebsitePublication({
   initialWorkHours: number | null;
   initialPrice: number | null;
   initialText: string | null;
+  initialConsent: boolean;
+  initialConsentAt: string | null;
 }) {
   const router = useRouter();
 
@@ -82,6 +86,12 @@ export function WebsitePublication({
      vorbefüllt: Ein vorbefülltes Feld wird bestätigt statt geschrieben — und
      genau die Annahmenotiz mit Maßen und Kürzeln soll hier nicht landen. */
   const [text, setText] = useState(initialText ?? "");
+  /* Einwilligung (Spalten aus 0001). KEIN eigenes Sperrverhalten — änderbar wie
+     die übrigen Angaben; der Server verweigert nur das Veröffentlichen ohne sie
+     (400 `consent_required`). Aufträge aus dem roapp-Webhook kommen nach §13.5
+     immer mit `false` an; genau die werden hier nachgetragen. */
+  const [consent, setConsent] = useState(initialConsent);
+  const [consentAt, setConsentAt] = useState(initialConsentAt);
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -140,6 +150,11 @@ export function WebsitePublication({
       setError(t(DEFAULT_LOCALE, "website.errText"));
       return;
     }
+    // Ohne bestätigte Einwilligung kein Veröffentlichen (Server erzwingt es).
+    if (!consent) {
+      setError(t(DEFAULT_LOCALE, "website.errConsent"));
+      return;
+    }
 
     setBusy(true);
     void (async () => {
@@ -154,6 +169,7 @@ export function WebsitePublication({
             website_work_hours: hours,
             website_price: parsedPrice,
             website_text: text,
+            consent_given: consent,
           }),
         });
         if (!res.ok) {
@@ -175,6 +191,8 @@ export function WebsitePublication({
           website_work_hours: number | null;
           website_price: number | null;
           website_text: string | null;
+          consent_given: boolean;
+          consent_at: string | null;
         };
         // Server-Wahrheit übernehmen (macht die Sperre wirksam).
         setSavedVisible(data.website_visible);
@@ -196,6 +214,9 @@ export function WebsitePublication({
         if (data.website_text !== null) {
           setText(data.website_text);
         }
+        // Der Zeitstempel entsteht auf dem Server — von dort übernehmen.
+        setConsent(data.consent_given);
+        setConsentAt(data.consent_at);
         setSavedNotice(true);
         setBusy(false);
         router.refresh();
@@ -210,12 +231,20 @@ export function WebsitePublication({
     category,
     clear,
     clothingType,
+    consent,
     orderId,
     price,
     router,
     text,
     workHours,
   ]);
+
+  /** Einwilligungs-Schalter — kein Sperrverhalten, nur während des Speicherns aus. */
+  const toggleConsent = useCallback(() => {
+    if (busy) return;
+    clear();
+    setConsent((v) => !v);
+  }, [busy, clear]);
 
   const categoryOptions = useMemo(
     () => WEBSITE_CATEGORIES.map((c) => ({ value: c.value, label: c.label })),
@@ -240,58 +269,39 @@ export function WebsitePublication({
         </div>
       ) : (
         /* Schalter (div + onClick, role="switch") — Standard: aus. */
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: 12,
-          }}
-        >
-          <span style={{ fontSize: 14, fontWeight: 600 }}>
-            {t(DEFAULT_LOCALE, "website.toggle")}
-          </span>
-          <div
-            role="switch"
-            tabIndex={0}
-            aria-checked={draftVisible}
-            aria-label={t(DEFAULT_LOCALE, "website.toggle")}
-            onClick={toggle}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault();
-                toggle();
-              }
-            }}
-            style={{
-              width: 46,
-              height: 26,
-              flexShrink: 0,
-              padding: 3,
-              borderRadius: 999,
-              cursor: "pointer",
-              background: draftVisible ? "var(--gold)" : "var(--surface-2)",
-              border: "1px solid var(--border)",
-              transition: "background 0.15s ease",
-            }}
-          >
-            <div
-              style={{
-                width: 18,
-                height: 18,
-                borderRadius: "50%",
-                background: "#FFFFFF",
-                transform: draftVisible ? "translateX(20px)" : "translateX(0)",
-                transition: "transform 0.15s ease",
-              }}
-            />
-          </div>
-        </div>
+        <SwitchRow
+          label={t(DEFAULT_LOCALE, "website.toggle")}
+          checked={draftVisible}
+          onToggle={toggle}
+        />
       )}
 
       {/* AUS ⇒ hier ist Schluss: keine Felder, keine Pflicht, kein Hinweis. */}
       {showFields ? (
         <>
+          {/* Einwilligung — steht ZUERST, weil ohne sie nichts veröffentlicht
+              wird (Server: 400 `consent_required`). Kein eigenes Sperrverhalten:
+              änderbar wie die übrigen Angaben; solange der Auftrag sichtbar ist,
+              verweigert der Server allerdings auch das Zurücknehmen. */}
+          <div style={labelStyle}>
+            <SwitchRow
+              label={t(DEFAULT_LOCALE, "website.consent")}
+              checked={consent}
+              onToggle={toggleConsent}
+              disabled={busy}
+            />
+            <span style={hintStyle}>
+              {t(DEFAULT_LOCALE, "website.consentHint")}
+            </span>
+            {consent && consentAt ? (
+              <span style={hintStyle}>
+                {t(DEFAULT_LOCALE, "website.consentRecorded", {
+                  datum: formatDate(consentAt),
+                })}
+              </span>
+            ) : null}
+          </div>
+
           {/* „Website-Kategorie" ausgeschrieben + Hinweis: NICHT die
               Vorher/Nachher/Prozess-Einteilung der Bilder (order_media.category). */}
           <SelectField
@@ -406,6 +416,89 @@ export function WebsitePublication({
   );
 }
 
+/**
+ * Schalter-Zeile (Beschriftung links, `role="switch"` rechts).
+ *
+ * Einmal definiert, zweimal verwendet — Website-Anzeige und Einwilligung sehen
+ * gleich aus und verhalten sich gleich. `div + onClick` + Enter/Space, KEIN
+ * `<input type="checkbox">` (Projekt-Konvention, wie der Settings-Toggle).
+ */
+function SwitchRow({
+  label,
+  checked,
+  onToggle,
+  disabled,
+}: {
+  label: string;
+  checked: boolean;
+  onToggle: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: 12,
+      }}
+    >
+      <span style={{ fontSize: 14, fontWeight: 600 }}>{label}</span>
+      <div
+        role="switch"
+        tabIndex={disabled ? -1 : 0}
+        aria-checked={checked}
+        aria-label={label}
+        onClick={disabled ? undefined : onToggle}
+        onKeyDown={(e) => {
+          if (disabled) return;
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            onToggle();
+          }
+        }}
+        style={{
+          width: 46,
+          height: 26,
+          flexShrink: 0,
+          padding: 3,
+          borderRadius: 999,
+          cursor: disabled ? "default" : "pointer",
+          opacity: disabled ? 0.6 : 1,
+          background: checked ? "var(--gold)" : "var(--surface-2)",
+          border: "1px solid var(--border)",
+          transition: "background 0.15s ease",
+        }}
+      >
+        <div
+          style={{
+            width: 18,
+            height: 18,
+            borderRadius: "50%",
+            background: "#FFFFFF",
+            transform: checked ? "translateX(20px)" : "translateX(0)",
+            transition: "transform 0.15s ease",
+          }}
+        />
+      </div>
+    </div>
+  );
+}
+
+/**
+ * ISO-Zeitstempel → TT.MM.JJJJ.
+ *
+ * Von Hand zusammengesetzt statt `toLocaleDateString`: Die Komponente rendert
+ * auch auf dem Server vor, und eine dort abweichende Locale würde beim
+ * Hydrieren als Textunterschied auffallen.
+ */
+function formatDate(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${pad(d.getUTCDate())}.${pad(d.getUTCMonth() + 1)}.${d.getUTCFullYear()}`;
+}
+
 /** Übersetzt einen Server-Fehlercode in eine Meldung. */
 function errorMessage(code: string): string {
   switch (code) {
@@ -419,6 +512,8 @@ function errorMessage(code: string): string {
       return t(DEFAULT_LOCALE, "website.errPrice");
     case "invalid_website_text":
       return t(DEFAULT_LOCALE, "website.errText");
+    case "consent_required":
+      return t(DEFAULT_LOCALE, "website.errConsent");
     case "website_locked":
       return t(DEFAULT_LOCALE, "website.errLocked");
     default:

@@ -19,8 +19,15 @@ function trimmedOrNull(value: unknown): string | null {
 }
 
 /**
- * Die Website-Spalten (0015 + `website_text` aus 0017) — ein zusammengehöriger
- * Block, siehe unten.
+ * Der Website-Block: die Spalten aus 0015 + `website_text` (0017) + die
+ * Einwilligung (`consent_given`, Spalte aus 0001) — zusammen bewertet, siehe
+ * unten.
+ *
+ * ⚠️ `consent_given` ist bewusst KEINE `website_*`-Spalte: Die Einwilligung ist
+ *    ein eigenständiger, rechtlich getragener Sachverhalt (unterschriebenes
+ *    Formular an der Kassa) und existierte lange vor der Website-Anbindung. Sie
+ *    wird hier nur MIT bewertet, weil sie Voraussetzung fürs Veröffentlichen
+ *    ist.
  */
 const WEBSITE_KEYS = [
   "website_visible",
@@ -29,6 +36,7 @@ const WEBSITE_KEYS = [
   "website_work_hours",
   "website_price",
   "website_text",
+  "consent_given",
 ] as const;
 
 /**
@@ -49,6 +57,17 @@ const WEBSITE_KEYS = [
  *
  * Die fünfte Angabe ist `website_text` („Was wurde gemacht", 0017) — der von
  * Hand geschriebene Text fürs öffentliche Archiv, Pflicht ab 80 Zeichen.
+ *
+ * ⚠️ EINWILLIGUNG (`consent_given`, Spalte aus 0001) ist Voraussetzung fürs
+ *    Veröffentlichen: `website_visible = true` ohne bestätigte Einwilligung ⇒
+ *    400 `consent_required`. Der Schalter selbst hat KEIN eigenes
+ *    Sperrverhalten (änderbar wie die übrigen Angaben) — solange der Auftrag
+ *    aber sichtbar ist, greift dieselbe Prüfung auch beim Abschalten der
+ *    Einwilligung, sonst stünde ein veröffentlichtes Stück ohne sie da.
+ *    `consent_at` wird beim Setzen automatisch gestempelt und beim Zurücknehmen
+ *    geleert; ein bereits vorhandener Zeitstempel wird NICHT überschrieben (er
+ *    hält fest, wann die Einwilligung erfasst wurde, nicht wann zuletzt
+ *    gespeichert wurde).
  *
  * ⚠️ EINBAHNSTRASSE: Ein bereits gespeichertes `website_visible = true` kann
  *    über diese Route NICHT auf false zurückgesetzt werden (400
@@ -85,12 +104,19 @@ export async function PATCH(
 
   // Order über RLS laden — fremde/fehlende id ⇒ 404. business_id kommt von hier.
   // `website_visible` wird mitgeladen, weil die Sperre gegen den GESPEICHERTEN
-  // Zustand prüft (nicht gegen einen Client-Wert).
+  // Zustand prüft (nicht gegen einen Client-Wert); `consent_given`/`consent_at`
+  // ebenso — der Zeitstempel darf nur beim erstmaligen Setzen entstehen.
   const { data: order } = await supabase
     .from("orders")
-    .select("id, business_id, website_visible")
+    .select("id, business_id, website_visible, consent_given, consent_at")
     .eq("id", orderId)
-    .maybeSingle<{ id: string; business_id: string; website_visible: boolean }>();
+    .maybeSingle<{
+      id: string;
+      business_id: string;
+      website_visible: boolean;
+      consent_given: boolean;
+      consent_at: string | null;
+    }>();
   if (!order) {
     return NextResponse.json({ error: "not_found" }, { status: 404 });
   }
@@ -113,6 +139,8 @@ export async function PATCH(
     website_work_hours?: number;
     website_price?: number;
     website_text?: string;
+    consent_given?: boolean;
+    consent_at?: string | null;
   } = {};
 
   if ("customer_email" in payload) {
@@ -145,6 +173,31 @@ export async function PATCH(
     // Geprüft wird der DB-Zustand, nicht der Client-Wunsch.
     if (order.website_visible && !nextVisible) {
       return NextResponse.json({ error: "website_locked" }, { status: 400 });
+    }
+
+    // Einwilligung — Zielzustand wie oben: explizit im Body, sonst gespeichert.
+    const nextConsent =
+      "consent_given" in payload
+        ? payload.consent_given === true
+        : order.consent_given;
+
+    // OHNE bestätigte Einwilligung KEIN Veröffentlichen. Greift auch, wenn ein
+    // bereits sichtbarer Auftrag die Einwilligung zurücknehmen wollte — dann
+    // stünde ein veröffentlichtes Stück ohne sie da.
+    if (nextVisible && !nextConsent) {
+      return NextResponse.json({ error: "consent_required" }, { status: 400 });
+    }
+
+    if ("consent_given" in payload) {
+      updates.consent_given = nextConsent;
+      if (!nextConsent) {
+        // Zurückgenommen ⇒ Zeitstempel mit weg (wie beim manuellen Anlegen).
+        updates.consent_at = null;
+      } else if (!order.consent_at) {
+        // Erstmals gesetzt ⇒ jetzt stempeln. Ein vorhandener Zeitstempel bleibt
+        // stehen: er hält fest, wann die Einwilligung erfasst wurde.
+        updates.consent_at = new Date().toISOString();
+      }
     }
 
     if (nextVisible) {
@@ -219,7 +272,7 @@ export async function PATCH(
     .eq("id", order.id)
     .eq("business_id", order.business_id)
     .select(
-      "customer_email, customer_phone, website_visible, website_category, website_clothing_type, website_work_hours, website_price, website_text",
+      "customer_email, customer_phone, website_visible, website_category, website_clothing_type, website_work_hours, website_price, website_text, consent_given, consent_at",
     )
     .single<{
       customer_email: string | null;
@@ -230,6 +283,8 @@ export async function PATCH(
       website_work_hours: number | null;
       website_price: number | null;
       website_text: string | null;
+      consent_given: boolean;
+      consent_at: string | null;
     }>();
 
   if (error || !data) {

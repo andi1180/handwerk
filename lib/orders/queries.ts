@@ -42,6 +42,16 @@ export type OrderDetail = {
      Annahmenotiz vom Tresen (Maße, Kürzel) und taugt nachweislich nicht als
      Textquelle. */
   website_text: string | null;
+  /* Einwilligung des Kunden in die Veröffentlichung (Spalten aus 0001).
+     Grundlage ist das unterschriebene Formular an der Kassa — hier wird nur
+     festgehalten, DASS es vorliegt, und wann das eingetragen wurde.
+
+     ⚠️ Voraussetzung für `website_visible = true` (Route Handler, 400
+     `consent_required`). Aufträge aus dem roapp-Webhook starten nach §13.5
+     immer auf `false`; nachtragen lässt sich das ab jetzt im Website-Block der
+     Detailseite. */
+  consent_given: boolean;
+  consent_at: string | null;
 };
 
 /** Ein Medien-Asset eines Auftrags. */
@@ -66,7 +76,7 @@ export async function getOrderById(id: string): Promise<OrderDetail | null> {
   const { data } = await supabase
     .from("orders")
     .select(
-      "id, business_id, customer_name, customer_email, customer_phone, external_ref, item_description, status, created_at, website_visible, website_category, website_clothing_type, website_work_hours, website_price, website_text",
+      "id, business_id, customer_name, customer_email, customer_phone, external_ref, item_description, status, created_at, website_visible, website_category, website_clothing_type, website_work_hours, website_price, website_text, consent_given, consent_at",
     )
     .eq("id", id)
     .maybeSingle<OrderDetail>();
