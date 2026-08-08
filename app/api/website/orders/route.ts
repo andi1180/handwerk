@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/service";
+import { videoFramePaths } from "@/lib/media/video-frames";
 
 /**
  * GET /api/website/orders — LESENDER Feed für die öffentliche Website des
@@ -40,21 +41,26 @@ import { createServiceClient } from "@/lib/supabase/service";
  * und lässt ihn durch.
  *
  * ═══════════════════════════════════════════════════════════════════════════
- * PHASE 1 = NUR FOTOS
+ * FOTOS (Phase 1) UND VIDEOS (Phase 2)
  * ═══════════════════════════════════════════════════════════════════════════
  *
- * Videos werden NICHT ausgeliefert — auch nicht erwähnt. Hat ein Auftrag
- * Videos, bleiben sie hier unsichtbar. Video ist ein eigener, späterer Schritt;
- * die `frame-*.jpg`-Vorschaubilder aus `lib/media/video-frames.ts` sind hier
- * ausdrücklich kein Gegenstand.
- *
- * Von den Fotos gehen nur `before` und `after` mit. `process` bleibt in
+ * Von den FOTOS gehen nur `before` und `after` mit. `process` bleibt in
  * Handwerk: die Website hat für Prozessbilder keine Bildkategorie.
  *
  * ⚠️ `order_media.category` (before/after/process, Migration 0010) ist die
  *    LIVE-Einteilung. Die ältere Spalte `order_media.tag`
  *    (vorher/nachher/prozess, aus 0001) wird seit 6b.2 NICHT mehr gesetzt und
  *    ist nur noch in wenigen Altzeilen befüllt — sie wird hier NICHT gelesen.
+ *
+ * VIDEOS gehen seit Phase 2 als eigene Liste mit, jeweils mit einem
+ * Vorschaubild aus den client-seitig extrahierten Standbildern
+ * (`lib/media/video-frames.ts`).
+ *
+ * ⚠️ Videos werden BEWUSST NICHT nach `category` gefiltert. Anders als bei den
+ *    Fotos wäre das kein Filter, sondern ein Totalausschluss: `resolveCategory`
+ *    im Upload-Handler zwingt JEDES Video auf `process` (0010), am Bestand
+ *    gemessen 35 von 35 (08.08.2026). Videos tragen in der Antwort deshalb auch
+ *    keine Bildart — die Vorher/Nachher-Achse gibt es für sie schlicht nicht.
  */
 
 /** Gültigkeit der signierten Foto-Adressen. Projektweiter Wert (1 h). */
@@ -71,6 +77,23 @@ const BUCKET = "order-media";
  */
 const UEBERNOMMENE_BILDARTEN = ["before", "after"] as const;
 type Bildart = (typeof UEBERNOMMENE_BILDARTEN)[number];
+
+/**
+ * Welches der drei extrahierten Standbilder als Vorschaubild dient, mit
+ * Ausweichreihenfolge. Die Indizes zeigen auf `VIDEO_FRAME_POSITIONS`
+ * (`[0.1, 0.5, 0.9]` der Dauer):
+ *
+ *   1 (≈ 50 %) — bevorzugt: mittig im Clip, am ehesten aussagekräftig.
+ *   0 (≈ 10 %) — Ausweich: näher am Geschehen als das Ende.
+ *   2 (≈ 90 %) — letzte Wahl.
+ *
+ * ⚠️ Am Bestand gemessen (08.08.2026) existieren Frames immer alle drei oder
+ *    gar nicht — die Ausweichstufen sind heute also totes Netz. Sie stehen
+ *    trotzdem hier, weil `extract-frames.ts` einzelne Frames sehr wohl
+ *    verwerfen kann (Schwarzbild-Prüfung, Seek-Zeitüberschreitung) und ein
+ *    Video dann mit Lücken im Speicher landet.
+ */
+const PREVIEW_FRAME_PREFERENCE = [1, 0, 2] as const;
 
 /** Der über das Secret aufgelöste Betrieb (Vertrauensquelle). */
 type FeedBusiness = { id: string };
@@ -100,6 +123,14 @@ type FeedMediaRow = {
   sort_order: number;
 };
 
+/** Eine Videozeile, wie sie aus `order_media` gelesen wird. */
+type FeedVideoRow = {
+  id: string;
+  order_id: string;
+  storage_path: string;
+  sort_order: number;
+};
+
 /** Ein Foto in der Antwort. */
 type FeedPhoto = {
   id: string;
@@ -109,6 +140,25 @@ type FeedPhoto = {
   sort_order: number;
   /** Signierte Adresse, gültig `signed_url_ttl_seconds`. */
   url: string;
+};
+
+/** Ein Video in der Antwort. */
+type FeedVideo = {
+  id: string;
+  /** Signierte Adresse der Videodatei, gültig `signed_url_ttl_seconds`. */
+  url: string;
+  /**
+   * Signierte Adresse eines extrahierten Standbilds (bevorzugt ≈ 50 % der
+   * Dauer), oder `null`.
+   *
+   * ⚠️ `null` ist im Bestand der Normalfall, nicht die Ausnahme: die
+   *    Frame-Extraktion greift erst seit Phase 1 und nur bei NEUEN Uploads —
+   *    am 08.08.2026 hatten 6 von 35 Videos überhaupt Standbilder. Die Website
+   *    braucht dafür einen eigenen Weg (eigenes Standbild ziehen oder ohne
+   *    Vorschau anzeigen); ein fehlendes Vorschaubild ist kein Fehler.
+   */
+  preview_url: string | null;
+  sort_order: number;
 };
 
 /** Ein Auftrag in der Antwort. */
@@ -183,8 +233,20 @@ type FeedOrder = {
    * ein einzelner Speicher-Schluckauf nicht das ganze Stück verschwinden lässt
    * — aber die Website kann die Übernahme aufschieben, statt ein halbes Stück
    * anzulegen. Im Normalfall `false`.
+   *
+   * ⚠️ Bezieht sich ausdrücklich NUR auf Fotos. Für Videos gibt es keine
+   *    Entsprechung: konnte ein Video nicht signiert werden, fehlt es
+   *    stillschweigend in `videos` (laut geloggt, für die Website aber nicht
+   *    erkennbar). Bewusst so belassen — die Antwortform ist mit der Website
+   *    abgestimmt, und Videos sind dort Beiwerk, keine Voraussetzung für die
+   *    Übernahme eines Stücks.
    */
   photos_incomplete: boolean;
+  /**
+   * Videos des Auftrags, nach `sort_order`. Leeres Feld, wenn der Auftrag keine
+   * Videos hat — nie `null`, nie fehlend.
+   */
+  videos: FeedVideo[];
 };
 
 /** 404 — das einzige harte Gate: fehlendes/unbekanntes Secret. */
@@ -270,9 +332,9 @@ export async function GET(request: Request) {
   }
 
   // Fotos aller sichtbaren Aufträge in EINER Abfrage. `media_type = 'photo'`
-  // zusätzlich zur Bildart-Prüfung: Videos sind laut 0010 immer `process`, aber
-  // darauf verlässt sich diese Route nicht — Phase 1 liefert nachweislich nur
-  // Fotos aus.
+  // zusätzlich zur Bildart-Prüfung: Videos sind laut 0010 immer `process` und
+  // fielen durch den Bildart-Filter ohnehin heraus — aber darauf verlässt sich
+  // diese Abfrage nicht. Videos holt die eigene Abfrage weiter unten.
   const orderIds = orders.map((o) => o.id);
   const { data: mediaRows, error: mediaError } = await service
     .from("order_media")
@@ -345,6 +407,139 @@ export async function GET(request: Request) {
     photosByOrder.set(m.order_id, list);
   }
 
+  // ═══════════════════════════════════════════════════════════════════════════
+  // VIDEOS (Phase 2)
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Eigene Abfrage statt einer erweiterten Foto-Abfrage: der Foto-Pfad oben
+  // bleibt damit unangetastet, und ein Fehlgriff hier kann die Fotos nicht
+  // beschädigen. KEIN `category`-Filter (siehe Kopf: jedes Video ist `process`).
+  const { data: videoRows, error: videoError } = await service
+    .from("order_media")
+    .select("id, order_id, storage_path, sort_order")
+    .eq("business_id", business.id)
+    .eq("media_type", "video")
+    .in("order_id", orderIds)
+    .order("sort_order", { ascending: true })
+    .returns<FeedVideoRow[]>();
+  if (videoError) {
+    console.error("website-feed: video query failed", {
+      business_id: business.id,
+      step: "video_query",
+      message: videoError.message,
+    });
+    // 500 und nicht „einfach ohne Videos ausliefern": ein leeres `videos` sähe
+    // für die Website aus wie „dieser Auftrag hat keine Videos". Ein
+    // Datenbankfehler soll nicht als Tatsachenbehauptung durchgehen; die
+    // Website fragt in 15 Minuten erneut.
+    return NextResponse.json({ error: "videos_failed" }, { status: 500 });
+  }
+
+  const videos = videoRows ?? [];
+  const videosByOrder = new Map<string, FeedVideoRow[]>();
+  for (const v of videos) {
+    const list = videosByOrder.get(v.order_id) ?? [];
+    list.push(v);
+    videosByOrder.set(v.order_id, list);
+  }
+
+  // Welche Standbilder existieren? Frames sind KEINE `order_media`-Zeilen,
+  // sondern Storage-Objekte unter dem Konventions-Pfad
+  // `{video-pfad-ohne-endung}.frame-{i}.jpg` — es gibt also nichts abzufragen.
+  // Der Auftragsordner wird gelistet, genau wie es die Portal-Detailseite tut
+  // (list() vor createSignedUrls). Eine Auflistung je Auftrag mit Videos,
+  // parallel.
+  const previewPathByVideo = new Map<string, string>();
+  if (videosByOrder.size > 0) {
+    const listings = await Promise.all(
+      [...videosByOrder.keys()].map(async (orderId) => {
+        const folder = `${business.id}/${orderId}`;
+        const { data, error } = await service.storage
+          .from(BUCKET)
+          .list(folder, { limit: 1000 });
+        if (error) {
+          console.error("website-feed: frame listing failed", {
+            business_id: business.id,
+            order_id: orderId,
+            step: "list_frames",
+            message: error.message,
+          });
+          // Kein Abbruch: ohne Auflistung gibt es für diesen Auftrag eben keine
+          // Vorschaubilder. Die Videos selbst gehen trotzdem mit.
+          return { orderId, folder, names: [] as string[] };
+        }
+        return { orderId, folder, names: (data ?? []).map((o) => o.name) };
+      }),
+    );
+    for (const { orderId, folder, names } of listings) {
+      const existing = new Set(names.map((n) => `${folder}/${n}`));
+      for (const v of videosByOrder.get(orderId) ?? []) {
+        const candidates = videoFramePaths(v.storage_path);
+        for (const index of PREVIEW_FRAME_PREFERENCE) {
+          const candidate = candidates[index];
+          if (candidate && existing.has(candidate)) {
+            previewPathByVideo.set(v.id, candidate);
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  // Videodateien und die ausgewählten Standbilder in EINEM Aufruf signieren.
+  const videoPaths = [
+    ...videos.map((v) => v.storage_path),
+    ...previewPathByVideo.values(),
+  ];
+  const videoUrlByPath = new Map<string, string>();
+  if (videoPaths.length > 0) {
+    const { data: signed, error: signError } = await service.storage
+      .from(BUCKET)
+      .createSignedUrls(videoPaths, SIGNED_URL_TTL_SECONDS);
+    if (signError) {
+      console.error("website-feed: video signing failed", {
+        business_id: business.id,
+        step: "sign_video_urls",
+        message: signError.message,
+      });
+      // Kein Abbruch — wie bei den Fotos. Die Aufträge gehen mit, die
+      // betroffenen Videos fehlen.
+    }
+    (signed ?? []).forEach((entry, index) => {
+      const path = videoPaths[index];
+      if (path && !entry.error && entry.signedUrl) {
+        videoUrlByPath.set(path, entry.signedUrl);
+      }
+    });
+  }
+
+  const videosByOrderPayload = new Map<string, FeedVideo[]>();
+  for (const v of videos) {
+    const url = videoUrlByPath.get(v.storage_path);
+    if (!url) {
+      console.error("website-feed: video url missing", {
+        business_id: business.id,
+        order_id: v.order_id,
+        media_id: v.id,
+        step: "sign_video_urls",
+      });
+      continue;
+    }
+    const previewPath = previewPathByVideo.get(v.id);
+    // Kein Standbild vorhanden ODER es ließ sich nicht signieren ⇒ null. Beides
+    // ist für die Website derselbe Fall: keine Vorschau.
+    const previewUrl = previewPath
+      ? (videoUrlByPath.get(previewPath) ?? null)
+      : null;
+    const list = videosByOrderPayload.get(v.order_id) ?? [];
+    list.push({
+      id: v.id,
+      url,
+      preview_url: previewUrl,
+      sort_order: v.sort_order,
+    });
+    videosByOrderPayload.set(v.order_id, list);
+  }
+
   const payload: FeedOrder[] = orders.map((o) => ({
     id: o.id,
     external_ref: o.external_ref,
@@ -359,6 +554,7 @@ export async function GET(request: Request) {
     consent_at: o.consent_at,
     photos: photosByOrder.get(o.id) ?? [],
     photos_incomplete: incompleteOrders.has(o.id),
+    videos: videosByOrderPayload.get(o.id) ?? [],
   }));
 
   return NextResponse.json(
