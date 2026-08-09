@@ -153,8 +153,17 @@ export async function POST(
 /**
  * order.created: Auftrag im Betrieb anlegen (wie die Portal-Order-Route, aber
  * via service_role). IDEMPOTENT über `external_ref`: existiert die Order schon,
- * kein zweiter Insert. §13.5: `consent_given` IMMER false / `consent_at` null —
- * Consent gehört an den Tresen, kann per Webhook nicht erteilt werden.
+ * kein zweiter Insert.
+ *
+ * ⚠️ EINWILLIGUNG wird AUTOMATISCH gesetzt (`consent_given = true`,
+ *    `consent_at = now`) — das ersetzt die frühere §13.5-Regel „per Webhook
+ *    IMMER false". Grund: Sie wird an der Kassa bei JEDEM Stück eingeholt,
+ *    ausnahmslos; ein nachträglicher Bestätigungsklick im Portal wäre Handarbeit
+ *    mit immer derselben Antwort. Die Einwilligung entsteht weiterhin am Tresen
+ *    (unterschriebenes Formular) — hier wird nur festgehalten, dass sie vorliegt.
+ *
+ *    Der Zeitstempel ist damit die ANLAGE des Auftrags, nicht die Unterschrift;
+ *    die beiden liegen praktisch zusammen (Annahme = Unterschrift).
  */
 async function handleOrderCreated(
   service: ServiceClient,
@@ -201,8 +210,9 @@ async function handleOrderCreated(
       item_description: roappOrder.raw_description,
       language: business.default_language,
       status: "draft",
-      consent_given: false, // §13.5: NIE per Webhook
-      consent_at: null,
+      // Einwilligung liegt an der Kassa immer vor — siehe Kopf dieser Funktion.
+      consent_given: true,
+      consent_at: new Date().toISOString(),
     })
     .select("id")
     .single<{ id: string }>();

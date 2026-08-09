@@ -10,6 +10,9 @@ import { DEFAULT_LOCALE, t } from "@/lib/i18n";
  * Kein `<form>`-Tag — Absenden über `div + onClick`. ISOLATION: es wird KEINE
  * `business_id` mitgeschickt; der Route Handler leitet sie serverseitig aus der
  * Session ab. Mobile-first, einspaltig, große Tap-Targets.
+ *
+ * ⚠️ KEINE Einwilligungs-Checkbox mehr: Die Einwilligung wird an der Kassa bei
+ *    jedem Stück eingeholt, der Route Handler setzt sie deshalb automatisch.
  */
 export default function NewOrderForm() {
   const router = useRouter();
@@ -18,7 +21,6 @@ export default function NewOrderForm() {
   const [customerPhone, setCustomerPhone] = useState("");
   const [externalRef, setExternalRef] = useState("");
   const [itemDescription, setItemDescription] = useState("");
-  const [consentGiven, setConsentGiven] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -42,7 +44,6 @@ export default function NewOrderForm() {
           customer_phone: customerPhone,
           external_ref: externalRef,
           item_description: itemDescription,
-          consent_given: consentGiven,
         }),
       });
 
@@ -143,29 +144,6 @@ export default function NewOrderForm() {
           />
           <span style={hintStyle}>
             {t(DEFAULT_LOCALE, "orders.itemDescriptionHint")}
-          </span>
-        </label>
-
-        <label
-          style={{
-            display: "flex",
-            alignItems: "flex-start",
-            gap: 10,
-            padding: "10px 0",
-            cursor: "pointer",
-          }}
-        >
-          <input
-            type="checkbox"
-            checked={consentGiven}
-            onChange={(e) => setConsentGiven(e.target.checked)}
-            style={{ marginTop: 3, width: 18, height: 18, flexShrink: 0 }}
-          />
-          <span style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            <span style={{ fontSize: 14, fontWeight: 600 }}>
-              {t(DEFAULT_LOCALE, "orders.consent")}
-            </span>
-            <span style={hintStyle}>{t(DEFAULT_LOCALE, "orders.consentHint")}</span>
           </span>
         </label>
 

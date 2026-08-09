@@ -40,6 +40,12 @@ function trimmedOrNull(value: unknown): string | null {
  *    Formular an der Kassa) und existierte lange vor der Website-Anbindung. Sie
  *    wird hier nur MIT bewertet, weil sie Voraussetzung fürs Veröffentlichen
  *    ist.
+ *
+ *    ⚠️ Die Oberfläche schickt sie NICHT mehr mit: Seit der Umstellung wird die
+ *       Einwilligung schon bei der Auftragsanlage gesetzt (Webhook wie
+ *       manueller Weg), der Schalter auf der Detailseite ist entfallen. Der Key
+ *       bleibt hier trotzdem gültig — er ist der einzige Weg, sie ohne
+ *       SQL-Eingriff nachzutragen (Aufträge von VOR der Umstellung).
  */
 const WEBSITE_KEYS = [
   "website_visible",
@@ -89,10 +95,12 @@ const WEBSITE_KEYS = [
  *
  * ⚠️ EINWILLIGUNG (`consent_given`, Spalte aus 0001) ist Voraussetzung fürs
  *    Veröffentlichen: `website_visible = true` ohne bestätigte Einwilligung ⇒
- *    400 `consent_required`. Der Schalter selbst hat KEIN eigenes
- *    Sperrverhalten (änderbar wie die übrigen Angaben) — solange der Auftrag
- *    aber sichtbar ist, greift dieselbe Prüfung auch beim Abschalten der
- *    Einwilligung, sonst stünde ein veröffentlichtes Stück ohne sie da.
+ *    400 `consent_required`. Das ist seit der automatischen Einwilligung bei der
+ *    Anlage nur noch ein STILLER SCHUTZ — neue Aufträge tragen sie ohnehin; er
+ *    greift bei Aufträgen von VOR der Umstellung. Die Einwilligung selbst hat
+ *    KEIN eigenes Sperrverhalten (änderbar wie die übrigen Angaben) — solange
+ *    der Auftrag aber sichtbar ist, greift dieselbe Prüfung auch beim
+ *    Zurücknehmen, sonst stünde ein veröffentlichtes Stück ohne sie da.
  *    `consent_at` wird beim Setzen automatisch gestempelt und beim Zurücknehmen
  *    geleert; ein bereits vorhandener Zeitstempel wird NICHT überschrieben (er
  *    hält fest, wann die Einwilligung erfasst wurde, nicht wann zuletzt

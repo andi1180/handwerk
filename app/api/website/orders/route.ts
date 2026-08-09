@@ -215,10 +215,14 @@ type FeedOrder = {
    *    `consent_given` sind zwei getrennte Angaben, der Feed gibt beide
    *    unverändert weiter.
    *
-   * ⚠️ Stand 08.08.2026 ist der Wert bei allen über den roapp-Webhook
-   *    angelegten Aufträgen `false` — §13.5 setzt ihn dort fest so, und es gibt
-   *    danach keine Stelle, an der er noch umgestellt werden könnte. Nur von
-   *    Hand angelegte Aufträge können `true` tragen.
+   * ⚠️ Seit 09.08.2026 setzen BEIDE Anlagewege (roapp-Webhook wie manueller)
+   *    den Wert automatisch auf `true` — die Einwilligung wird an der Kassa bei
+   *    jedem Stück eingeholt. Die frühere §13.5-Regel („per Webhook immer
+   *    false") gilt nicht mehr.
+   *
+   *    Ältere Aufträge tragen weiterhin ihren damaligen Wert; ein rückwirkendes
+   *    Setzen hat es bewusst NICHT gegeben. Wer drüben auf das Feld gated,
+   *    sieht bei Aufträgen von vor der Umstellung also `false`.
    */
   consent_given: boolean;
   /**

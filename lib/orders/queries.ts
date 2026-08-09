@@ -49,10 +49,11 @@ export type OrderDetail = {
      Grundlage ist das unterschriebene Formular an der Kassa — hier wird nur
      festgehalten, DASS es vorliegt, und wann das eingetragen wurde.
 
-     ⚠️ Voraussetzung für `website_visible = true` (Route Handler, 400
-     `consent_required`). Aufträge aus dem roapp-Webhook starten nach §13.5
-     immer auf `false`; nachtragen lässt sich das ab jetzt im Website-Block der
-     Detailseite. */
+     ⚠️ Wird bei der Auftragsanlage AUTOMATISCH gesetzt (Webhook wie manueller
+     Weg) — sie wird an der Kassa bei jedem Stück eingeholt, ausnahmslos. Es
+     gibt daher keinen Schalter dafür. Voraussetzung für `website_visible =
+     true` (Route Handler, 400 `consent_required`); das ist ein stiller Schutz
+     für Aufträge von VOR dieser Umstellung, die noch `false` tragen. */
   consent_given: boolean;
   consent_at: string | null;
 };

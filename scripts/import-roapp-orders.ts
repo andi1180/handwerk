@@ -241,6 +241,11 @@ async function main(): Promise<void> {
           short_summary: shortSummary,
           language: business.default_language,
           status: "draft",
+          /* BEWUSST `false`, obwohl die Live-Anlagewege (Webhook + Portal) die
+             Einwilligung seit 09.08.2026 automatisch setzen: Dieses Script
+             trägt HISTORISCHE Aufträge nach, für die niemand bestätigen kann,
+             dass an der Kassa unterschrieben wurde. Es folgt damit derselben
+             Linie wie der Bestand — kein rückwirkendes Setzen. */
           consent_given: false,
           consent_at: null,
         })

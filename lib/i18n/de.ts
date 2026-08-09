@@ -106,9 +106,6 @@ export const de = {
     externalRefHint: "z. B. roapp-Nr.",
     itemDescription: "Beschreibung",
     itemDescriptionHint: "Kontext für die KI — z. B. Material, Arbeitsschritte (optional).",
-    consent: "Einwilligung des Kunden liegt vor",
-    consentHint:
-      "Der Kunde hat zugestimmt, dass seine Fotos und Angaben zur Erstellung des Booklets verwendet werden dürfen. Optional — der Auftrag kann auch ohne Einwilligung angelegt werden.",
     create: "Anlegen",
     nameRequired: "Bitte einen Kundennamen angeben.",
     createError:
@@ -497,12 +494,6 @@ export const de = {
     category: "Website-Kategorie",
     categoryHint:
       "Art der Arbeit für die Website — nicht die Vorher/Nachher/Prozess-Einteilung der Bilder.",
-    // Einwilligung (Spalten aus 0001). Voraussetzung fürs Veröffentlichen —
-    // Aufträge aus dem roapp-Webhook kommen nach §13.5 immer ohne sie an.
-    consent: "Einwilligung liegt vor (schriftlich, Kassa)",
-    consentHint:
-      "Das unterschriebene Formular liegt im Atelier. Ohne diese Bestätigung erscheint der Auftrag nicht auf der Website.",
-    consentRecorded: "Erfasst am {datum}.",
     clothingType: "Kleidungsart",
     workHours: "Arbeitszeit (Stunden)",
     price: "Preis (€)",
@@ -537,8 +528,10 @@ export const de = {
     textRetry: "Erneut erzeugen",
     errTextGeneration:
       "Der Textentwurf konnte nicht erzeugt werden. Bitte erneut versuchen oder den Text selbst schreiben.",
+    // Seit der automatischen Einwilligung bei der Anlage nur noch bei Aufträgen
+    // von VOR der Umstellung möglich — deshalb der Hinweis, wer helfen kann.
     errConsent:
-      "Ohne bestätigte Einwilligung kann der Auftrag nicht auf der Website erscheinen.",
+      "Für diesen Auftrag ist keine Einwilligung hinterlegt (angelegt vor der Umstellung). Er kann daher nicht auf der Website erscheinen — bitte an die Technik wenden.",
     errLocked:
       "Die Website-Anzeige kann hier nicht mehr entfernt werden.",
     saveError: "Speichern fehlgeschlagen. Bitte erneut versuchen.",

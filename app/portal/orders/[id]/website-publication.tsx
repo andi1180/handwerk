@@ -34,6 +34,10 @@ import {
  *       bearbeitbar — sonst würde die eintreffende Antwort überschreiben, was
  *       gerade jemand tippt. Der Entwurf kommt ins Feld und trägt das
  *       Kennzeichen „KI-Entwurf, ungeprüft“, bis ihn jemand ändert.
+ *    ⚠️ KEIN Einwilligungs-Schalter mehr: Sie wird an der Kassa bei jedem Stück
+ *       eingeholt und deshalb schon bei der Auftragsanlage gesetzt. Der Server
+ *       prüft sie weiterhin (400 `consent_required`) — als stiller Schutz für
+ *       Aufträge von VOR dieser Umstellung, nicht als etwas zum Anklicken.
  *  · GESPEICHERT SICHTBAR — der Schalter ist weg und durch einen
  *    nicht-interaktiven Status ersetzt (Einbahnstraße, Server erzwingt es mit
  *    400 `website_locked`). Die VIER WERTE bleiben ausdrücklich EDITIERBAR,
@@ -55,8 +59,6 @@ export function WebsitePublication({
   initialPrice,
   initialText,
   initialKiDraft,
-  initialConsent,
-  initialConsentAt,
 }: {
   orderId: string;
   initialVisible: boolean;
@@ -66,8 +68,6 @@ export function WebsitePublication({
   initialPrice: number | null;
   initialText: string | null;
   initialKiDraft: boolean;
-  initialConsent: boolean;
-  initialConsentAt: string | null;
 }) {
   const router = useRouter();
 
@@ -109,12 +109,6 @@ export function WebsitePublication({
   const [generating, setGenerating] = useState(false);
   /** Fehler der Entwurfs-Erzeugung — steht am Feld, nicht bei den Angaben. */
   const [generationError, setGenerationError] = useState<string | null>(null);
-  /* Einwilligung (Spalten aus 0001). KEIN eigenes Sperrverhalten — änderbar wie
-     die übrigen Angaben; der Server verweigert nur das Veröffentlichen ohne sie
-     (400 `consent_required`). Aufträge aus dem roapp-Webhook kommen nach §13.5
-     immer mit `false` an; genau die werden hier nachgetragen. */
-  const [consent, setConsent] = useState(initialConsent);
-  const [consentAt, setConsentAt] = useState(initialConsentAt);
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -211,11 +205,6 @@ export function WebsitePublication({
       setError(t(DEFAULT_LOCALE, "website.errText"));
       return;
     }
-    // Ohne bestätigte Einwilligung kein Veröffentlichen (Server erzwingt es).
-    if (!consent) {
-      setError(t(DEFAULT_LOCALE, "website.errConsent"));
-      return;
-    }
 
     setBusy(true);
     void (async () => {
@@ -230,7 +219,6 @@ export function WebsitePublication({
             website_work_hours: hours,
             website_price: parsedPrice,
             website_text: text,
-            consent_given: consent,
           }),
         });
         if (!res.ok) {
@@ -253,8 +241,6 @@ export function WebsitePublication({
           website_price: number | null;
           website_text: string | null;
           website_text_ki_entwurf: boolean;
-          consent_given: boolean;
-          consent_at: string | null;
         };
         // Server-Wahrheit übernehmen (macht die Sperre wirksam).
         setSavedVisible(data.website_visible);
@@ -282,9 +268,6 @@ export function WebsitePublication({
         setDraftRef(
           data.website_text_ki_entwurf ? (data.website_text ?? "") : null,
         );
-        // Der Zeitstempel entsteht auf dem Server — von dort übernehmen.
-        setConsent(data.consent_given);
-        setConsentAt(data.consent_at);
         setSavedNotice(true);
         setBusy(false);
         router.refresh();
@@ -299,7 +282,6 @@ export function WebsitePublication({
     category,
     clear,
     clothingType,
-    consent,
     generating,
     orderId,
     price,
@@ -307,13 +289,6 @@ export function WebsitePublication({
     text,
     workHours,
   ]);
-
-  /** Einwilligungs-Schalter — kein Sperrverhalten, nur während des Speicherns aus. */
-  const toggleConsent = useCallback(() => {
-    if (busy) return;
-    clear();
-    setConsent((v) => !v);
-  }, [busy, clear]);
 
   const categoryOptions = useMemo(
     () => WEBSITE_CATEGORIES.map((c) => ({ value: c.value, label: c.label })),
@@ -348,28 +323,16 @@ export function WebsitePublication({
       {/* AUS ⇒ hier ist Schluss: keine Felder, keine Pflicht, kein Hinweis. */}
       {showFields ? (
         <>
-          {/* Einwilligung — steht ZUERST, weil ohne sie nichts veröffentlicht
-              wird (Server: 400 `consent_required`). Kein eigenes Sperrverhalten:
-              änderbar wie die übrigen Angaben; solange der Auftrag sichtbar ist,
-              verweigert der Server allerdings auch das Zurücknehmen. */}
-          <div style={labelStyle}>
-            <SwitchRow
-              label={t(DEFAULT_LOCALE, "website.consent")}
-              checked={consent}
-              onToggle={toggleConsent}
-              disabled={busy}
-            />
-            <span style={hintStyle}>
-              {t(DEFAULT_LOCALE, "website.consentHint")}
-            </span>
-            {consent && consentAt ? (
-              <span style={hintStyle}>
-                {t(DEFAULT_LOCALE, "website.consentRecorded", {
-                  datum: formatDate(consentAt),
-                })}
-              </span>
-            ) : null}
-          </div>
+          {/* Hier stand der Einwilligungs-Schalter. Entfallen: Die Einwilligung
+              wird an der Kassa bei JEDEM Stück eingeholt und deshalb schon bei
+              der Auftragsanlage gesetzt (Webhook wie manueller Weg) — ein Klick,
+              dessen Antwort immer dieselbe ist, ist keine Entscheidung.
+
+              Die Server-Prüfung bleibt als stiller Schutz: Fehlt die
+              Einwilligung doch einmal (etwa bei einem Auftrag von VOR dieser
+              Umstellung), verweigert der Server das Veröffentlichen mit 400
+              `consent_required` — sichtbar als Fehlermeldung unten. Nachtragen
+              ist dann ein Eingriff per SQL/API, kein Klick. */}
 
           {/* „Website-Kategorie" ausgeschrieben + Hinweis: NICHT die
               Vorher/Nachher/Prozess-Einteilung der Bilder (order_media.category). */}
@@ -501,9 +464,8 @@ export function WebsitePublication({
 /**
  * Schalter-Zeile (Beschriftung links, `role="switch"` rechts).
  *
- * Einmal definiert, zweimal verwendet — Website-Anzeige und Einwilligung sehen
- * gleich aus und verhalten sich gleich. `div + onClick` + Enter/Space, KEIN
- * `<input type="checkbox">` (Projekt-Konvention, wie der Settings-Toggle).
+ * `div + onClick` + Enter/Space, KEIN `<input type="checkbox">`
+ * (Projekt-Konvention, wie der Settings-Toggle).
  */
 function SwitchRow({
   label,
@@ -567,20 +529,6 @@ function SwitchRow({
   );
 }
 
-/**
- * ISO-Zeitstempel → TT.MM.JJJJ.
- *
- * Von Hand zusammengesetzt statt `toLocaleDateString`: Die Komponente rendert
- * auch auf dem Server vor, und eine dort abweichende Locale würde beim
- * Hydrieren als Textunterschied auffallen.
- */
-function formatDate(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${pad(d.getUTCDate())}.${pad(d.getUTCMonth() + 1)}.${d.getUTCFullYear()}`;
-}
-
 /** Übersetzt einen Server-Fehlercode in eine Meldung. */
 function errorMessage(code: string): string {
   switch (code) {
@@ -598,6 +546,9 @@ function errorMessage(code: string): string {
     // wurde nichts — auch kein leerer Text.
     case "text_generation_failed":
       return t(DEFAULT_LOCALE, "website.errTextGeneration");
+    /* Kein Schalter mehr, aber der Fall bleibt möglich: Aufträge von VOR der
+       automatischen Einwilligung tragen `consent_given = false`. Nachtragen ist
+       dann ein Eingriff per SQL/API. */
     case "consent_required":
       return t(DEFAULT_LOCALE, "website.errConsent");
     case "website_locked":

@@ -13,6 +13,14 @@ function trimmedOrNull(value: unknown): string | null {
 /**
  * POST /api/portal/orders — legt einen Auftrag an.
  *
+ * ⚠️ EINWILLIGUNG wird AUTOMATISCH gesetzt (`consent_given = true`,
+ *    `consent_at = now`) — sie wird an der Kassa bei JEDEM Stück eingeholt,
+ *    ausnahmslos. Die frühere Checkbox im Anlage-Formular ist deshalb entfallen:
+ *    Ein Klick, dessen Antwort immer dieselbe ist, ist keine Entscheidung.
+ *    `consent_given` aus dem Body wird IGNORIERT (kein Client-Wert).
+ *
+ *    Gleiches Verhalten im roapp-Webhook (dem regulären Anlageweg).
+ *
  * ISOLATION: `business_id` stammt AUSSCHLIESSLICH aus `getCurrentBusiness`
  * (Session, RLS-erzwungen), NIEMALS aus dem Request-Body. Geschrieben wird über
  * den AUTHENTICATED Server-Client (RLS-Policy `orders_all`), kein `service_role`.
@@ -45,7 +53,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "name_required" }, { status: 400 });
   }
 
-  const consentGiven = payload.consent_given === true;
   const itemDescription = trimmedOrNull(payload.item_description);
 
   // KI-Kurzbeschreibung für die Auftragskachel — EINMALIG bei der Anlage erzeugt
@@ -78,8 +85,9 @@ export async function POST(request: Request) {
       short_summary: shortSummary,
       language: business.default_language,
       status: "draft",
-      consent_given: consentGiven,
-      consent_at: consentGiven ? new Date().toISOString() : null,
+      // Einwilligung liegt an der Kassa immer vor — siehe Kopf dieser Funktion.
+      consent_given: true,
+      consent_at: new Date().toISOString(),
     })
     .select("id")
     .single<{ id: string }>();

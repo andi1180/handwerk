@@ -159,14 +159,14 @@ Erstes echtes Feature: Aufträge anlegen und auflisten — der **manuelle Pfad**
 ### Anlage-Formular
 
 - [app/portal/orders/new/page.tsx](app/portal/orders/new/page.tsx) (Server-Page) rendert die einzige Client Component der Route, [new-order-form.tsx](app/portal/orders/new/new-order-form.tsx).
-- Felder (`div + onClick` / `.form-input`, **kein `<form>`-Tag**): `customer_name` (Pflicht), `customer_email`, `customer_phone`, `external_ref` (Hinweis „z. B. roapp-Nr."), `item_description` (Textarea, Hinweis „KI-Kontext"), `consent_given` (Checkbox, nicht-blockierend, klarer Hinweistext).
+- Felder (`div + onClick` / `.form-input`, **kein `<form>`-Tag**): `customer_name` (Pflicht), `customer_email`, `customer_phone`, `external_ref` (Hinweis „z. B. roapp-Nr."), `item_description` (Textarea, Hinweis „KI-Kontext"). **Keine Einwilligungs-Checkbox** — die Einwilligung wird an der Kassa bei jedem Stück eingeholt und deshalb serverseitig automatisch gesetzt.
 - Validierung: leerer `customer_name` → inline i18n-Fehler (`orders.nameRequired`), kein Request. Absenden → POST an `/api/portal/orders` **ohne `business_id`**; Erfolg → `router.push("/portal/orders")`, Fehler → `orders.createError`.
 
 ### Route Handler
 
 - [app/api/portal/orders/route.ts](app/api/portal/orders/route.ts), `POST`: AUTHENTICATED Server-Client. `auth.getUser()` → kein User → **401**; `getCurrentBusiness()` → kein Betrieb → **403**.
 - **Isolationsregel:** `business_id` stammt **ausschließlich** aus `getCurrentBusiness` (Session), **niemals** aus dem Body. Insert über RLS-Policy `orders_all` (kein `service_role`).
-- Insert: `business_id`, `customer_name` (required, sonst **400**), `customer_email`/`customer_phone`/`external_ref`/`item_description` (getrimmt, leer → `null`), `language = business.default_language`, `status = 'draft'`, `consent_given` (bool aus Body), `consent_at = now()` falls `consent_given`, sonst `null`. Gibt die neue `order.id` zurück (**201**).
+- Insert: `business_id`, `customer_name` (required, sonst **400**), `customer_email`/`customer_phone`/`external_ref`/`item_description` (getrimmt, leer → `null`), `language = business.default_language`, `status = 'draft'`, **`consent_given = true` + `consent_at = now()` (immer, unabhängig vom Body — `consent_given` aus dem Body wird ignoriert)**. Gibt die neue `order.id` zurück (**201**).
 
 ### i18n
 
@@ -2076,7 +2076,7 @@ Neue Blöcke in [lib/i18n/de.ts](lib/i18n/de.ts): `register.*` (`title`/`intro`/
 **✅ LIVE — beide Events end-to-end verifiziert.** Vendor-neutraler Inbound-Webhook, der Aufträge **automatisch anlegt** (`order.created`) und **ausliefert** (`order.picked_up`). Additiv zum manuellen Pfad (§12.5). **Keine Migration** — `businesses.webhook_secret` existiert aus 0001. **Pro Betrieb, Secret-authentifiziert, tenant-gescoped** (§12.3 / §14.2).
 
 **Verifiziert (end-to-end):**
-- `order.created` → Auftrag wird automatisch als `draft` angelegt (Name/E-Mail aus der roapp-API, `consent_given=false`, `external_ref=id_label`).
+- `order.created` → Auftrag wird automatisch als `draft` angelegt (Name/E-Mail aus der roapp-API, `external_ref=id_label`). *(Zum Zeitpunkt dieser Messung noch mit `consent_given=false`; die Einwilligung wird seit 09.08.2026 automatisch gesetzt — s. u.)*
 - `order.picked_up` → Booklet-E-Mail geht raus, aber **nur** wenn API-`status.name === "Abgeholt"`; Zwischenstatus (z. B. „Fertig zur Abholung") lösen einen No-op aus (`noop_status`).
 - Auth via Pfad-Secret, Anreicherung über **einen** roapp-API-Call, Doppelversand-Schutz über defensiven Status-Filter + `count`-Check.
 
@@ -2106,7 +2106,7 @@ Neue Blöcke in [lib/i18n/de.ts](lib/i18n/de.ts): `register.*` (`title`/`intro`/
 
 Wie die Portal-Order-Route ([app/api/portal/orders/route.ts](app/api/portal/orders/route.ts)), aber via `service_role`:
 - `customer_name` = `first+last` → sonst `client.name` → sonst `external_ref` → sonst `"Kunde"` (Spalte NOT NULL); `customer_email` = `client.email` (leer/`''` ⇒ `null`, s. `parseRoappOrder`); `customer_phone` = `firstClientPhone(client)` (erste nicht-leere roapp-`phone`-Nummer, ROH; sonst `null`); `external_ref` = `id_label`; `language` = `business.default_language`; `status='draft'`.
-- **§13.5:** `consent_given` **IMMER `false`**, `consent_at` **`null`** — Consent gehört an den Tresen, kann per Webhook nicht erteilt werden.
+- **Einwilligung automatisch:** `consent_given` **IMMER `true`**, `consent_at = now()`. **Ersetzt die frühere §13.5-Regel** („per Webhook immer `false`") — sie wird an der Kassa bei jedem Stück eingeholt, ausnahmslos; ein nachträglicher Bestätigungsklick wäre Handarbeit mit immer derselben Antwort. Die Einwilligung entsteht weiterhin am Tresen (unterschriebenes Formular), hier wird nur festgehalten, **dass** sie vorliegt; der Zeitstempel ist damit die Anlage, nicht die Unterschrift (die beiden fallen praktisch zusammen).
 - `item_description` = `null` — roapp-Custom-Field-IDs sind pro Betrieb verschieden ⇒ kein zuverlässiges Mapping.
 - **IDEMPOTENT:** existiert schon eine Order mit `external_ref` für den Betrieb ⇒ kein zweiter Insert, `already_exists` (Dedup nur, wenn `external_ref` vorhanden).
 
@@ -2132,7 +2132,7 @@ CLI-Script für den **einmaligen Backfill** schon existierender roapp-Aufträge 
 
 - **Importmenge = GENAU `OBJECT_IDS`** (hartkodiertes Array, vom Nutzer aus den roapp-Web-UI-URLs abgelesen). **KEIN** Listen-/Such-Endpoint, **KEIN** Auto-Discovery.
 - **Betrieb** über `BUSINESS_EMAIL = "office@alinadax.com"` aufgelöst (`select id,name,default_language from businesses where business_email=…`); fehlt er ⇒ **harter Abbruch**. `business.id` ist die **EINZIGE Vertrauensquelle** (§14.2), jede Query darauf gescoped.
-- **Pro Auftrag** (Felder repliziert aus dem Webhook-`handleOrderCreated`): `customer_name` (REPLIZIERTE `buildCustomerName`-Logik first+last → name → external_ref → "Kunde"; Webhook-Route bewusst **unangefasst**, kein Export), `customer_email`(||null), `customer_phone=null`, `external_ref=id_label`, `item_description=raw_description`, `short_summary` (Haiku, wie Live-Anlage; Fehler ⇒ null, Order trotzdem angelegt), `language=default_language`, `status='draft'`, `consent_given=false`/`consent_at=null` (§13.5).
+- **Pro Auftrag** (Felder repliziert aus dem Webhook-`handleOrderCreated`): `customer_name` (REPLIZIERTE `buildCustomerName`-Logik first+last → name → external_ref → "Kunde"; Webhook-Route bewusst **unangefasst**, kein Export), `customer_email`(||null), `customer_phone=null`, `external_ref=id_label`, `item_description=raw_description`, `short_summary` (Haiku, wie Live-Anlage; Fehler ⇒ null, Order trotzdem angelegt), `language=default_language`, `status='draft'`, `consent_given=false`/`consent_at=null` — **bewusst weiterhin `false`**, obwohl die Live-Anlagewege die Einwilligung seit 09.08.2026 automatisch setzen: Das Script trägt **historische** Aufträge nach, für die niemand bestätigen kann, dass an der Kassa unterschrieben wurde. Es folgt damit derselben Linie wie der Bestand (kein rückwirkendes Setzen).
 - **Idempotenz:** SELECT auf `(business_id, external_ref)` vor jedem Insert ⇒ existiert ⇒ skip (KEIN upsert — keine UNIQUE-Constraint, nur Index). **Re-runnbar.**
 - **Nicht-blockierend pro ID:** eigener try/catch ⇒ loggen + weiter; `external_ref` fehlt ⇒ skip; `getRoappOrder`-Fehler ⇒ skip+log. Abschluss-Log `created N / skipped M / failed K`.
 - **HARTE GRENZE:** legt AUSSCHLIESSLICH die `draft`-Order an — **KEINE** Booklet-Generierung, **KEIN** Reel, **KEINE** E-Mail, **KEIN** Versand, **KEIN** Status über `draft`; `roappOrder.status` wird gelesen, aber ignoriert. **KEIN** `analytics_events`-Insert (Backfill ≠ Anlage-Event, kein Consumer) — nur `item_description` + `short_summary`. `service_role` ist CLI-only (`.env.local`, dependency-freier Loader wie [upload-ffmpeg.ts](scripts/upload-ffmpeg.ts)); relative Imports (`../lib/...`).
@@ -2168,7 +2168,7 @@ Schlanke, betriebs-skopierte Ablage für **Sach-Events**, die weder Abrechnung (
 ### Webhook handleCreated befüllt item_description + analytics_event ([app/api/webhook/[secret]/route.ts](app/api/webhook/[secret]/route.ts))
 
 Im `order.created`-Branch, **nach** dem Idempotenz-Check:
-1. **`item_description` = `roappOrder.raw_description`** (parser-getrimmt, sonst `null`) — **ROH-Text, bewusst unverändert** (die KI filtert Zahlen/Maße/Kürzel erst bei der Generierung). `consent_given` bleibt `false` (§13.5), unverändert.
+1. **`item_description` = `roappOrder.raw_description`** (parser-getrimmt, sonst `null`) — **ROH-Text, bewusst unverändert** (die KI filtert Zahlen/Maße/Kürzel erst bei der Generierung). `consent_given` wird beim Insert automatisch auf `true` gesetzt (s. o.).
 2. **Zusätzlich** (nur wenn `raw_description` nicht leer): `analytics_events`-Insert via `service_role`, **NICHT-BLOCKIEREND** (wie der Billing-Insert im deliver-Pfad — Fehler ⇒ `console.error`, kein Abbruch): `business_id` = aufgelöste Betriebs-ID (**§14.2, NIE aus dem Payload**), `event_type='order_description'`, `source='roapp'`, `external_ref=id_label`, `payload={ raw_text: <raw_description> }`. **PII-frei.** Bei `already_exists` greift der frühe Return oben ⇒ hier wird nie doppelt geschrieben.
 
 ### KI-Intro-Umbau ([lib/ai/intro.ts](lib/ai/intro.ts))
