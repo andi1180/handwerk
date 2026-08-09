@@ -43,9 +43,11 @@ function trimmedOrNull(value: unknown): string | null {
  *
  *    ⚠️ Die Oberfläche schickt sie NICHT mehr mit: Seit der Umstellung wird die
  *       Einwilligung schon bei der Auftragsanlage gesetzt (Webhook wie
- *       manueller Weg), der Schalter auf der Detailseite ist entfallen. Der Key
- *       bleibt hier trotzdem gültig — er ist der einzige Weg, sie ohne
- *       SQL-Eingriff nachzutragen (Aufträge von VOR der Umstellung).
+ *       manueller Weg), der Schalter auf der Detailseite ist entfallen — und
+ *       beim Veröffentlichen setzt dieser Handler sie ohnehin selbst (siehe
+ *       unten). Der Key bleibt gültig, weil er der einzige Weg bleibt, die
+ *       Einwilligung ohne SQL-Eingriff zurückzunehmen oder sie an einem NICHT
+ *       veröffentlichten Auftrag nachzutragen.
  */
 const WEBSITE_KEYS = [
   "website_visible",
@@ -93,18 +95,20 @@ const WEBSITE_KEYS = [
  *    stehen — es beantwortet „hat jemand den Text angefasst?“, nicht „hat jemand
  *    gespeichert?“.
  *
- * ⚠️ EINWILLIGUNG (`consent_given`, Spalte aus 0001) ist Voraussetzung fürs
- *    Veröffentlichen: `website_visible = true` ohne bestätigte Einwilligung ⇒
- *    400 `consent_required`. Das ist seit der automatischen Einwilligung bei der
- *    Anlage nur noch ein STILLER SCHUTZ — neue Aufträge tragen sie ohnehin; er
- *    greift bei Aufträgen von VOR der Umstellung. Die Einwilligung selbst hat
- *    KEIN eigenes Sperrverhalten (änderbar wie die übrigen Angaben) — solange
- *    der Auftrag aber sichtbar ist, greift dieselbe Prüfung auch beim
- *    Zurücknehmen, sonst stünde ein veröffentlichtes Stück ohne sie da.
- *    `consent_at` wird beim Setzen automatisch gestempelt und beim Zurücknehmen
- *    geleert; ein bereits vorhandener Zeitstempel wird NICHT überschrieben (er
- *    hält fest, wann die Einwilligung erfasst wurde, nicht wann zuletzt
- *    gespeichert wurde).
+ * ⚠️ EINWILLIGUNG (`consent_given`, Spalte aus 0001) wird beim Veröffentlichen
+ *    ERZWUNGEN, nicht abgefragt: `website_visible = true` setzt
+ *    `consent_given`/`consent_at` ohne Bedingung auf `true`/jetzt — bei jedem
+ *    Auftrag, unabhängig vom gespeicherten Wert und vom Anlagedatum. Grund: Sie
+ *    wird an der Kassa bei JEDEM Stück eingeholt; wer den Schalter umlegt,
+ *    bestätigt damit, dass sie für dieses Stück vorliegt. Ohne das blieben die
+ *    vor der automatischen Einwilligung entstandenen Aufträge dauerhaft auf
+ *    `false` und damit unveröffentlichbar (der Schalter dafür ist entfallen).
+ *    Die Prüfung `400 consent_required` steht weiterhin im Code, kann aber nicht
+ *    mehr auslösen.
+ *
+ *    Außerhalb des Veröffentlichens bleibt die Einwilligung über den Body
+ *    änderbar: Zurücknehmen leert `consent_at`, erstmaliges Nachtragen stempelt,
+ *    ein vorhandener Zeitstempel bleibt dort stehen.
  *
  * ⚠️ EINBAHNSTRASSE: Ein bereits gespeichertes `website_visible = true` kann
  *    über diese Route NICHT auf false zurückgesetzt werden (400
@@ -223,22 +227,29 @@ export async function PATCH(
       return NextResponse.json({ error: "website_locked" }, { status: 400 });
     }
 
-    // Einwilligung — Zielzustand wie oben: explizit im Body, sonst gespeichert.
-    const nextConsent =
-      "consent_given" in payload
-        ? payload.consent_given === true
-        : order.consent_given;
+    /* ⚠️ DIE EINWILLIGUNG WIRD BEIM VERÖFFENTLICHEN ERZWUNGEN, NICHT ABGEFRAGT.
+       Sie wird an der Kassa bei JEDEM Stück eingeholt; wer hier den Schalter
+       umlegt, bestätigt damit, dass sie für dieses Stück vorliegt. Deshalb ohne
+       Bedingung und bei JEDEM Auftrag — unabhängig vom gespeicherten Wert und
+       unabhängig vom Anlagedatum.
 
-    // OHNE bestätigte Einwilligung KEIN Veröffentlichen. Greift auch, wenn ein
-    // bereits sichtbarer Auftrag die Einwilligung zurücknehmen wollte — dann
-    // stünde ein veröffentlichtes Stück ohne sie da.
-    if (nextVisible && !nextConsent) {
-      return NextResponse.json({ error: "consent_required" }, { status: 400 });
-    }
+       Das schließt die Lücke der automatischen Einwilligung bei der Anlage: Die
+       greift nur für NEU entstehende Aufträge; die davor entstandenen tragen
+       dauerhaft `false`, und seit dem Wegfall des Schalters gäbe es sonst keinen
+       Weg mehr, das ohne SQL-Eingriff zu ändern.
 
-    if ("consent_given" in payload) {
-      updates.consent_given = nextConsent;
-      if (!nextConsent) {
+       ⚠️ `consent_at` wird dabei NEU gestempelt, auch wenn schon einer dasteht.
+          Der Zeitstempel hält damit fest, wann die Einwilligung zuletzt
+          bestätigt wurde — bewusst anders als beim Zurücknehmen/Nachtragen
+          unten, wo ein vorhandener Stempel stehen bleibt. */
+    if (nextVisible) {
+      updates.consent_given = true;
+      updates.consent_at = new Date().toISOString();
+    } else if ("consent_given" in payload) {
+      // Nicht sichtbar: Einwilligung wie bisher nachtragbar/zurücknehmbar.
+      const consent = payload.consent_given === true;
+      updates.consent_given = consent;
+      if (!consent) {
         // Zurückgenommen ⇒ Zeitstempel mit weg (wie beim manuellen Anlegen).
         updates.consent_at = null;
       } else if (!order.consent_at) {
@@ -246,6 +257,16 @@ export async function PATCH(
         // stehen: er hält fest, wann die Einwilligung erfasst wurde.
         updates.consent_at = new Date().toISOString();
       }
+    }
+
+    // Zielzustand: erzwungen (oben), sonst der gespeicherte Wert.
+    const nextConsent = updates.consent_given ?? order.consent_given;
+
+    /* OHNE bestätigte Einwilligung KEIN Veröffentlichen. Bleibt als Boden
+       stehen, KANN aber nicht mehr auslösen: Bei `nextVisible` steht
+       `consent_given` oben bereits auf `true`, bevor diese Prüfung läuft. */
+    if (nextVisible && !nextConsent) {
+      return NextResponse.json({ error: "consent_required" }, { status: 400 });
     }
 
     if (nextVisible) {

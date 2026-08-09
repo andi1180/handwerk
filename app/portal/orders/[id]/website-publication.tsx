@@ -35,9 +35,10 @@ import {
  *       gerade jemand tippt. Der Entwurf kommt ins Feld und trägt das
  *       Kennzeichen „KI-Entwurf, ungeprüft“, bis ihn jemand ändert.
  *    ⚠️ KEIN Einwilligungs-Schalter mehr: Sie wird an der Kassa bei jedem Stück
- *       eingeholt und deshalb schon bei der Auftragsanlage gesetzt. Der Server
- *       prüft sie weiterhin (400 `consent_required`) — als stiller Schutz für
- *       Aufträge von VOR dieser Umstellung, nicht als etwas zum Anklicken.
+ *       eingeholt und deshalb schon bei der Auftragsanlage gesetzt. Beim
+ *       Veröffentlichen setzt der Server sie zusätzlich selbst — auch bei
+ *       Aufträgen von VOR dieser Umstellung, die dauerhaft `false` tragen.
+ *       `400 consent_required` kann damit nicht mehr auftreten.
  *  · GESPEICHERT SICHTBAR — der Schalter ist weg und durch einen
  *    nicht-interaktiven Status ersetzt (Einbahnstraße, Server erzwingt es mit
  *    400 `website_locked`). Die VIER WERTE bleiben ausdrücklich EDITIERBAR,
@@ -328,11 +329,11 @@ export function WebsitePublication({
               der Auftragsanlage gesetzt (Webhook wie manueller Weg) — ein Klick,
               dessen Antwort immer dieselbe ist, ist keine Entscheidung.
 
-              Die Server-Prüfung bleibt als stiller Schutz: Fehlt die
-              Einwilligung doch einmal (etwa bei einem Auftrag von VOR dieser
-              Umstellung), verweigert der Server das Veröffentlichen mit 400
-              `consent_required` — sichtbar als Fehlermeldung unten. Nachtragen
-              ist dann ein Eingriff per SQL/API, kein Klick. */}
+              Das Speichern hier setzt sie zusätzlich selbst: Der Server erzwingt
+              `consent_given` beim Veröffentlichen ohne Bedingung (siehe Kopf von
+              app/api/portal/orders/[id]/route.ts). Damit lassen sich auch die
+              Aufträge von VOR der automatischen Einwilligung veröffentlichen,
+              die dauerhaft `false` tragen — ohne Eingriff per SQL. */}
 
           {/* „Website-Kategorie" ausgeschrieben + Hinweis: NICHT die
               Vorher/Nachher/Prozess-Einteilung der Bilder (order_media.category). */}
@@ -546,9 +547,9 @@ function errorMessage(code: string): string {
     // wurde nichts — auch kein leerer Text.
     case "text_generation_failed":
       return t(DEFAULT_LOCALE, "website.errTextGeneration");
-    /* Kein Schalter mehr, aber der Fall bleibt möglich: Aufträge von VOR der
-       automatischen Einwilligung tragen `consent_given = false`. Nachtragen ist
-       dann ein Eingriff per SQL/API. */
+    /* Kann seit dem Erzwingen beim Veröffentlichen nicht mehr auftreten — die
+       Zuordnung bleibt stehen, damit der Code kein stummes „unbekannter Fehler"
+       zeigt, falls die Prüfung serverseitig je wieder greift. */
     case "consent_required":
       return t(DEFAULT_LOCALE, "website.errConsent");
     case "website_locked":
