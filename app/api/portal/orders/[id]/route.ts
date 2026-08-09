@@ -106,9 +106,12 @@ const WEBSITE_KEYS = [
  *    Die Prüfung `400 consent_required` steht weiterhin im Code, kann aber nicht
  *    mehr auslösen.
  *
+ *    `consent_at` wird dabei nur beim ERSTEN Mal gestempelt — er hält fest, wann
+ *    die Einwilligung erfasst wurde, nicht wann zuletzt gespeichert wurde.
+ *
  *    Außerhalb des Veröffentlichens bleibt die Einwilligung über den Body
  *    änderbar: Zurücknehmen leert `consent_at`, erstmaliges Nachtragen stempelt,
- *    ein vorhandener Zeitstempel bleibt dort stehen.
+ *    ein vorhandener Zeitstempel bleibt ebenso stehen.
  *
  * ⚠️ EINBAHNSTRASSE: Ein bereits gespeichertes `website_visible = true` kann
  *    über diese Route NICHT auf false zurückgesetzt werden (400
@@ -238,13 +241,16 @@ export async function PATCH(
        dauerhaft `false`, und seit dem Wegfall des Schalters gäbe es sonst keinen
        Weg mehr, das ohne SQL-Eingriff zu ändern.
 
-       ⚠️ `consent_at` wird dabei NEU gestempelt, auch wenn schon einer dasteht.
-          Der Zeitstempel hält damit fest, wann die Einwilligung zuletzt
-          bestätigt wurde — bewusst anders als beim Zurücknehmen/Nachtragen
-          unten, wo ein vorhandener Stempel stehen bleibt. */
+       ⚠️ `consent_at` wird dabei NUR gestempelt, wenn noch keiner dasteht. Der
+          Zeitstempel hält fest, wann die Einwilligung ERFASST wurde, nicht wann
+          zuletzt gespeichert wurde — sonst verschöbe ihn jede spätere
+          Preiskorrektur am selben Auftrag. Gleiche Regel wie beim Nachtragen
+          unten. */
     if (nextVisible) {
       updates.consent_given = true;
-      updates.consent_at = new Date().toISOString();
+      if (!order.consent_at) {
+        updates.consent_at = new Date().toISOString();
+      }
     } else if ("consent_given" in payload) {
       // Nicht sichtbar: Einwilligung wie bisher nachtragbar/zurücknehmbar.
       const consent = payload.consent_given === true;
