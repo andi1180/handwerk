@@ -92,10 +92,11 @@ const SYSTEM_PROMPT =
   "- Beschreibe NUR, was aus den Bildunterschriften und der Annahmenotiz " +
   "hervorgeht. Erfinde keine Materialien, keine Farben, keine Gefühle, keine " +
   "Zufriedenheit der Kundin.\n" +
-  "- Ist das Material dünn oder nichtssagend, schreibe trotzdem einen kurzen, " +
-  "ehrlichen Text aus dem, was da ist. Brich NICHT ab, frage NICHT nach, " +
-  "entschuldige dich NICHT und erkläre nicht, dass die Angaben knapp sind — " +
-  "schreibe einfach knapper.\n\n" +
+  "- Ist das Material dünn, widersprüchlich oder scheinen die Bildunterschriften " +
+  "nicht zusammenzupassen, schreibe TROTZDEM einen kurzen, ehrlichen Text aus " +
+  "dem, was am ehesten zum Kleidungsstück gehört. Brich NICHT ab, frage NICHT " +
+  "nach, entschuldige dich NICHT, bewerte NICHT die Eingabe und erkläre nicht, " +
+  "dass die Angaben knapp sind — schreibe einfach knapper und allgemeiner.\n\n" +
   "Antworte AUSSCHLIESSLICH mit dem Text selbst — keine Überschrift, keine " +
   "Anführungszeichen, keine Vor- oder Nachbemerkung.";
 
@@ -129,6 +130,37 @@ function cleanDraft(raw: string): string {
   text = text.replace(/\s*\n\s*/g, " ");
   text = text.replace(/[ \t]+/g, " ");
   return text.trim();
+}
+
+/**
+ * Muster einer META-ANTWORT: Das Modell hat über die Aufgabe gesprochen, statt
+ * den Text zu liefern — es hat zurückgefragt, die Eingabe bewertet oder
+ * abgelehnt. Gleiche Idee wie `isMetaResponse` bei den Bildunterschriften
+ * ([lib/ai/captions.ts](lib/ai/captions.ts)), nur auf diese Textsorte
+ * zugeschnitten: Die dortige Längen-Regel entfällt (zwei bis drei Sätze sind
+ * hier normal), dafür zählen Verweise auf das Eingabematerial.
+ *
+ * ⚠️ NICHT theoretisch, sondern gemessen: Bei einem Auftrag mit
+ *    zusammenhanglosen Bildunterschriften antwortete das Modell mit
+ *    „… Ich kann keinen sachlichen, ehrlichen Text schreiben … Bitte prüfen
+ *    Sie die Eingabe: Gehören alle Bilder zu einem Auftrag?" — 653 Zeichen, die
+ *    an der 80-Zeichen-Prüfung mühelos vorbeikommen und als Archivtext eines
+ *    Kunden online gegangen wären.
+ *
+ * Die Muster zielen auf das, was ein Archivtext NIE tut: eine Frage stellen, in
+ * der Ich-Form über das eigene Können sprechen, oder das Rohmaterial benennen
+ * (ein Text über ein Kleidungsstück erwähnt keine „Bildunterschriften").
+ */
+const META_MUSTER: readonly RegExp[] = [
+  /\?/,
+  /\bich (kann|konnte|habe keine|sehe|benötige|brauche|weiß)\b/i,
+  /\b(tut mir leid|entschuldigung|leider kann|leider lässt)\b/i,
+  /\b(bildunterschrift|annahmenotiz|eingabe|rohmaterial|angaben (reichen|sind zu))\b/i,
+  /\bals (ki|sprachmodell|assistent)\b/i,
+];
+
+function istMetaAntwort(text: string): boolean {
+  return META_MUSTER.some((muster) => muster.test(text));
 }
 
 /**
@@ -166,6 +198,16 @@ export async function generateWebsiteTextDraft(
     // Leere Antwort ist etwas anderes als ein kurzer Entwurf: Hier gibt es
     // nichts zu speichern und nichts zu prüfen.
     throw new Error("website text draft: empty model response");
+  }
+  if (istMetaAntwort(text)) {
+    /* Eine Rückfrage ist KEIN Entwurf. Sie ist lang genug, um durch die
+       80-Zeichen-Prüfung zu kommen — ohne diesen Wächter stünde sie als
+       Archivtext im Netz. Der Aufrufer meldet `text_generation_failed`; die
+       Oberfläche bietet „Erneut erzeugen" an (die Ablehnung hängt auch am
+       Zufall der Stichprobe), sonst schreibt der Mensch selbst. */
+    throw new Error(
+      `website text draft: meta response instead of a draft — ${text.slice(0, 200)}`,
+    );
   }
   return text;
 }
