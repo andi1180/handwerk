@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentBusiness } from "@/lib/auth/current-business";
 import { isEmailFormat } from "@/lib/settings/options";
+import { websiteTextDraftForOrder } from "@/lib/ai/website-text";
 import {
   isPositiveNumber,
   isValidWebsiteText,
@@ -10,6 +11,17 @@ import {
   normalizeWebsiteText,
   parseNumericInput,
 } from "@/lib/orders/website";
+
+/*
+ * Seit dem Textentwurf (0018) kann dieser Handler einen Modell-Aufruf enthalten
+ * (nur beim Umlegen ohne Text). Der Aufruf hat eine eigene Zeitgrenze von 30 s
+ * (lib/ai/website-text.ts); `maxDuration` liegt darüber, damit eine
+ * Zeitüberschreitung als klarer Fehlercode ankommt statt als abgeschnittene
+ * Funktion. Der Kontakt-Pfad bleibt davon unberührt und antwortet wie bisher
+ * sofort.
+ */
+export const runtime = "nodejs";
+export const maxDuration = 60;
 
 /** Trimmt einen String; leerer/Nicht-String-Wert → null (Feld entfernen erlaubt). */
 function trimmedOrNull(value: unknown): string | null {
@@ -55,8 +67,25 @@ const WEBSITE_KEYS = [
  * sichtbar ist. Das gilt auch für spätere Korrekturen (z. B. Preis ändern),
  * damit ein sichtbarer Auftrag nie mit halben Angaben dasteht.
  *
- * Die fünfte Angabe ist `website_text` („Was wurde gemacht", 0017) — der von
- * Hand geschriebene Text fürs öffentliche Archiv, Pflicht ab 80 Zeichen.
+ * Die fünfte Angabe ist `website_text` („Was wurde gemacht", 0017) — der Text
+ * fürs öffentliche Archiv, Pflicht ab 80 Zeichen.
+ *
+ * ⚠️ TEXTENTWURF (0018): Ist beim Umlegen KEIN Text da, wird einer erzeugt
+ *    (Haiku, aus den Bildunterschriften + der Annahmenotiz) und mitgespeichert;
+ *    er läuft danach durch dieselbe 80-Zeichen-Prüfung wie ein getippter Text.
+ *    Scheitert die Erzeugung, scheitert das Umlegen (502
+ *    `text_generation_failed`) — es wird KEIN leerer Text gespeichert.
+ *
+ *    Der Regelfall ist das allerdings nicht: Die Oberfläche erzeugt den Entwurf
+ *    schon beim Klick auf den Schalter (`POST …/website-text`), damit ihn
+ *    jemand ansehen kann. Hier greift die Erzeugung nur, wenn das nicht
+ *    stattgefunden hat — etwa bei einem Aufruf ohne Oberfläche.
+ *
+ *    Das Kennzeichen `website_text_ki_entwurf` wird ABGELEITET, nie übernommen:
+ *    `true` beim Erzeugen; `false`, sobald der übergebene Text vom gespeicherten
+ *    abweicht (= von Hand bearbeitet). Ein Speichern ohne Textänderung lässt es
+ *    stehen — es beantwortet „hat jemand den Text angefasst?“, nicht „hat jemand
+ *    gespeichert?“.
  *
  * ⚠️ EINWILLIGUNG (`consent_given`, Spalte aus 0001) ist Voraussetzung fürs
  *    Veröffentlichen: `website_visible = true` ohne bestätigte Einwilligung ⇒
@@ -106,14 +135,24 @@ export async function PATCH(
   // `website_visible` wird mitgeladen, weil die Sperre gegen den GESPEICHERTEN
   // Zustand prüft (nicht gegen einen Client-Wert); `consent_given`/`consent_at`
   // ebenso — der Zeitstempel darf nur beim erstmaligen Setzen entstehen.
+  // `website_text`/`website_text_ki_entwurf` tragen die Entwurfs-Logik (0018):
+  // der gespeicherte Text entscheidet, ob erzeugt werden muss und ob das
+  // Kennzeichen stehen bleibt. `item_description`/`language` sind das Material
+  // für die Erzeugung.
   const { data: order } = await supabase
     .from("orders")
-    .select("id, business_id, website_visible, consent_given, consent_at")
+    .select(
+      "id, business_id, item_description, language, website_visible, website_text, website_text_ki_entwurf, consent_given, consent_at",
+    )
     .eq("id", orderId)
     .maybeSingle<{
       id: string;
       business_id: string;
+      item_description: string | null;
+      language: string;
       website_visible: boolean;
+      website_text: string | null;
+      website_text_ki_entwurf: boolean;
       consent_given: boolean;
       consent_at: string | null;
     }>();
@@ -139,6 +178,7 @@ export async function PATCH(
     website_work_hours?: number;
     website_price?: number;
     website_text?: string;
+    website_text_ki_entwurf?: boolean;
     consent_given?: boolean;
     consent_at?: string | null;
   } = {};
@@ -235,10 +275,47 @@ export async function PATCH(
         );
       }
 
-      // „Was wurde gemacht" (0017): Pflicht ab 80 Zeichen getrimmt. Der erste
-      // Satz wird drüben zur Bildunterschrift — deshalb die Untergrenze, nicht
-      // bloß „nicht leer". Begründung im Kopf von lib/orders/website.ts.
-      const websiteText = payload.website_text;
+      /* „Was wurde gemacht" (0017): Pflicht ab 80 Zeichen getrimmt. Der erste
+         Satz wird drüben zur Bildunterschrift — deshalb die Untergrenze, nicht
+         bloß „nicht leer". Begründung im Kopf von lib/orders/website.ts.
+
+         Erst wird bestimmt, welcher Text überhaupt gemeint ist: der aus dem
+         Body, wenn einer mitkam — sonst der gespeicherte. Ein PATCH, das nur
+         den Preis korrigiert und `website_text` gar nicht mitschickt, darf
+         weder eine Erzeugung auslösen noch den vorhandenen Text verlieren. */
+      const textImBody = "website_text" in payload;
+      const vorhandenerText = textImBody
+        ? payload.website_text
+        : order.website_text;
+      const hatText =
+        typeof vorhandenerText === "string" &&
+        vorhandenerText.trim().length > 0;
+
+      /* Kein Text ⇒ einen erzeugen (0018). Steht bewusst NACH den vier
+         Angaben oben und nach der Einwilligung: Ein unvollständiges Formular
+         soll keinen Modell-Aufruf kosten. Und vor der 80-Zeichen-Prüfung, denn
+         der Entwurf muss durch dieselbe Prüfung wie ein getippter Text. */
+      let websiteText: unknown = vorhandenerText;
+      let erzeugt = false;
+      if (!hatText) {
+        try {
+          websiteText = await websiteTextDraftForOrder(supabase, order);
+          erzeugt = true;
+        } catch (err) {
+          console.error(
+            `[order PATCH] text_generation_failed (order ${orderId}):`,
+            err,
+          );
+          /* 502 und nicht 500: Gescheitert ist der Aufruf beim Modell-Anbieter,
+             nicht etwas bei uns. Das Umlegen scheitert damit vollständig —
+             gespeichert wird NICHTS, insbesondere kein leerer Text. */
+          return NextResponse.json(
+            { error: "text_generation_failed" },
+            { status: 502 },
+          );
+        }
+      }
+
       if (!isValidWebsiteText(websiteText)) {
         return NextResponse.json(
           { error: "invalid_website_text" },
@@ -253,6 +330,22 @@ export async function PATCH(
       updates.website_price = price;
       // Getrimmt speichern: genau diese Fassung wurde geprüft.
       updates.website_text = normalizeWebsiteText(websiteText);
+
+      /* Kennzeichen „unbearbeiteter KI-Entwurf" (0018) — ABGELEITET, nie aus
+         dem Body übernommen. Drei Fälle:
+           · gerade erzeugt              ⇒ true.
+           · Text kam mit dem Body       ⇒ true nur, wenn er BUCHSTÄBLICH dem
+                                           gespeicherten Entwurf entspricht;
+                                           jede Änderung ⇒ false.
+           · Text kam nicht mit          ⇒ gar nicht anfassen (niemand hat ihn
+                                           angesehen, also ändert sich nichts). */
+      if (erzeugt) {
+        updates.website_text_ki_entwurf = true;
+      } else if (textImBody) {
+        updates.website_text_ki_entwurf =
+          order.website_text_ki_entwurf &&
+          updates.website_text === order.website_text;
+      }
     } else {
       // Nicht sichtbar (war es auch vorher nicht — sonst hätte die Sperre oben
       // gegriffen): nur das Flag schreiben. Etwaige Altwerte in den fünf
@@ -272,7 +365,7 @@ export async function PATCH(
     .eq("id", order.id)
     .eq("business_id", order.business_id)
     .select(
-      "customer_email, customer_phone, website_visible, website_category, website_clothing_type, website_work_hours, website_price, website_text, consent_given, consent_at",
+      "customer_email, customer_phone, website_visible, website_category, website_clothing_type, website_work_hours, website_price, website_text, website_text_ki_entwurf, consent_given, consent_at",
     )
     .single<{
       customer_email: string | null;
@@ -283,6 +376,7 @@ export async function PATCH(
       website_work_hours: number | null;
       website_price: number | null;
       website_text: string | null;
+      website_text_ki_entwurf: boolean;
       consent_given: boolean;
       consent_at: string | null;
     }>();

@@ -527,6 +527,16 @@ export const de = {
       "Bitte beschreiben, was gemacht wurde — mindestens 80 Zeichen, zwei bis drei Sätze.",
     // Zähler unter dem Textfeld — erscheint nur, solange der Text zu kurz ist.
     textCounter: "Noch {fehlend} Zeichen ({laenge}/{min}).",
+    // Textentwurf (Migration 0018). Der Hinweis steht am Feld, solange die
+    // Anfrage läuft; das Feld ist dabei gesperrt.
+    textGenerating: "Text wird erzeugt …",
+    // Kennzeichen neben der Feldbeschriftung, solange der Entwurf unverändert
+    // ist. Verschwindet, sobald jemand ein Zeichen ändert — es beantwortet
+    // „hat das schon jemand angesehen?".
+    kiDraftBadge: "KI-Entwurf, ungeprüft",
+    textRetry: "Erneut erzeugen",
+    errTextGeneration:
+      "Der Textentwurf konnte nicht erzeugt werden. Bitte erneut versuchen oder den Text selbst schreiben.",
     errConsent:
       "Ohne bestätigte Einwilligung kann der Auftrag nicht auf der Website erscheinen.",
     errLocked:

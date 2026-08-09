@@ -37,11 +37,14 @@ export type OrderDetail = {
   website_clothing_type: string | null;
   website_work_hours: number | null;
   website_price: number | null;
-  /* „Was wurde gemacht" — von Hand geschrieben (Migration 0017). Pflicht ab 80
-     Zeichen, sobald sichtbar. NICHT `item_description`: das ist die
-     Annahmenotiz vom Tresen (Maße, Kürzel) und taugt nachweislich nicht als
-     Textquelle. */
+  /* „Was wurde gemacht" (Migration 0017). Pflicht ab 80 Zeichen, sobald
+     sichtbar. NICHT `item_description`: das ist die Annahmenotiz vom Tresen
+     (Maße, Kürzel) und taugt nachweislich nicht als Textquelle. */
   website_text: string | null;
+  /* true, solange `website_text` ein UNBEARBEITETER KI-Entwurf ist (0018) —
+     abgeleitet im Route Handler, nie von Hand gesetzt. Die Detailseite zeigt
+     dafür das Kennzeichen „KI-Entwurf, ungeprüft" am Textfeld. */
+  website_text_ki_entwurf: boolean;
   /* Einwilligung des Kunden in die Veröffentlichung (Spalten aus 0001).
      Grundlage ist das unterschriebene Formular an der Kassa — hier wird nur
      festgehalten, DASS es vorliegt, und wann das eingetragen wurde.
@@ -76,7 +79,7 @@ export async function getOrderById(id: string): Promise<OrderDetail | null> {
   const { data } = await supabase
     .from("orders")
     .select(
-      "id, business_id, customer_name, customer_email, customer_phone, external_ref, item_description, status, created_at, website_visible, website_category, website_clothing_type, website_work_hours, website_price, website_text, consent_given, consent_at",
+      "id, business_id, customer_name, customer_email, customer_phone, external_ref, item_description, status, created_at, website_visible, website_category, website_clothing_type, website_work_hours, website_price, website_text, website_text_ki_entwurf, consent_given, consent_at",
     )
     .eq("id", id)
     .maybeSingle<OrderDetail>();

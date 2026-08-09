@@ -463,6 +463,7 @@ export default async function OrderDetailPage({
         initialWorkHours={order.website_work_hours}
         initialPrice={order.website_price}
         initialText={order.website_text}
+        initialKiDraft={order.website_text_ki_entwurf}
         initialConsent={order.consent_given}
         initialConsentAt={order.consent_at}
       />
