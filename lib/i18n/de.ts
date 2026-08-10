@@ -511,7 +511,7 @@ export const de = {
     // Fehler — spiegeln die Server-Codes.
     errCategory: "Bitte eine Website-Kategorie wählen.",
     errClothingType: "Bitte eine Kleidungsart wählen.",
-    errWorkHours: "Bitte eine Arbeitszeit größer als 0 angeben.",
+    errWorkHours: "Bitte eine Arbeitszeit von 0 oder mehr angeben.",
     errPrice: "Bitte einen Preis größer als 0 angeben.",
     // Nennt die Zahl, weil „zu kurz" allein niemandem sagt, wie viel fehlt.
     errText:
