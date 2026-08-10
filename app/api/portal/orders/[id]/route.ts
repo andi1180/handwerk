@@ -4,7 +4,6 @@ import { getCurrentBusiness } from "@/lib/auth/current-business";
 import { isEmailFormat } from "@/lib/settings/options";
 import { websiteTextDraftForOrder } from "@/lib/ai/website-text";
 import {
-  isNonNegativeNumber,
   isPositiveNumber,
   isValidWebsiteText,
   isWebsiteCategory,
@@ -295,9 +294,8 @@ export async function PATCH(
       }
 
       // Zahlenfelder: Komma-Dezimaltrenner erlaubt; leer/ungültig ⇒ null ⇒ 400.
-      // Arbeitszeit darf 0 sein (heißt „nicht anzeigen"), Preis nicht.
       const workHours = parseNumericInput(payload.website_work_hours);
-      if (!isNonNegativeNumber(workHours)) {
+      if (!isPositiveNumber(workHours)) {
         return NextResponse.json(
           { error: "invalid_website_work_hours" },
           { status: 400 },

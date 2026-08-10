@@ -82,33 +82,16 @@ export function isWebsiteClothingType(
    ───────────────────────────────────────────────────────────────────────── */
 
 /**
- * Prüft einen Preis-Wert: endliche Zahl > 0.
+ * Prüft einen Arbeitszeit-/Preis-Wert: endliche Zahl > 0.
  *
- * `> 0`, weil die Website `preis_cent check (> 0)` führt — eine Zeile mit
- * Preis 0 wäre dort nicht anlegbar. Die Regel gilt nur, WENN
- * `website_visible = true`; in der DB steht die Spalte ohne CHECK
+ * `> 0` und nicht `>= 0`, weil die Website beide Größen so führt
+ * (`stunden numeric(6,1) check (stunden > 0)`, `preis_cent check (> 0)`) —
+ * eine Zeile mit 0 wäre dort nicht anlegbar. Die Regel gilt nur, WENN
+ * `website_visible = true`; in der DB stehen die Spalten ohne CHECK
  * (Begründung im Kopf von Migration 0015).
- *
- * Für Arbeitszeit gilt seit dem 10.08.2026 eine andere Grenze — siehe
- * `isNonNegativeNumber`.
  */
 export function isPositiveNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && value > 0;
-}
-
-/**
- * Prüft einen Arbeitszeit-Wert: endliche Zahl >= 0.
- *
- * Anders als bei Preis ist hier `0` gültig (Auftrag Andreas, 10.08.2026):
- * `stunden = 0` heißt auf der Website „nicht anzeigen", nicht „unbrauchbare
- * Angabe" — die Website selbst blendet den Arbeitszeit-Absatz dann aus,
- * anstatt den Wert abzulehnen (atelier-dax-web, Migration 0039, CHECK dort
- * auf `stunden >= 0` gelockert). Negative Werte bleiben ungültig. Die Regel
- * gilt nur, WENN `website_visible = true`; in der DB steht die Spalte ohne
- * CHECK (Begründung im Kopf von Migration 0015).
- */
-export function isNonNegativeNumber(value: unknown): value is number {
-  return typeof value === "number" && Number.isFinite(value) && value >= 0;
 }
 
 /**

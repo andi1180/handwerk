@@ -8,7 +8,6 @@ import {
   WEBSITE_CATEGORIES,
   WEBSITE_CLOTHING_TYPES,
   WEBSITE_TEXT_MIN_LENGTH,
-  isNonNegativeNumber,
   isPositiveNumber,
   isValidWebsiteText,
   isWebsiteCategory,
@@ -194,7 +193,7 @@ export function WebsitePublication({
       return;
     }
     const hours = parseNumericInput(workHours);
-    if (!isNonNegativeNumber(hours)) {
+    if (!isPositiveNumber(hours)) {
       setError(t(DEFAULT_LOCALE, "website.errWorkHours"));
       return;
     }
