@@ -274,6 +274,14 @@
   text-shadow: 0 1px 12px rgba(0, 0, 0, 0.4);
 }
 
+/* Trägt die Seite das Bewertungs-Sheet (Kunden-Sicht + hinterlegte
+   Google-Review-URL), reserviert das Outro unten Platz für dessen minimierte
+   Leiste — sonst verdeckte sie die Kontakt-Pills. Serverseitig gesetzt
+   (page.tsx), damit es beim Hydrieren nicht springt. */
+.booklet-content--review-sheet {
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 40px + 62px);
+}
+
 /* FIX 2b: im Outro Logo etwas kleiner + engere Abstände, damit die Teilen-
    Sektion + Kontakt-Pills ohne Scrollen auf einen Mobile-Screen passen
    (Intro-Logo bleibt unverändert groß). */
@@ -532,28 +540,90 @@
   pointer-events: none;
 }
 
+/* Abdunklung NUR optisch: `pointer-events: none`, damit die Seite bedienbar
+   bleibt (Teilen-Buttons/Kontakt-Links funktionieren normal und minimieren das
+   Sheet zusätzlich über den Außenklick-Listener in review-popup.tsx). Im
+   minimierten Zustand ist sie ganz weg. */
 .booklet-review-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 70;
-  background: rgba(0, 0, 0, 0.6);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
-  padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px));
+  z-index: 69;
+  background: rgba(0, 0, 0, 0.55);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.28s ease;
+}
+.booklet-review-backdrop[data-open="true"] {
+  opacity: 1;
 }
 
-.booklet-review-popup {
+/* Das Sheet selbst: fährt von unten herein und bleibt danach dauerhaft am
+   unteren Rand — entweder aufgeklappt (Panel) oder als schmale Leiste. Es wird
+   nie unmountet; `data-state` steuert nur die Position. Breite folgt der
+   Booklet-Spalte (Desktop: zentrierte 480px). */
+.booklet-review-sheet {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 70;
+  max-width: 480px;
+  margin: 0 auto;
+  transform: translateY(110%);
+  visibility: hidden;
+  transition:
+    transform 0.32s cubic-bezier(0.22, 0.61, 0.36, 1),
+    visibility 0.32s;
+}
+.booklet-review-sheet[data-state="open"],
+.booklet-review-sheet[data-state="minimized"] {
+  transform: translateY(0);
+  visibility: visible;
+}
+
+/* Aufgeklappt: Wortmarke, Sterne, Satz, Aktion, „Abbrechen". */
+.booklet-review-panel {
   width: 100%;
-  max-width: 330px;
-  padding: 20px 20px 16px;
+  padding: 18px 20px calc(14px + env(safe-area-inset-bottom, 0px));
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 10px;
   text-align: center;
   color: var(--share-ink);
+  border-radius: 18px 18px 0 0;
+}
+
+/* Minimiert: schmale Leiste über die volle Breite — Sterne (im aktuellen
+   Auswahlzustand) + Hinweis zum Aufklappen. Antippen öffnet wieder. */
+.booklet-review-bar {
+  width: 100%;
+  min-height: 56px;
+  padding: 7px 16px calc(7px + env(safe-area-inset-bottom, 0px));
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  color: var(--share-ink);
+  border-radius: 16px 16px 0 0;
+  cursor: pointer;
+  user-select: none;
+}
+
+.booklet-review-bar-stars {
+  display: flex;
+  gap: 2px;
+}
+
+.booklet-review-bar-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--share-ink-soft);
 }
 
 /* Farbiger „Google"-Wortmarken-Schriftzug (kein offizielles Logo-Asset). */
@@ -677,6 +747,13 @@
   .booklet-review-sticky[data-visible="true"] {
     transform: translate(-50%, 0);
     transition: opacity 0.22s ease;
+  }
+  /* Sheet erscheint/verschwindet ohne Slide (Position bleibt im transform). */
+  .booklet-review-sheet {
+    transition: visibility 0s;
+  }
+  .booklet-review-backdrop {
+    transition: none;
   }
 }
 

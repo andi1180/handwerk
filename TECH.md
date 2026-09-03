@@ -3544,11 +3544,13 @@ Muster wie `.media-tile-delete` im Portal). i18n `booklet.videoPlay`/`videoPause
 
 ---
 
-## Bewertungs-Popup auf der letzten Booklet-Seite (ersetzt den Google-Button)
+## Bewertungs-Sheet auf der letzten Booklet-Seite (ersetzt den Google-Button)
 
 Der Google-Bewertungs-Button in der Teilen-Sektion des Outros (9b / Block A /
-Punkt 9) ist **entfernt**; an seine Stelle tritt ein **zentriertes Popup**, das
-auf der letzten Seite nach kurzer Verweildauer von selbst aufgeht. **Reine
+Punkt 9) ist **entfernt**; an seine Stelle tritt ein **Bottom-Sheet**, das auf
+der letzten Seite nach kurzer Verweildauer von unten hereinfährt. Es
+**verschwindet nie ganz**: Abbrechen/Wegtippen **minimiert** es zu einer
+schmalen Leiste am unteren Rand, die jederzeit wieder aufklappt. **Reine
 Frontend-Änderung + i18n** — keine Migration, kein Eingriff in den Event-Endpoint
 ([app/api/b/[token]/event/route.ts](app/api/b/[token]/event/route.ts)), die
 Taxonomie ([lib/booklet/events.ts](lib/booklet/events.ts)), den Lader
@@ -3565,11 +3567,46 @@ Outro-Sektion selbst: die Outro-Sektion darf über `100dvh` hinauswachsen (§9a)
 ein `threshold` auf ihr träfe dann nie zuverlässig.
 
 Ist der Sentinel zu ≥ 50 % sichtbar, startet ein Timer von **1000 ms**; wird
-vorher weggescrollt, verfällt er. Danach öffnet das Popup **einmal pro
-Seitenaufruf** (`shownRef`, Observer trennt sich) — einmal geschlossen
-(Abbrechen / Tap auf den abgedunkelten Hintergrund / Escape), bleibt es zu.
+vorher weggescrollt, verfällt er. Danach klappt das Sheet auf. Der
+**automatische** Trigger feuert **einmal pro Seitenaufruf** (`autoShownRef`,
+Observer trennt sich danach) — der Minimieren-/Wieder-Öffnen-Zyklus ist davon
+unabhängig und beliebig oft möglich.
 
-### Inhalt (Reihenfolge)
+### Drei Zustände (`data-state` am Sheet)
+
+Das Sheet wird **nie unmountet**; `data-state` steuert nur seine Position
+(`transform: translateY(...)` + `visibility`, CSS-Transition):
+
+| Zustand | Darstellung |
+| --- | --- |
+| `hidden` | vor dem Auslösen — unter dem unteren Rand geparkt, `visibility: hidden` (nicht fokussierbar) |
+| `open` | volles Sheet: Wortmarke, 5 Sterne, emotionaler Satz, „Bewertung abgeben", Hinweis, „Abbrechen" |
+| `minimized` | schmale Leiste (`min-height: 56px`, volle Breite) mit den 5 Sternen **im aktuellen Auswahlzustand** + Pfeil nach oben und `review.minimizedHint` |
+
+**Minimieren statt Schließen** löst aus: „Abbrechen", **Escape** und **jeder
+Klick außerhalb des Sheets**. Letzteres deckt bewusst auch die
+**Teilen-Buttons** und die **Kontakt-Links** (E-Mail/Tel/Website) ab: der
+Listener hängt am **Dokument** (`pointerdown`, capture) und **greift nicht ein**
+— weder `preventDefault` noch `stopPropagation` — die eigentliche Aktion läuft
+also ganz normal, das Sheet minimiert **zusätzlich**. Genau deshalb ist die
+Abdunklung **rein optisch** (`pointer-events: none`) und blockiert nichts; im
+minimierten Zustand ist sie ganz weg (`data-open="false"` ⇒ `opacity: 0`).
+
+**Wieder aufklappen:** Tap auf die Leiste (`role="button"` + Enter/Space).
+Trifft der Tap dabei direkt einen **Stern**, wird diese Sternezahl übernommen
+und ist im aufgeklappten Sheet bereits vorausgewählt (`stopPropagation` am
+Stern, danach `expand()`) — **kein Reset** des `rating`-State beim
+Minimieren/Öffnen.
+
+**Platz für die Leiste:** die minimierte Leiste ist `position: fixed` und läge
+sonst über den Kontakt-Pills. Das Outro reserviert deshalb unten Platz —
+[page.tsx](app/b/[token]/page.tsx) setzt auf `.booklet-content` zusätzlich
+`booklet-content--review-sheet` (Bedingung **identisch** zum `<ReviewPopup>`-
+Render: Kunden-Sicht **und** hinterlegte `google_review_url`), die Klasse erhöht
+`padding-bottom` um die Leistenhöhe. Serverseitig gesetzt ⇒ **kein Sprung beim
+Hydrieren**.
+
+### Inhalt des aufgeklappten Sheets (Reihenfolge)
 
 1. **Google-Wortmarke** — `GoogleWordmark` **exakt** aus dem früheren Button
    übernommen (G blau, o rot, o gelb, g blau, l grün, e rot; pro Buchstabe ein
@@ -3584,16 +3621,19 @@ Seitenaufruf** (`shownRef`, Observer trennt sich) — einmal geschlossen
    Zwischenablage (`writeToClipboard`, Dokument noch fokussiert ⇒ zuverlässig)
    und öffnet **denselben** `google_review_url` wie zuvor der Button im neuen Tab
    (`window.open(..., "_blank", "noopener,noreferrer")`, Protokoll-Guard).
-6. **„Abbrechen"** als reiner Text/Link (kein Button-Look) schließt.
-7. **Tap auf den Hintergrund** schließt ebenfalls (Escape zusätzlich).
+6. **„Abbrechen"** als reiner Text/Link (kein Button-Look) **minimiert**
+   (schließt nicht).
+7. Nach „Bewertung abgeben" minimiert das Sheet ebenfalls; hat der Entwurf die
+   Zwischenablage erreicht, zeigt die Leiste `review.copied` statt des
+   Aufklapp-Hinweises.
 
 ### Sternezahl wird NICHT an Google übergeben (bewusste Entscheidung)
 
 Google hat die **URL-Vorbefüllung** von Bewertungen unterbunden; es gibt keinen
-zuverlässigen, dauerhaften Weg, eine im Popup gewählte Sternezahl in das
+zuverlässigen, dauerhaften Weg, eine im Sheet gewählte Sternezahl in das
 Google-Formular zu tragen. Der Link öffnet deshalb die **normale**
 Bewertungsseite, auf der der Nutzer die Sterne selbst noch einmal vergibt — die
-Sterne im Popup sind eine **Geste**, kein Datenkanal.
+Sterne im Sheet sind eine **Geste**, kein Datenkanal.
 
 Daraus folgt (§8.6 / Google-ToS, **PFLICHT**): das Verhalten ist bei **jeder**
 Sternezahl **identisch** — 1 Stern öffnet exakt denselben Link wie 5, es gibt
@@ -3606,7 +3646,7 @@ gekoppelt.
 
 ### Sichtbarkeit (§9d unverändert)
 
-Das Popup wird — wie die Teilen-Sektion — **nur in der Kunden-Sicht** (`?c=1`)
+Das Sheet wird — wie die Teilen-Sektion — **nur in der Kunden-Sicht** (`?c=1`)
 gerendert; Empfänger eines geteilten (nackten) Links bekommen **keinen**
 Bewertungs-Prompt. Zusätzlich nur, wenn der Betrieb eine `google_review_url`
 hinterlegt hat.
@@ -3632,13 +3672,17 @@ hinterlegt hat.
   Webviews) 1:1 aus `share-bar.tsx` verschoben — beide Konsumenten (Teilen-Sektion
   und Popup) nutzen jetzt **eine** Quelle, nichts dupliziert.
 - [booklet.css](app/b/[token]/booklet.css): `.booklet-review`/`.booklet-review-btn`
-  raus, `.booklet-review-sentinel`/`-backdrop`/`-popup`/`-brand`/`-stars`/
-  `.booklet-star`/`-emotional`/`-submit`/`-cancel` neu; `.booklet-google` und
-  `.booklet-review-hint` bleiben (vom Popup genutzt). Optik folgt dem Overlay-
-  Muster des Portals (`.biz-reel-backdrop`/`.biz-reel-popup`), nutzt aber die
-  Booklet-Tokens (frosted Karte `.booklet-frost`, dunkle Schrift).
+  raus; neu `.booklet-review-sentinel`/`-backdrop`/`-sheet`/`-panel`/`-bar`/
+  `-bar-stars`/`-bar-hint`/`-brand`/`-stars`/`.booklet-star`/`-emotional`/
+  `-submit`/`-cancel` sowie `.booklet-content--review-sheet` (Platzreservierung
+  im Outro). `.booklet-google` und `.booklet-review-hint` bleiben. Panel **und**
+  Leiste nutzen die frosted Karte `.booklet-frost` (dunkle Schrift), oben
+  abgerundet; das Sheet ist auf `max-width: 480px` zentriert und folgt damit der
+  Booklet-Spalte am Desktop. `prefers-reduced-motion` schaltet Slide-Transition
+  und Backdrop-Blende ab (das Sheet erscheint dann ohne Bewegung).
 - i18n `review.*`: `button` entfernt; `dialogLabel`/`starsLabel`/`starLabel`/
-  `emotional`/`submit`/`cancel` neu; `hint`/`copied` unverändert.
+  `emotional`/`submit`/`cancel`/`minimizedHint`/`minimizedAria` neu;
+  `hint`/`copied` unverändert.
 
 `pnpm typecheck` + `pnpm build` grün.
 
@@ -3646,7 +3690,7 @@ hinterlegt hat.
 
 ## Sticky „Auf Google bewerten" auf den Medien-Seiten ([app/b/[token]/review-sticky-button.tsx](app/b/[token]/review-sticky-button.tsx))
 
-Ergänzt das Bewertungs-Popup um einen **zweiten, dezenten Einstieg**: Das Popup
+Ergänzt das Bewertungs-Sheet um einen **zweiten, dezenten Einstieg**: Das Sheet
 kommt erst auf der letzten Seite — wer nach einer Medien-Seite abbricht, hätte es
 nie gesehen. Der sticky Button läuft deshalb über die **Medien-Seiten** mit.
 Beide Einstiege teilen sich Aktion und Tracking (s. „Geteilte Klick-Aktion").
@@ -3655,14 +3699,14 @@ Beide Einstiege teilen sich Aktion und Tracking (s. „Geteilte Klick-Aktion").
 
 Ein `IntersectionObserver` mit `root = .booklet-scroll` beobachtet **alle**
 `.booklet-section--media`-Sektionen — dasselbe Sichtbarkeits-Muster wie
-Video-Autoplay und Popup, damit sich im Scroll-Snap-Container alles gleich
+Video-Autoplay und Sheet, damit sich im Scroll-Snap-Container alles gleich
 verhält. Sichtbar ist der Button genau dann, wenn mindestens eine Medien-Sektion
 zu ≥ `VISIBLE_RATIO` (0.5) im Bild liegt; ein `Set` der gerade sichtbaren
 Sektionen fängt den Übergang zwischen zwei Seiten ab (kein Flackern beim Snap).
 
 **Intro und Outro tragen die Klasse `booklet-section--media` nicht** ⇒ dort
 erscheint er nie. Das ist die ganze Ausschluss-Logik — vorne wäre er aufdringlich
-(der erste Eindruck gehört dem Booklet), hinten übernimmt das Popup. Ein Booklet
+(der erste Eindruck gehört dem Booklet), hinten übernimmt das Sheet. Ein Booklet
 ohne Medien (nur Intro + Outro) hat nichts zu beobachten; der Effect steigt früh
 aus, der Button bleibt unsichtbar.
 
@@ -3693,10 +3737,10 @@ weg (der `translate(-50%, …)`-Anteil bleibt, sonst wäre die Zentrierung hin).
 
 ### Geteilte Klick-Aktion ([lib/booklet/review-action.ts](lib/booklet/review-action.ts))
 
-Popup **und** Sticky-Button rufen dasselbe `submitGoogleReview({ token,
+Sheet **und** Sticky-Button rufen dasselbe `submitGoogleReview({ token,
 reviewDraft, googleReviewUrl })` — bewusst **eine** Quelle: Zwei Einstiege, die
 auseinanderdriften, würden auch Tracking und die §8.6-Zusagen auseinanderlaufen
-lassen. Die Reihenfolge ist unverändert aus dem Popup übernommen und Absicht:
+lassen. Die Reihenfolge ist unverändert aus dem Sheet übernommen und Absicht:
 **erst** das Event `link_click/review`, **dann** der Entwurf in die Zwischenablage
 (solange das Dokument noch fokussiert ist), **erst dann** `window.open` aufs
 Google-Profil. Umgekehrt verlöre die Seite den Fokus, bevor das Kopieren durch
@@ -3711,16 +3755,16 @@ Rückmeldung aus, statt etwas Falsches zu versprechen.
 identischer Link für alle, Vorschlag-Charakter des Entwurfs, **niemals** an eine
 Belohnung gekoppelt.
 
-### Sichtbarkeits-Gates (§9d, wie beim Popup)
+### Sichtbarkeits-Gates (§9d, wie beim Sheet)
 
 Gerendert wird der Button in [page.tsx](app/b/[token]/page.tsx) nur, wenn
 **beides** zutrifft: **Kunden-Sicht** (`?c=1`, `isCustomerViewParam`) **und**
 `settings.google_review_url` gesetzt. Empfänger eines geteilten (nackten) Links
-bekommen also weder Popup noch Sticky-Button; ein Betrieb ohne hinterlegte
+bekommen also weder Sheet noch Sticky-Button; ein Betrieb ohne hinterlegte
 Review-URL ebenfalls nicht.
 
 ### i18n
 
 `review.stickyLabel` (Button-Text neben der Wortmarke), `review.stickyAria`
 (zugängliches Label — die Wortmarke ist `aria-hidden`); `review.copied` wird mit
-dem Popup geteilt.
+dem Sheet geteilt.

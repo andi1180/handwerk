@@ -271,6 +271,11 @@ function OutroSection({
 }) {
   const { contact_email, contact_phone, website_url } = data.settings;
   const hasContact = Boolean(contact_email || contact_phone || website_url);
+  /* Bewertungs-Sheet bleibt nach dem Minimieren als schmale Leiste am unteren
+     Rand stehen — dafür reserviert das Outro unten Platz (sonst verdeckte sie
+     die Kontakt-Pills). Gleiche Bedingung wie der <ReviewPopup>-Render unten. */
+  const hasReviewSheet =
+    isCustomerView && Boolean(data.settings.google_review_url);
 
   return (
     <section className="booklet-section booklet-section--outro">
@@ -281,7 +286,13 @@ function OutroSection({
       )}
       <div className="booklet-scrim" aria-hidden />
 
-      <div className="booklet-content">
+      <div
+        className={
+          hasReviewSheet
+            ? "booklet-content booklet-content--review-sheet"
+            : "booklet-content"
+        }
+      >
         {data.logoUrl ? (
           <img
             className="booklet-logo"

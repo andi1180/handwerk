@@ -416,12 +416,14 @@ export const de = {
     message: "Ein kleines Booklet zu meiner Maßarbeit – schau mal rein",
   },
   review: {
-    // Bewertungs-POPUP auf der letzten Booklet-Seite (review-popup.tsx).
+    // Bewertungs-SHEET auf der letzten Booklet-Seite (review-popup.tsx):
+    // fährt von unten herein und minimiert zu einer schmalen Leiste (statt zu
+    // schließen).
     // §8.6-PFLICHT: Vorschlag-Charakter („Textvorschlag (KI)") — der Kunde fügt
     // ihn ins Google-Feld ein und kann ihn dort frei anpassen; NIEMALS an eine
-    // Belohnung gekoppelt. Die Sterne im Popup sind reine Geste: sie werden NICHT
+    // Belohnung gekoppelt. Die Sterne im Sheet sind reine Geste: sie werden NICHT
     // an Google übergeben und ändern das Verhalten nicht (kein Gating).
-    // „Google" trägt im Popup der farbige Wortmarken-Schriftzug, daher hier ohne.
+    // „Google" trägt im Sheet der farbige Wortmarken-Schriftzug, daher hier ohne.
     dialogLabel: "Bewertung abgeben",
     starsLabel: "Sterne",
     starLabel: "{n} von 5 Sternen",
@@ -429,7 +431,11 @@ export const de = {
     emotional:
       "Wir leben von Weiterempfehlungen, nicht von Werbung — deine Bewertung hilft echtem Handwerk.",
     submit: "Bewertung abgeben",
+    // „Abbrechen" schließt das Sheet nicht, es minimiert es zur unteren Leiste.
     cancel: "Abbrechen",
+    // Minimierte Leiste am unteren Rand (Sterne + Hinweis zum Aufklappen).
+    minimizedHint: "Tippen zum Bewerten",
+    minimizedAria: "Bewertung öffnen",
     hint: "Textvorschlag (KI) im Clipboard abgelegt - bei Google ins Textfeld tippen und einfügen/paste wählen.",
     copied: "✓ Entwurf kopiert",
     // Sticky-Button auf den Medien-Seiten (review-sticky-button.tsx): das Wort
