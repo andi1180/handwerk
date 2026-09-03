@@ -1028,7 +1028,9 @@ sprachfertig aus der DB. Nur feste Labels neu: Block `booklet.*`
 
 ### Deferred
 
-- **Auto-Play-Video on-scroll** (IntersectionObserver) — spätere Politur.
+- ~~**Auto-Play-Video on-scroll** (IntersectionObserver) — spätere Politur.~~
+  **Inzwischen umgesetzt** — s. Abschnitt „Video-Autoplay in der öffentlichen
+  Web-Story" ([booklet-video.tsx](app/b/[token]/booklet-video.tsx)) weiter unten.
 - **View-/Engagement-Tracking** (`booklet_events`, `viewed_at`) — Step 9/10.
 - **Slot-Editor** (pro-Item-Hintergründe/Feinlayout) — nach Step 8.
 
@@ -3615,6 +3617,15 @@ hinterlegt hat.
   `reviewHref`, `GoogleWordmark` und die Props `reviewDraft`/`googleReviewUrl`
   entfernt; `CopiedKey` (`"link" | "review"`) fällt weg → wieder ein einfaches
   `copied`-Boolean. Die beiden Teilen-Aktionen sind **unverändert**.
+- **`GoogleWordmark` ist jetzt eine eigene Datei**
+  [app/b/[token]/google-wordmark.tsx](app/b/[token]/google-wordmark.tsx) — beim
+  Ausbau aus `share-bar.tsx` nicht gelöscht, sondern **verschoben**, weil sie ab
+  jetzt **zwei** Konsumenten hat: das Bewertungs-Popup (letzte Seite) und den
+  sticky Bewertungs-Button (Medien-Seiten, s. nächster Abschnitt). Eine Quelle
+  statt zweier Kopien — die Wortmarke muss an beiden Einstiegen identisch
+  aussehen. Rein dekorativ (`aria-hidden`), die aufrufende Schaltfläche trägt
+  das zugängliche Label; optionales `className` (das Popup setzt
+  `booklet-review-brand`, der Sticky-Button nutzt den Default).
 - **Geteilter Clipboard-Helfer** [lib/share/clipboard.ts](lib/share/clipboard.ts)
   (NEU, plain-TS, SSR-sicher, Muster wie [file-share.ts](lib/share/file-share.ts)):
   `writeToClipboard` (moderne API + Legacy-`execCommand`-Fallback für In-App-
@@ -3630,3 +3641,86 @@ hinterlegt hat.
   `emotional`/`submit`/`cancel` neu; `hint`/`copied` unverändert.
 
 `pnpm typecheck` + `pnpm build` grün.
+
+---
+
+## Sticky „Auf Google bewerten" auf den Medien-Seiten ([app/b/[token]/review-sticky-button.tsx](app/b/[token]/review-sticky-button.tsx))
+
+Ergänzt das Bewertungs-Popup um einen **zweiten, dezenten Einstieg**: Das Popup
+kommt erst auf der letzten Seite — wer nach einer Medien-Seite abbricht, hätte es
+nie gesehen. Der sticky Button läuft deshalb über die **Medien-Seiten** mit.
+Beide Einstiege teilen sich Aktion und Tracking (s. „Geteilte Klick-Aktion").
+
+### Sichtbarkeit: Seite 2 bis vorletzte Seite
+
+Ein `IntersectionObserver` mit `root = .booklet-scroll` beobachtet **alle**
+`.booklet-section--media`-Sektionen — dasselbe Sichtbarkeits-Muster wie
+Video-Autoplay und Popup, damit sich im Scroll-Snap-Container alles gleich
+verhält. Sichtbar ist der Button genau dann, wenn mindestens eine Medien-Sektion
+zu ≥ `VISIBLE_RATIO` (0.5) im Bild liegt; ein `Set` der gerade sichtbaren
+Sektionen fängt den Übergang zwischen zwei Seiten ab (kein Flackern beim Snap).
+
+**Intro und Outro tragen die Klasse `booklet-section--media` nicht** ⇒ dort
+erscheint er nie. Das ist die ganze Ausschluss-Logik — vorne wäre er aufdringlich
+(der erste Eindruck gehört dem Booklet), hinten übernimmt das Popup. Ein Booklet
+ohne Medien (nur Intro + Outro) hat nichts zu beobachten; der Effect steigt früh
+aus, der Button bleibt unsichtbar.
+
+Unsichtbar heißt auch **unklickbar**: `data-visible="false"` setzt
+`pointer-events: none`, dazu `aria-hidden` und `tabIndex={-1}`. Das Element
+bleibt montiert, damit der Ein-/Ausblend-Übergang läuft.
+
+### Positionierung ([booklet.css](app/b/[token]/booklet.css): `.booklet-review-sticky`)
+
+`position: fixed`, **oben mittig** (`top: calc(env(safe-area-inset-top) + 14px)`,
+`left: 50%` + `translate(-50%, …)`, `z-index: 15`). Oben statt unten, damit der
+Scroll-Hinweis auf die nächste Seite frei bleibt.
+
+Er hängt bewusst **NICHT im Scroller**, sondern als Geschwister daneben (gerendert
+in [page.tsx](app/b/[token]/page.tsx) vor `<main class="booklet-scroll">`): Ein
+Element innerhalb einer `100dvh`-Snap-Sektion könnte gar nicht seitenübergreifend
+mitlaufen, es würde pro Seite neu ein- und ausgeblendet.
+
+**Kollision mit dem Seiten-Logo:** Legt der Betrieb per `branding.logo_per_page`
+ein Logo oben mittig auf jede Medien-Seite, säßen beide am selben Platz. Die Seite
+reicht deshalb `belowPageLogo={Boolean(logo_per_page && logoUrl)}` durch — beide
+Bedingungen, denn ein gesetztes Flag ohne hochgeladenes Logo rendert nichts. Ist
+es wahr, greift `.booklet-review-sticky--below-logo` und schiebt den Button auf
+`top: calc(env(safe-area-inset-top) + 84px)`, also **unter** das Logo.
+
+`prefers-reduced-motion` behält den Opazitäts-Übergang, lässt die Verschiebung
+weg (der `translate(-50%, …)`-Anteil bleibt, sonst wäre die Zentrierung hin).
+
+### Geteilte Klick-Aktion ([lib/booklet/review-action.ts](lib/booklet/review-action.ts))
+
+Popup **und** Sticky-Button rufen dasselbe `submitGoogleReview({ token,
+reviewDraft, googleReviewUrl })` — bewusst **eine** Quelle: Zwei Einstiege, die
+auseinanderdriften, würden auch Tracking und die §8.6-Zusagen auseinanderlaufen
+lassen. Die Reihenfolge ist unverändert aus dem Popup übernommen und Absicht:
+**erst** das Event `link_click/review`, **dann** der Entwurf in die Zwischenablage
+(solange das Dokument noch fokussiert ist), **erst dann** `window.open` aufs
+Google-Profil. Umgekehrt verlöre die Seite den Fokus, bevor das Kopieren durch
+ist. `reviewHref` ergänzt ein fehlendes Protokoll.
+
+Rückgabe ist ein Boolean: ob der Entwurf **tatsächlich** in der Zwischenablage
+landete. Nur dann behauptet der Button „✓ kopiert" (2,5 s, Timer im `useRef`,
+beim Unmount geräumt) — ohne Entwurf oder bei blockiertem Clipboard bleibt die
+Rückmeldung aus, statt etwas Falsches zu versprechen.
+
+**§8.6 (Google-ToS) gilt unverändert:** kein Gating nach Zufriedenheit, ein
+identischer Link für alle, Vorschlag-Charakter des Entwurfs, **niemals** an eine
+Belohnung gekoppelt.
+
+### Sichtbarkeits-Gates (§9d, wie beim Popup)
+
+Gerendert wird der Button in [page.tsx](app/b/[token]/page.tsx) nur, wenn
+**beides** zutrifft: **Kunden-Sicht** (`?c=1`, `isCustomerViewParam`) **und**
+`settings.google_review_url` gesetzt. Empfänger eines geteilten (nackten) Links
+bekommen also weder Popup noch Sticky-Button; ein Betrieb ohne hinterlegte
+Review-URL ebenfalls nicht.
+
+### i18n
+
+`review.stickyLabel` (Button-Text neben der Wortmarke), `review.stickyAria`
+(zugängliches Label — die Wortmarke ist `aria-hidden`); `review.copied` wird mit
+dem Popup geteilt.
