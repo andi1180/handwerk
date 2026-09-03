@@ -365,7 +365,7 @@ Die Server-Page lädt `order_media` (RLS, `sort_order` ASC) inkl. server-seitige
 - **Tap = ansehen/abspielen (nicht reorder):** ein Tap auf die Kachel öffnet einen Vollbild-`MediaViewer` (Overlay; Foto groß bzw. `<video controls autoPlay muted>` — **stummgeschaltet**, s. „Video-Ton aus" unten; Schließen per X, Backdrop-Klick oder Escape → zurück zur gleich großen Kachel). Ein `draggedRef`-Flag (in `onDragStart` gesetzt, ~50 ms nach Drop zurückgesetzt) unterdrückt den unmittelbar nach einem echten Drag folgenden Klick.
 - **Löschen:** kleiner Lösch-Button pro Kachel (`.media-tile-delete`, obere Ecke; `stopPropagation` auf Pointer/Click, damit weder Drag noch Vorschau auslösen) → Bestätigung (`window.confirm`, `assembler.deleteConfirm`) → **optimistische** Entfernung + `DELETE` → bei Erfolg `router.refresh()`; bei Fehler Rollback + i18n-Hinweis (`assembler.deleteError`).
 
-> **Video-Ton aus:** Alle **Playback**-`<video>`-Elemente sind `muted` — der Vollbild-`MediaViewer` ([media-list.tsx](app/portal/orders/[id]/media-list.tsx)), die Capture-Entwurf-Vorschau ([capture.tsx](app/portal/orders/[id]/capture.tsx)) und der Clip in der öffentlichen Web-Story ([app/b/[token]/page.tsx](app/b/[token]/page.tsx)). Tile-Poster und Queue-Thumbnail waren ohnehin stumm; das Reel ist seit 8b-1a **mute-by-design** (FFmpeg `-an`, Audio-Strip). Das Booklet trägt seine Story über Bild + Caption, nicht über Ton.
+> **Video-Ton aus:** Alle **Playback**-`<video>`-Elemente sind `muted` — der Vollbild-`MediaViewer` ([media-list.tsx](app/portal/orders/[id]/media-list.tsx)), die Capture-Entwurf-Vorschau ([capture.tsx](app/portal/orders/[id]/capture.tsx)) und der Clip in der öffentlichen Web-Story ([app/b/[token]/booklet-video.tsx](app/b/[token]/booklet-video.tsx) — dort ist `muted` seit dem Autoplay-Umbau zusätzlich **Pflicht**, s. eigener Abschnitt; der Kunde kann den Ton per Button einschalten, das Portal nicht). Tile-Poster und Queue-Thumbnail waren ohnehin stumm; das Reel ist seit 8b-1a **mute-by-design** (FFmpeg `-an`, Audio-Strip). Das Booklet trägt seine Story über Bild + Caption, nicht über Ton.
 
 ### Route Handler — Reorder ([…/media/reorder/route.ts](app/api/portal/orders/[id]/media/reorder/route.ts), `PATCH`)
 
@@ -979,10 +979,12 @@ Styles in [app/b/[token]/booklet.css](app/b/[token]/booklet.css) (globales CSS,
   Scroll-Indikator (Chevron, `prefers-reduced-motion`-fest).
 - **Medien-Sektionen** (eine pro `order_media`, in `sort_order`): **Foto**
   `<img>` full-bleed `cover`/`100dvh` (statisch — Ken-Burns ist Sache des Reels,
-  8b). **Video** `<video controls playsInline preload="metadata">`, Poster-Frame
-  via `src="…#t=0.1"`, **kein** Auto-Play-on-Scroll im MVP (spart
-  IntersectionObserver-Komplexität auf der öffentlichen Seite) — Tap zum
-  Abspielen. **Caption-Overlay** unten in der Safe-Zone (`displayCaption`):
+  8b). **Video** — *ursprünglich* `<video controls playsInline>` ohne Auto-Play;
+  **seit dem Autoplay-Umbau** (eigener Abschnitt „Video-Autoplay in der
+  öffentlichen Web-Story" weiter unten) spielt es stumm + in Schleife, sobald es
+  in den sichtbaren Bereich scrollt, mit eigenen Bedienelementen statt des
+  nativen `controls`-Balkens; Poster-Frame weiter via `src="…#t=0.1"`.
+  **Caption-Overlay** unten in der Safe-Zone (`displayCaption`):
   unteres Drittel, ~16 % vom unteren Rand abgehoben (über der IG/TikTok-UI-Zone),
   mit Gradient-Scrim (transparent → dunkel) für Kontrast; `displayCaption == null`
   ⇒ **kein** Overlay, **kein** Scrim. Logo pro Seite **nur** wenn
@@ -3477,3 +3479,154 @@ Beide stützen den Befund, der zu diesem Feld geführt hat:
 
 1. `item_description` von N1425 lautet `Escada corset schaun ob kann besse machen` — wieder eine Annahmenotiz, kein Arbeitsbericht.
 2. Die `caption` des `after`-Fotos ist **`null`**; die des `before`-Fotos enthält „… bei andere Schneiderei in Wien" — also **Betriebs-Kontext, der in einem öffentlichen Alt-Text nichts zu suchen hat**. Wer drüben Alt-Texte aus Captions ableitet, braucht beides: einen Ersatzweg für den `null`-Fall **und** eine Prüfung des Inhalts.
+
+## Video-Autoplay in der öffentlichen Web-Story ([app/b/[token]/booklet-video.tsx](app/b/[token]/booklet-video.tsx))
+
+Videos auf den Medien-Seiten von `/b/[token]` spielen **automatisch, stumm und in
+Endlos-Schleife**, sobald sie in den sichtbaren Bereich scrollen, und pausieren,
+sobald sie ihn verlassen. **Nur die öffentliche Booklet-Ansicht** — das Portal
+(Vollbild-`MediaViewer`, Capture-Vorschau) bleibt unverändert beim Tap-zum-
+Abspielen. **Keine Migration**, keine Datenänderung; die Zugriffskontrolle
+(`access_token` → `loadPublicBooklet`, §14.2) ist **nicht angefasst**.
+
+Das Video wandert dafür aus der Server Component in die neue Client-Komponente
+`<BookletVideo src locale className>`; [page.tsx](app/b/[token]/page.tsx) bleibt
+Server Component und reicht nur Props durch (zusätzlich `locale` an
+`MediaSection`, für die aria-Labels der Bedienelemente).
+
+### Sichtbarkeit → abspielen/pausieren
+
+`IntersectionObserver` pro Video-Element, `root` = der Story-Scroller
+(`video.closest(".booklet-scroll")` — der Scroll-Snap-Container, **nicht** der
+Viewport), `threshold: [0, 0.5, 1]`. Ab `intersectionRatio >= 0.5` (`VISIBLE_RATIO`)
+läuft das Video, sonst `pause()`. Weil jede Sektion `100dvh` hoch ist und
+`scroll-snap-stop: always` greift, ist immer **höchstens ein** Video über der
+Schwelle — alle anderen stehen still. Ein bewusst pausiertes Video (`userPausedRef`)
+startet der Observer **nicht** erneut; verlässt es den sichtbaren Bereich, wird
+dieser Wunsch zurückgesetzt (erneutes Hinscrollen = frischer Besuch der Seite).
+
+### muted ist Pflicht, nicht Geschmackssache
+
+Die **Autoplay-Policy** aller aktuellen Browser (iOS Safari, Chrome Mobile wie
+Desktop) erlaubt automatisches Abspielen **ausschließlich stumm** — mit Ton lehnt
+`play()` ab (`NotAllowedError`). Ausgangszustand ist deshalb **immer** stumme
+Wiedergabe; Ton gibt es nur auf ausdrücklichen Tap. Zwei Absicherungen:
+
+- `muted` wird zusätzlich als **DOM-Property** in einem Mount-Effekt gesetzt —
+  React rendert das Attribut beim Server-Rendering nicht zuverlässig mit, und ohne
+  gesetztes `muted` scheitert schon das erste `play()`.
+- Wird ein `play()` trotzdem abgelehnt (z. B. beim Zurückscrollen auf ein zuvor
+  entstummtes Video), schaltet die Komponente stumm und versucht es **genau einmal**
+  erneut — lieber stumm laufen als schwarz stehen. **Kein Autoplay mit Ton, unter
+  keinen Umständen.**
+
+### Bedienelemente ([booklet.css](app/b/[token]/booklet.css): `.booklet-video-controls`/`.booklet-video-btn`)
+
+Der native `controls`-Balken entfällt (er läge über der Story-Optik und blendete
+beim Autoplay ständig auf); stattdessen eine kleine, **dauerhaft sichtbare**
+Leiste oben rechts (links liegt der Portal-Zurück-Button, mittig das Seiten-Logo):
+
+- **Play/Pause** — immer vorhanden; Pause setzt `userPausedRef`, Play löscht ihn.
+- **Ton an/aus** — **nur**, wenn am Element eine Tonspur erkennbar ist. Dafür gibt
+  es keinen einheitlichen Standard-Weg: `hasAudioTrack()` prüft nacheinander
+  `mozHasAudio` (Firefox), `audioTracks.length` und `webkitAudioDecodedByteCount`
+  (WebKit/Blink, zählt erst **während** der Wiedergabe hoch) — deshalb wird bei
+  `loadeddata`, `playing` und (solange noch nichts erkannt wurde) `timeupdate`
+  nachgeprüft. Im Zweifel `false`: **kein** Ton-Button ist besser als einer, der
+  nichts tut. Entstummen ist eine Nutzer-Geste ⇒ das Video darf dabei auch anlaufen.
+
+`z-index: 4` (über Caption-Scrim/Seiten-Logo) + `transform: translateZ(0)` — eigene
+Compositing-Ebene, sonst malt der native Video-Layer auf iOS darüber (dasselbe
+Muster wie `.media-tile-delete` im Portal). i18n `booklet.videoPlay`/`videoPause`/
+`videoUnmute`/`videoMute`.
+
+---
+
+## Bewertungs-Popup auf der letzten Booklet-Seite (ersetzt den Google-Button)
+
+Der Google-Bewertungs-Button in der Teilen-Sektion des Outros (9b / Block A /
+Punkt 9) ist **entfernt**; an seine Stelle tritt ein **zentriertes Popup**, das
+auf der letzten Seite nach kurzer Verweildauer von selbst aufgeht. **Reine
+Frontend-Änderung + i18n** — keine Migration, kein Eingriff in den Event-Endpoint
+([app/api/b/[token]/event/route.ts](app/api/b/[token]/event/route.ts)), die
+Taxonomie ([lib/booklet/events.ts](lib/booklet/events.ts)), den Lader
+([lib/booklet/load.ts](lib/booklet/load.ts)) oder die Token-/`business_id`-
+Isolation der Booklet-Route (§14.2). Kein `<form>`, kein `any`.
+
+### Auslösung ([app/b/[token]/review-popup.tsx](app/b/[token]/review-popup.tsx), `"use client"`)
+
+Dasselbe Sichtbarkeits-Muster wie das Video-Autoplay: ein **IntersectionObserver**
+mit `root = .booklet-scroll` (der Scroll-Snap-Container) beobachtet einen
+unsichtbaren **Sentinel** (`.booklet-review-sentinel`, 1×1 px, `pointer-events:
+none`), den die Komponente im Outro rendert. Bewusst ein Sentinel statt der
+Outro-Sektion selbst: die Outro-Sektion darf über `100dvh` hinauswachsen (§9a),
+ein `threshold` auf ihr träfe dann nie zuverlässig.
+
+Ist der Sentinel zu ≥ 50 % sichtbar, startet ein Timer von **1000 ms**; wird
+vorher weggescrollt, verfällt er. Danach öffnet das Popup **einmal pro
+Seitenaufruf** (`shownRef`, Observer trennt sich) — einmal geschlossen
+(Abbrechen / Tap auf den abgedunkelten Hintergrund / Escape), bleibt es zu.
+
+### Inhalt (Reihenfolge)
+
+1. **Google-Wortmarke** — `GoogleWordmark` **exakt** aus dem früheren Button
+   übernommen (G blau, o rot, o gelb, g blau, l grün, e rot; pro Buchstabe ein
+   `<span>` mit Brand-Hex, `aria-hidden`). **Kein** offizielles Logo-Asset
+   (Markenrichtlinien), keine eigene Interpretation.
+2. **5 leere Sterne**, zentriert, antippbar, **nicht vorausgewählt**
+   (`role="radiogroup"`/`role="radio"` + `aria-label` je Stern).
+3. **Emotionaler Satz** darunter — i18n `review.emotional` (frei anpassbar, kein
+   Inline-String).
+4. Klick auf einen Stern füllt **alle Sterne bis dorthin** (lokaler `rating`-State).
+5. **„Bewertung abgeben"** — legt (falls vorhanden) den `review_draft` in die
+   Zwischenablage (`writeToClipboard`, Dokument noch fokussiert ⇒ zuverlässig)
+   und öffnet **denselben** `google_review_url` wie zuvor der Button im neuen Tab
+   (`window.open(..., "_blank", "noopener,noreferrer")`, Protokoll-Guard).
+6. **„Abbrechen"** als reiner Text/Link (kein Button-Look) schließt.
+7. **Tap auf den Hintergrund** schließt ebenfalls (Escape zusätzlich).
+
+### Sternezahl wird NICHT an Google übergeben (bewusste Entscheidung)
+
+Google hat die **URL-Vorbefüllung** von Bewertungen unterbunden; es gibt keinen
+zuverlässigen, dauerhaften Weg, eine im Popup gewählte Sternezahl in das
+Google-Formular zu tragen. Der Link öffnet deshalb die **normale**
+Bewertungsseite, auf der der Nutzer die Sterne selbst noch einmal vergibt — die
+Sterne im Popup sind eine **Geste**, kein Datenkanal.
+
+Daraus folgt (§8.6 / Google-ToS, **PFLICHT**): das Verhalten ist bei **jeder**
+Sternezahl **identisch** — 1 Stern öffnet exakt denselben Link wie 5, es gibt
+**kein Gating** und keine Verzweigung nach Zufriedenheit. Auch das **Tracking**
+unterscheidet nicht: `link_click/review` feuert **genau einmal beim Klick auf
+„Bewertung abgeben"**, ohne Sternezahl (kein neues Event, keine neue
+Taxonomie-Erweiterung). Der Textentwurf bleibt ein **Vorschlag** (im Google-Feld
+frei editierbar, i18n `review.hint`) und ist **niemals** an eine Belohnung
+gekoppelt.
+
+### Sichtbarkeit (§9d unverändert)
+
+Das Popup wird — wie die Teilen-Sektion — **nur in der Kunden-Sicht** (`?c=1`)
+gerendert; Empfänger eines geteilten (nackten) Links bekommen **keinen**
+Bewertungs-Prompt. Zusätzlich nur, wenn der Betrieb eine `google_review_url`
+hinterlegt hat.
+
+### Aufgeräumt
+
+- [share-bar.tsx](app/b/[token]/share-bar.tsx): Review-Block, `writeReview`,
+  `reviewHref`, `GoogleWordmark` und die Props `reviewDraft`/`googleReviewUrl`
+  entfernt; `CopiedKey` (`"link" | "review"`) fällt weg → wieder ein einfaches
+  `copied`-Boolean. Die beiden Teilen-Aktionen sind **unverändert**.
+- **Geteilter Clipboard-Helfer** [lib/share/clipboard.ts](lib/share/clipboard.ts)
+  (NEU, plain-TS, SSR-sicher, Muster wie [file-share.ts](lib/share/file-share.ts)):
+  `writeToClipboard` (moderne API + Legacy-`execCommand`-Fallback für In-App-
+  Webviews) 1:1 aus `share-bar.tsx` verschoben — beide Konsumenten (Teilen-Sektion
+  und Popup) nutzen jetzt **eine** Quelle, nichts dupliziert.
+- [booklet.css](app/b/[token]/booklet.css): `.booklet-review`/`.booklet-review-btn`
+  raus, `.booklet-review-sentinel`/`-backdrop`/`-popup`/`-brand`/`-stars`/
+  `.booklet-star`/`-emotional`/`-submit`/`-cancel` neu; `.booklet-google` und
+  `.booklet-review-hint` bleiben (vom Popup genutzt). Optik folgt dem Overlay-
+  Muster des Portals (`.biz-reel-backdrop`/`.biz-reel-popup`), nutzt aber die
+  Booklet-Tokens (frosted Karte `.booklet-frost`, dunkle Schrift).
+- i18n `review.*`: `button` entfernt; `dialogLabel`/`starsLabel`/`starLabel`/
+  `emotional`/`submit`/`cancel` neu; `hint`/`copied` unverändert.
+
+`pnpm typecheck` + `pnpm build` grün.

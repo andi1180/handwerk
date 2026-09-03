@@ -389,6 +389,11 @@ export const de = {
     // Zurück zur Auftrags-Detailseite — NUR in der betriebs-eigenen Vorschau
     // (`?p=1`) gerendert, nie für den echten Kunden (Sackgassen-Fix).
     backToOrder: "Zurück zum Auftrag",
+    // Bedienelemente der Video-Seiten (Autoplay stumm + Endlos-Schleife).
+    videoPlay: "Video abspielen",
+    videoPause: "Video pausieren",
+    videoUnmute: "Ton einschalten",
+    videoMute: "Ton ausschalten",
     contactEmail: "E-Mail",
     contactPhone: "Telefon",
     contactWebsite: "Website",
@@ -411,13 +416,28 @@ export const de = {
     message: "Ein kleines Booklet zu meiner Maßarbeit – schau mal rein",
   },
   review: {
+    // Bewertungs-POPUP auf der letzten Booklet-Seite (review-popup.tsx).
     // §8.6-PFLICHT: Vorschlag-Charakter („Textvorschlag (KI)") — der Kunde fügt
     // ihn ins Google-Feld ein und kann ihn dort frei anpassen; NIEMALS an eine
-    // Belohnung gekoppelt, keine Sterne-Vorgabe (harter Google-ToS-Verstoß).
-    // „Google" trägt im Button der farbige Wortmarken-Schriftzug, daher hier ohne.
-    button: "Bewertung schreiben",
+    // Belohnung gekoppelt. Die Sterne im Popup sind reine Geste: sie werden NICHT
+    // an Google übergeben und ändern das Verhalten nicht (kein Gating).
+    // „Google" trägt im Popup der farbige Wortmarken-Schriftzug, daher hier ohne.
+    dialogLabel: "Bewertung abgeben",
+    starsLabel: "Sterne",
+    starLabel: "{n} von 5 Sternen",
+    // Emotionaler Satz unter den Sternen — hier frei anpassbar.
+    emotional:
+      "Wir leben von Weiterempfehlungen, nicht von Werbung — deine Bewertung hilft echtem Handwerk.",
+    submit: "Bewertung abgeben",
+    cancel: "Abbrechen",
     hint: "Textvorschlag (KI) im Clipboard abgelegt - bei Google ins Textfeld tippen und einfügen/paste wählen.",
     copied: "✓ Entwurf kopiert",
+    // Sticky-Button auf den Medien-Seiten (review-sticky-button.tsx): das Wort
+    // „Google" trägt dort — wie im Popup — der farbige Wortmarken-Schriftzug,
+    // deshalb hier nur der Rest des Labels. Das vollständige „Auf Google
+    // bewerten" steht im aria-label (die Wortmarke ist aria-hidden).
+    stickyLabel: "bewerten",
+    stickyAria: "Auf Google bewerten",
   },
   qr: {
     // QR-Druckansicht (9c-2): Handover am Tresen. Der QR kodiert den

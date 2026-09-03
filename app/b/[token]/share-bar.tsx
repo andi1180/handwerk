@@ -3,15 +3,13 @@
 import { useEffect, useRef, useState } from "react";
 import { t, type Locale } from "@/lib/i18n";
 import { trackBookletEvent } from "@/lib/booklet/track";
+import { writeToClipboard } from "@/lib/share/clipboard";
 import {
   canShareFiles as detectCanShareFiles,
   downloadFile,
   fetchAsShareFile,
   shareFile,
 } from "@/lib/share/file-share";
-
-/** Welcher „✓ kopiert"-Flash gerade aktiv ist (immer nur einer). */
-type CopiedKey = "link" | "review";
 
 /**
  * Teilen-Sektion der öffentlichen Web-Story — der WOM-Kern.
@@ -27,10 +25,10 @@ type CopiedKey = "link" | "review";
  *    `navigator.share({ files })` (öffnet den IG/TikTok-Composer); ohne
  *    File-Sharing (Desktop) Fallback = Download. Nur sichtbar, wenn ein Reel
  *    vorliegt (`reelSignedUrl`). Feuert `shared/reel`.
- * 3. „Google-Bewertung schreiben": nur wenn `googleReviewUrl` UND `reviewDraft`.
- *    Klick → Entwurf in die Zwischenablage + Deeplink zum Google-Profil.
- *    §8.6-PFLICHT: Framing „Vorschlag, gern in deinen Worten anpassen" (NICHT
- *    „Text einfügen"), und NIEMALS an eine Belohnung gekoppelt.
+ *
+ * Die Google-Bewertung sitzt NICHT mehr hier: sie läuft über das Bewertungs-
+ * Popup (review-popup.tsx), das auf dieser Seite nach kurzer Verweildauer
+ * aufgeht — §8.6-Leitplanken dort dokumentiert.
  *
  * Hinweis: WhatsApp / „Link kopieren" / IG-Caption sind aus der UI entfernt;
  * die Event-Taxonomie (whatsapp/copy/ig in lib/booklet/events.ts) bleibt
@@ -40,18 +38,14 @@ export function ShareBar({
   token,
   storyUrl,
   reelSignedUrl,
-  reviewDraft,
-  googleReviewUrl,
   locale,
 }: {
   token: string;
   storyUrl: string;
   reelSignedUrl: string | null;
-  reviewDraft: string | null;
-  googleReviewUrl: string | null;
   locale: Locale;
 }) {
-  const [copiedKey, setCopiedKey] = useState<CopiedKey | null>(null);
+  const [copied, setCopied] = useState(false);
   // Optimistisch: die Zielgruppe (Kunde am Handy) kann i. d. R. Dateien teilen.
   // Nach dem Mount per Capability-Probe ggf. auf „Herunterladen" korrigiert.
   const [canShareFiles, setCanShareFiles] = useState(true);
@@ -107,30 +101,18 @@ export function ShareBar({
     [],
   );
 
-  function flashCopied(key: CopiedKey) {
-    setCopiedKey(key);
+  function flashCopied() {
+    setCopied(true);
     if (copyTimer.current) clearTimeout(copyTimer.current);
-    copyTimer.current = setTimeout(() => setCopiedKey(null), 2000);
+    copyTimer.current = setTimeout(() => setCopied(false), 2000);
   }
 
-  /** Text in die Zwischenablage + Flash; nur bei tatsächlichem Erfolg flashen. */
-  async function copyText(text: string, key: CopiedKey): Promise<void> {
-    if (await writeToClipboard(text)) flashCopied(key);
-    // Schlägt selbst der Legacy-Fallback fehl (sehr selten), kein Fehler-Toast.
-  }
-
-  /** Pures Kopieren der Story-URL (Fallback von „Booklet teilen"). */
+  /** Story-URL kopieren (Fallback von „Booklet teilen"); nur bei Erfolg flashen. */
   function copyLink() {
-    void copyText(storyUrl, "link");
-  }
-
-  async function writeReview() {
-    if (!reviewDraft || !googleReviewUrl) return;
-    trackBookletEvent(token, "link_click", "review");
-    // §8.6: Entwurf bereitstellen (Clipboard, Doc ist hier noch fokussiert ⇒
-    // zuverlässig) und DANN das Google-Profil im neuen Tab öffnen.
-    await copyText(reviewDraft, "review");
-    window.open(reviewHref(googleReviewUrl), "_blank", "noopener,noreferrer");
+    void (async () => {
+      if (await writeToClipboard(storyUrl)) flashCopied();
+      // Schlägt selbst der Legacy-Fallback fehl (sehr selten), kein Fehler-Toast.
+    })();
   }
 
   /** „Booklet teilen" (PRIMÄR): Story-URL teilen, Fallback = Link kopieren. */
@@ -177,7 +159,6 @@ export function ShareBar({
     downloadFile(reelSignedUrl, "reel.mp4");
   }
 
-  const showReview = Boolean(googleReviewUrl && reviewDraft);
   // Datei-Share-Pfad, aber Prefetch noch nicht fertig → Button disabled/Ladezustand.
   const reelLoading = canShareFiles && !reelReady;
 
@@ -188,9 +169,7 @@ export function ShareBar({
       <Pressable className="booklet-share-primary" onPress={handleShareBooklet}>
         <ShareIcon />
         <span>
-          {copiedKey === "link"
-            ? t(locale, "share.copied")
-            : t(locale, "share.shareBooklet")}
+          {copied ? t(locale, "share.copied") : t(locale, "share.shareBooklet")}
         </span>
       </Pressable>
 
@@ -210,71 +189,8 @@ export function ShareBar({
           </span>
         </Pressable>
       ) : null}
-
-      {showReview ? (
-        <div className="booklet-review">
-          <Pressable className="booklet-review-btn" onPress={writeReview}>
-            <GoogleWordmark />
-            <span>
-              {copiedKey === "review"
-                ? t(locale, "review.copied")
-                : t(locale, "review.button")}
-            </span>
-          </Pressable>
-          {/* §8.6: Vorschlag-Charakter (Textvorschlag/KI), im Google-Feld
-              editierbar; kein Belohnungsbezug, keine Sterne-Vorgabe. */}
-          <p className="booklet-review-hint">{t(locale, "review.hint")}</p>
-        </div>
-      ) : null}
     </div>
   );
-}
-
-/** Externer Link bekommt ein Protokoll, falls der Betrieb keins gesetzt hat. */
-function reviewHref(url: string): string {
-  return /^https?:\/\//i.test(url) ? url : `https://${url}`;
-}
-
-/**
- * Robustes Kopieren — erst die moderne Clipboard-API, sonst der Legacy-Pfad.
- * Die Web-Story wird oft aus In-App-Webviews (WhatsApp/Instagram) geöffnet, wo
- * `navigator.clipboard` fehlt oder blockiert ist; dort greift `execCommand`,
- * damit der „ist kopiert"-Hinweis (Review) auch wirklich stimmt.
- * Gibt zurück, ob das Kopieren tatsächlich geklappt hat.
- */
-async function writeToClipboard(text: string): Promise<boolean> {
-  try {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(text);
-      return true;
-    }
-  } catch {
-    // Moderne API verweigert (kein HTTPS / kein Fokus) → Legacy-Fallback.
-  }
-  return legacyCopy(text);
-}
-
-/** Legacy-Kopierpfad (verstecktes <textarea> + execCommand) — best effort. */
-function legacyCopy(text: string): boolean {
-  try {
-    const ta = document.createElement("textarea");
-    ta.value = text;
-    ta.setAttribute("readonly", "");
-    ta.style.position = "fixed";
-    ta.style.top = "0";
-    ta.style.left = "0";
-    ta.style.opacity = "0";
-    ta.style.pointerEvents = "none";
-    document.body.appendChild(ta);
-    ta.focus();
-    ta.select();
-    ta.setSelectionRange(0, text.length);
-    const ok = document.execCommand("copy");
-    ta.remove();
-    return ok;
-  } catch {
-    return false;
-  }
 }
 
 /* div-basierter Button (kein <form>): Klick + Tastatur (Enter/Space). */
@@ -353,28 +269,3 @@ function InstagramIcon() {
   );
 }
 
-/**
- * „Google" als farbiger Wortmarken-Schriftzug (G blau, o rot, o gelb, g blau,
- * l grün, e rot) — sofort als Google erkennbar, ohne das offizielle Logo-Asset
- * einzubetten (Markenrichtlinien). Rein dekorativ; der lesbare Button-Text steht
- * daneben (`aria-hidden`).
- */
-function GoogleWordmark() {
-  const letters: [string, string][] = [
-    ["G", "#4285F4"],
-    ["o", "#EA4335"],
-    ["o", "#FBBC05"],
-    ["g", "#4285F4"],
-    ["l", "#34A853"],
-    ["e", "#EA4335"],
-  ];
-  return (
-    <span className="booklet-google" aria-hidden>
-      {letters.map(([ch, color], i) => (
-        <span key={i} style={{ color }}>
-          {ch}
-        </span>
-      ))}
-    </span>
-  );
-}

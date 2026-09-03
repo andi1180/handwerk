@@ -455,47 +455,176 @@
   height: 18px;
 }
 
-/* --- Google-Bewertung (Schritt 9b, §8.6) — Vorschlag, NIE „einfügen"/Belohnung --- */
-.booklet-review {
-  width: 100%;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin-top: 0;
-}
-/* Google-Bewertung — als weißer Button mit dezenter Erhebung hervorgehoben
-   (sticht aus den Outline-Sekundäraktionen heraus); der farbige „Google"-
-   Schriftzug macht ihn sofort erkennbar. */
-.booklet-review-btn {
+/* --- Sticky „Auf Google bewerten" auf den Medien-Seiten (§8.6) ---
+   Schwebt oben MITTIG über den Seiten 2 bis vorletzte und läuft beim Scrollen
+   mit (position: fixed, außerhalb des Scrollers). Bewusst oben statt unten:
+   unten liegen Caption (~16 %), Website-Zeile und der Hinweis auf die nächste
+   Seite. Sichtbarkeit steuert review-sticky-button.tsx über data-visible.
+
+   z-index 15: über Medium/Scrim/Caption (0–2), Seiten-Logo (3) und den
+   Video-Bedienelementen (4) — aber unter dem Portal-Zurück-Button (20) und dem
+   Bewertungs-Popup (70), das auf der letzten Seite ohnehin übernimmt.
+
+   Helle Pille, weil die farbige Google-Wortmarke einen hellen Grund braucht;
+   klein gehalten (kompakt/dezent), damit sie das Foto nicht dominiert. */
+.booklet-review-sticky {
+  position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) + 14px);
+  left: 50%;
+  z-index: 15;
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  gap: 8px;
-  min-height: 42px;
-  padding: 9px 16px;
+  gap: 6px;
+  max-width: min(78%, 260px);
+  padding: 7px 14px;
+  border: 1px solid rgba(0, 0, 0, 0.1);
   border-radius: 999px;
-  border: 1px solid var(--share-line);
-  background: #ffffff;
-  color: var(--share-ink);
-  font-size: 0.92rem;
+  background: rgba(255, 255, 255, 0.93);
+  color: #1a1814;
+  font-family: inherit;
+  font-size: 0.82rem;
   font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
   cursor: pointer;
-  user-select: none;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.12);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.28);
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+  /* Ausgangszustand: unsichtbar UND unklickbar (bleibt für den weichen
+     Übergang montiert). */
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, -6px);
   transition:
-    border-color 0.15s ease,
-    box-shadow 0.15s ease;
+    opacity 0.22s ease,
+    transform 0.22s ease;
 }
-.booklet-review-btn:hover {
-  border-color: rgba(0, 0, 0, 0.28);
-  box-shadow: 0 3px 14px rgba(0, 0, 0, 0.16);
+.booklet-review-sticky[data-visible="true"] {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translate(-50%, 0);
 }
+.booklet-review-sticky:active {
+  filter: brightness(0.96);
+}
+/* Wortmarke eine Spur größer als das Label — „Google bewerten" liest sich als
+   eine Zeile. */
+.booklet-review-sticky .booklet-google {
+  font-size: 0.95rem;
+}
+/* Legt der Betrieb auf jeder Seite sein Logo oben mittig ab (logo_per_page),
+   rutscht die Pille darunter: Logo startet bei +18px und ist max. 54px hoch. */
+.booklet-review-sticky--below-logo {
+  top: calc(env(safe-area-inset-top, 0px) + 84px);
+}
+
+/* --- Bewertungs-Popup (§8.6) — Vorschlag, NIE „einfügen"/Belohnung ---
+   Ersetzt den früheren Bewertungs-Button in der Teilen-Sektion: geht nach kurzer
+   Verweildauer auf der letzten Seite auf (Auslösung in review-popup.tsx).
+   Optik folgt dem Overlay-Muster des Portals (.biz-reel-backdrop/-popup),
+   nutzt hier aber die Booklet-Tokens (frosted Karte, dunkle Schrift). */
+
+/* Unsichtbarer Auslöser-Marker im Outro — kein Layout-Einfluss. */
+.booklet-review-sentinel {
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  pointer-events: none;
+}
+
+.booklet-review-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px));
+}
+
+.booklet-review-popup {
+  width: 100%;
+  max-width: 330px;
+  padding: 20px 20px 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  text-align: center;
+  color: var(--share-ink);
+}
+
 /* Farbiger „Google"-Wortmarken-Schriftzug (kein offizielles Logo-Asset). */
 .booklet-google {
   font-weight: 700;
   font-size: 1.02rem;
   letter-spacing: -0.01em;
 }
+
+/* Google-Wortmarke als Kopf des Popups (kein offizielles Logo-Asset). */
+.booklet-review-brand {
+  font-size: 1.45rem;
+}
+
+.booklet-review-stars {
+  display: flex;
+  gap: 4px;
+}
+
+.booklet-star {
+  padding: 2px;
+  border: 0;
+  background: none;
+  color: rgba(26, 24, 20, 0.32);
+  cursor: pointer;
+  line-height: 0;
+  transition: transform 0.12s ease;
+}
+.booklet-star:active {
+  transform: scale(0.92);
+}
+
+.booklet-review-emotional {
+  margin: 0;
+  font-size: 0.88rem;
+  line-height: 1.45;
+  color: var(--share-ink);
+}
+
+.booklet-review-submit {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 16px;
+  border-radius: 999px;
+  border: 1px solid var(--share-line);
+  background: #ffffff;
+  color: var(--share-ink);
+  font-family: inherit;
+  font-size: 0.95rem;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.12);
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+.booklet-review-submit:hover {
+  border-color: rgba(0, 0, 0, 0.28);
+  box-shadow: 0 3px 14px rgba(0, 0, 0, 0.16);
+}
+
+/* „Abbrechen" bewusst als reiner Text (kein Button-Look). */
+.booklet-review-cancel {
+  font-size: 0.82rem;
+  color: var(--share-ink-soft);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+  user-select: none;
+}
+
 .booklet-review-hint {
   margin: 0;
   font-size: 0.72rem;
@@ -543,4 +672,49 @@
   .booklet-scroll-hint {
     animation: none;
   }
+  /* Nur ein-/ausblenden, ohne Versatz (die Zentrierung bleibt im transform). */
+  .booklet-review-sticky,
+  .booklet-review-sticky[data-visible="true"] {
+    transform: translate(-50%, 0);
+    transition: opacity 0.22s ease;
+  }
+}
+
+/* --- Video-Bedienelemente auf den Medien-Seiten --- */
+
+/* Videos laufen im sichtbaren Bereich automatisch (stumm, in Schleife) — der
+   native controls-Balken entfällt dafür. Diese kleine Leiste bleibt trotzdem
+   sichtbar, damit der Nutzer pausieren und (falls das Video eine Tonspur hat)
+   den Ton einschalten kann. Oben rechts: links liegt der Portal-Zurück-Button,
+   mittig das Seiten-Logo. */
+.booklet-video-controls {
+  position: absolute;
+  top: calc(env(safe-area-inset-top, 0px) + 14px);
+  right: calc(env(safe-area-inset-right, 0px) + 14px);
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.booklet-video-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.5);
+  color: #ffffff;
+  cursor: pointer;
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+  /* Eigene Compositing-Ebene: sonst malt der native Video-Layer (iOS) darüber. */
+  transform: translateZ(0);
+  transition: background 0.15s ease;
+}
+.booklet-video-btn:hover {
+  background: rgba(0, 0, 0, 0.68);
 }

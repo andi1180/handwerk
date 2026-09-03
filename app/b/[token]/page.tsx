@@ -11,7 +11,10 @@ import {
   type PublicBookletData,
   type PublicBookletMedia,
 } from "@/lib/booklet/load";
+import { BookletVideo } from "./booklet-video";
 import { ShareBar } from "./share-bar";
+import { ReviewPopup } from "./review-popup";
+import { ReviewStickyButton } from "./review-sticky-button";
 import { ViewTracker } from "./view-tracker";
 import { TrackedLink } from "./tracked-link";
 import "./booklet.css";
@@ -101,10 +104,25 @@ export default async function PublicBookletPage({
       {/* Analytics (10a): feuert beim Mount EINMALIG `viewed` — für ALLE Öffner
           (Kunde UND Empfänger), unabhängig von `?c=1`. Reichweite zählt. */}
       <ViewTracker token={token} />
+      {/* Sticky „Auf Google bewerten" — schwebt oben mittig über den MEDIEN-
+          Seiten (Seite 2 bis vorletzte) und läuft beim Scrollen mit; Intro und
+          Outro bleiben frei (dort übernimmt das Popup). Wie das Popup NUR in
+          der Kunden-Sicht (§9d) und nur mit hinterlegter Google-Review-URL.
+          Als Geschwister des Scrollers gerendert — in einer 100dvh-Snap-Sektion
+          könnte er nicht seitenübergreifend mitlaufen. */}
+      {isCustomerView && data.settings.google_review_url ? (
+        <ReviewStickyButton
+          token={token}
+          reviewDraft={data.reviewDraft}
+          googleReviewUrl={data.settings.google_review_url}
+          locale={locale}
+          belowPageLogo={Boolean(data.branding.logo_per_page && data.logoUrl)}
+        />
+      ) : null}
       <main className="booklet-scroll">
         <IntroSection data={data} locale={locale} />
         {data.media.map((item) => (
-          <MediaSection key={item.id} item={item} data={data} />
+          <MediaSection key={item.id} item={item} data={data} locale={locale} />
         ))}
         <OutroSection
           data={data}
@@ -173,9 +191,11 @@ function IntroSection({
 function MediaSection({
   item,
   data,
+  locale,
 }: {
   item: PublicBookletMedia;
   data: PublicBookletData;
+  locale: Locale;
 }) {
   // Overlay-Text: caption ?? keyword; beide leer ⇒ kein Overlay, kein Scrim.
   const caption = displayCaption(item);
@@ -186,18 +206,19 @@ function MediaSection({
   const websiteUrl = data.settings.website_url;
 
   return (
-    <section className="booklet-section">
+    // Modifier `--media`: Anker für den sticky Bewertungs-Button — er ist genau
+    // dann sichtbar, wenn eine SOLCHE Sektion im Bild liegt (Intro/Outro tragen
+    // die Klasse nicht). Rein als Auswahl-Haken, ohne eigene Regeln im CSS.
+    <section className="booklet-section booklet-section--media">
       {item.signedUrl ? (
         item.media_type === "video" ? (
-          // KEIN Auto-Play im MVP — Tap zum Abspielen (kein IntersectionObserver
-          // auf der öffentlichen Seite). Poster-Frame via #t-Fragment.
-          <video
+          // Autoplay im sichtbaren Bereich, stumm + Endlos-Schleife; eigene
+          // Bedienelemente (Play/Pause, Ton) statt des nativen controls-Balkens.
+          // Details + Begründung der muted-Pflicht in booklet-video.tsx.
+          <BookletVideo
             className="booklet-bg booklet-video"
             src={`${item.signedUrl}#t=0.1`}
-            controls
-            playsInline
-            muted
-            preload="metadata"
+            locale={locale}
           />
         ) : (
           // Foto statisch full-bleed (Ken-Burns ist Sache des Reels, 8b).
@@ -277,14 +298,27 @@ function OutroSection({
             der Kunden-Sicht (markierter Link `?c=1`). Empfänger des nackten
             Links sehen das normale Settings-Outro ohne Teilen-Schicht. */}
         {isCustomerView ? (
-          <ShareBar
-            token={token}
-            storyUrl={storyUrl}
-            reelSignedUrl={reelSignedUrl}
-            reviewDraft={data.reviewDraft}
-            googleReviewUrl={data.settings.google_review_url}
-            locale={locale}
-          />
+          <>
+            <ShareBar
+              token={token}
+              storyUrl={storyUrl}
+              reelSignedUrl={reelSignedUrl}
+              locale={locale}
+            />
+            {/* Bewertungs-Popup (ersetzt den früheren Button in der Teilen-
+                Sektion): geht nach kurzer Verweildauer auf dieser letzten Seite
+                auf. Wie die Teilen-Sektion NUR in der Kunden-Sicht (§9d) —
+                Empfänger eines geteilten Links bekommen keinen Bewertungs-Prompt.
+                Nur sinnvoll, wenn der Betrieb eine Google-Review-URL hinterlegt hat. */}
+            {data.settings.google_review_url ? (
+              <ReviewPopup
+                token={token}
+                reviewDraft={data.reviewDraft}
+                googleReviewUrl={data.settings.google_review_url}
+                locale={locale}
+              />
+            ) : null}
+          </>
         ) : null}
 
         {hasContact ? (
