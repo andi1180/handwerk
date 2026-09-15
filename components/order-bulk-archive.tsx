@@ -12,6 +12,7 @@ import {
 } from "react";
 import { DEFAULT_LOCALE, t } from "@/lib/i18n";
 import { ArchiveToggle } from "@/components/archive-toggle";
+import { OrderCopyButton } from "@/components/order-copy-button";
 import { DropdownMenu, DropdownItem } from "@/components/dropdown-menu";
 import {
   buildOrdersUrl,
@@ -320,13 +321,15 @@ function CheckIcon() {
 
 /**
  * Rechtsbündige Kachel-Kontrolle. Entscheidet client-seitig (Context):
- *  - Archiv-Scope            → Entarchivieren-Icon (kein Select-Mode hier).
- *  - Hauptliste, archivierbar:
- *      • Select-Mode  → Auswahl-Checkbox (toggelt `selected`).
- *      • sonst        → Einzel-Archiv-Icon (bestehendes Verhalten).
- *  - Hauptliste, nicht archivierbar → nichts (wie bisher).
+ *  - Select-Mode (nur Hauptliste) → Auswahl-Checkbox auf archivierbaren
+ *    Kacheln, sonst nichts. KEIN Kopier-/Archiv-Icon (Auswahl ist exklusiv).
+ *  - Archiv-Scope            → Kopier-Icon + Entarchivieren-Icon.
+ *  - Hauptliste              → Kopier-Icon + (falls archivierbar) Archiv-Icon.
  *
- * Die Checkbox ist ein `<button>` im `<Link>` und stoppt die Propagation —
+ * Kopieren ist in BEIDEN Scopes und ohne Eligibility-Gate verfügbar — jeder
+ * Auftrag lässt sich als leeres Template duplizieren.
+ *
+ * Checkbox/Icons sind `<button>`s im `<Link>` und stoppen die Propagation —
  * exakt das Muster des bestehenden Einzel-Archiv-Icons (kein Navigieren).
  */
 export function OrderRowControls({
@@ -340,13 +343,21 @@ export function OrderRowControls({
 }) {
   const { selectMode, selected, toggle } = useBulkSelect();
 
-  if (archiveView) {
-    return <ArchiveToggle orderId={orderId} mode="unarchive" />;
-  }
-  if (!archivable) return null;
   if (!selectMode) {
-    return <ArchiveToggle orderId={orderId} mode="archive" />;
+    return (
+      <>
+        <OrderCopyButton orderId={orderId} />
+        {archiveView ? (
+          <ArchiveToggle orderId={orderId} mode="unarchive" />
+        ) : archivable ? (
+          <ArchiveToggle orderId={orderId} mode="archive" />
+        ) : null}
+      </>
+    );
   }
+
+  // Select-Mode: nur archivierbare Kacheln tragen eine Auswahl-Checkbox.
+  if (!archivable) return null;
 
   const isSelected = selected.has(orderId);
   return (

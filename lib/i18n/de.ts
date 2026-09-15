@@ -72,6 +72,8 @@ export const de = {
     noDescription: "Keine Beschreibung",
     archive: "Archivieren",
     unarchive: "Aus Archiv holen",
+    copy: "Auftrag kopieren",
+    copyError: "Kopieren fehlgeschlagen. Bitte erneut versuchen.",
     archiveMenu: "Archiv",
     archiveView: "Archiv",
     backToList: "← Hauptliste",

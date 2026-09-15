@@ -3768,3 +3768,98 @@ Review-URL ebenfalls nicht.
 `review.stickyLabel` (Button-Text neben der Wortmarke), `review.stickyAria`
 (zugängliches Label — die Wortmarke ist `aria-hidden`); `review.copied` wird mit
 dem Sheet geteilt.
+
+---
+
+## Auftrag kopieren — leeres Template mit Kundendaten
+
+Zu **einem** roapp-Auftrag gehören oft **mehrere** valooro-Aufträge: derselbe
+Kunde bringt mehrere Stücke, und jedes Stück braucht sein eigenes Booklet. Bisher
+hieß das: neuen Auftrag von Hand anlegen und Name, E-Mail, Telefon und die
+externe Referenz abtippen. Die Kopier-Funktion nimmt genau diese Tipparbeit ab.
+
+Die Kopie ist ein **leeres Template**: Kundendaten + Auftragskontext werden 1:1
+übernommen, **keine Medien**, **kein Booklet**, kein `picked_up_at`/`archived_at`,
+Website-Publikationsfelder auf Default. Danach ist sie ein ganz normaler neuer
+`draft`-Auftrag ohne jede Sonderbehandlung — insbesondere gibt es **keinen
+automatischen Sammelversand** bei der Abholung: jede Kopie wird über den
+bestehenden Weg einzeln verschickt.
+
+**Keine Migration** — es gibt keine neue Spalte und keine Verknüpfung zwischen
+Original und Kopie. Die Zusammengehörigkeit trägt allein die externe Referenz.
+
+### Route Handler ([app/api/portal/orders/[id]/copy/route.ts](app/api/portal/orders/[id]/copy/route.ts), `POST`)
+
+**Kein Body.** AUTHENTICATED Server-Client (kein `service_role`), 401/403 ohne
+User/Betrieb; das Original wird über RLS **und** einen defensiven
+`business_id`-Filter geladen — fremde/fehlende id ⇒ 404. `business_id` stammt
+ausschließlich aus der Session (§14.2). Antwort **201** `{ id }`.
+
+Übernommen werden `customer_name`, `customer_email`, `customer_phone`,
+`item_description`, `short_summary` und `language`; gesetzt werden `status`
+`'draft'` sowie `consent_given: true` + `consent_at: now()` — dieselbe Regel wie
+beim manuellen Anlegen ([orders/route.ts](app/api/portal/orders/route.ts)): die
+Einwilligung wird an der Kassa bei jedem Stück eingeholt.
+
+⚠️ **`short_summary` wird kopiert, nicht neu erzeugt** — es beschreibt den
+Auftragskontext des Originals und ist als Startwert richtig; ein zweiter
+Haiku-Call für einen identischen Text wäre Verschwendung. Wird das Stück ein
+anderes, korrigiert man die Beschreibung ohnehin von Hand.
+
+### Nummerierung: `{Basis}-NN`
+
+`baseRef` = externe Referenz des Originals **ohne** eine bereits vorhandene
+`-NN`-Endung (`/-(\d{2})$/`). Kopiert man also eine **Kopie**, wird wieder auf
+die Basis-Nummer aufgesetzt — es entstehen keine verschachtelten Ketten wie
+`N1425-01-01`, sondern `N1425-01`, `N1425-02`, `N1425-03`.
+
+Die neue Nummer ist die höchste vorhandene `-NN`-Endung unter Original **und**
+Geschwistern, plus 1, zweistellig gepaddet. Ab der 100. Kopie würde die Endung
+dreistellig — bei einer Handvoll Änderungen pro Auftrag kein realer Fall.
+
+⚠️ **Der Geschwister-Lookup nutzt bewusst `.like()` statt `.or()`.** Die externe
+Referenz ist Fremd-/Freitext (roapp-`id_label` bzw. Handeingabe im
+Anlage-Formular); ein Komma darin würde die `.or()`-Syntax zerlegen und die
+Abfrage in falsche Bedingungen zerfallen lassen — dieselbe Klasse von Problem,
+gegen die die Suche in [orders-query.ts](lib/orders/orders-query.ts) explizit
+sanitisiert. Ein einzelner `.like("external_ref", "{Basis}%")`-Filter deckt die
+Basis-Nummer **und** alle Kopien in **einer** Abfrage ab; die exakte Zuordnung
+(`=== baseRef` oder `{baseRef}-NN`) macht danach ein JS-Filter, der auch
+Über-Treffer durch `%`/`_` in der Referenz wieder wegschneidet.
+
+### Einsortierung: `created_at` + 1 ms
+
+Die Liste sortiert `created_at DESC`. Damit die Kopie **immer direkt über dem
+Original und über allen bisherigen Kopien** steht, bekommt sie den **größten**
+Zeitstempel unter Original + Geschwistern **plus 1 Millisekunde**. Der angezeigte
+Kalendertag bleibt dadurch derselbe wie beim Original — die Karten bleiben
+beieinander, statt an den Anfang der Liste zu springen.
+
+⚠️ **Einschränkung ohne externe Referenz:** hat das Original kein
+`external_ref`, gibt es keine Geschwister zum Nachschlagen — die Kopie setzt dann
+nur auf dem Original auf (`original.created_at + 1 ms`). Mehrere referenzlose
+Kopien desselben Originals können so denselben Millisekunden-Stempel bekommen;
+ihre Reihenfolge **untereinander** ist dann unbestimmt. Über dem Original stehen
+sie aber in jedem Fall. Ihre externe Referenz bleibt `null`.
+
+### Oberfläche
+
+[components/order-copy-button.tsx](components/order-copy-button.tsx) —
+Icon-Button (zwei überlappende Rechtecke) nach dem Muster von
+[ArchiveToggle](components/archive-toggle.tsx): erbt die Geometrie von
+`.archive-toggle`, stoppt die Klick-Propagation (die Kachel ist ein `<Link>`),
+busy-Guard gegen Doppelklick, bei Erfolg `router.refresh()` — man bleibt in der
+Liste, die neue Kachel erscheint direkt oberhalb. Fehler ⇒ `window.alert`
+(Projekt-Konvention).
+
+Eingebunden in `OrderRowControls`
+([order-bulk-archive.tsx](components/order-bulk-archive.tsx)) neben dem
+bestehenden Archiv-Icon: **in beiden Scopes** (Hauptliste **und** Archiv-Ansicht)
+und **ohne** Eligibility-Gate — jeder Auftrag ist kopierbar, anders als beim
+Archivieren (`isArchivable`). **Nur außerhalb des Select-Mode** sichtbar; im
+Auswahl-Modus tragen archivierbare Kacheln weiterhin ausschließlich die
+Auswahl-Checkbox.
+
+### i18n
+
+`orders.copy` (aria-label/Tooltip „Auftrag kopieren"), `orders.copyError`.
