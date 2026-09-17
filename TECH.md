@@ -3889,3 +3889,60 @@ sichtprüfen, dass dort `fra1` steht.
 **Nicht erledigt:** die in CLAUDE.md notierte Zusammenführung der drei
 Auftragslisten-Queries zu einem Join. Die Region senkt die Latenz **pro**
 Roundtrip, die Anzahl der Roundtrips bleibt unverändert.
+
+## Instant-Loading (`loading.tsx`)
+
+**Reine Anzeige-Schicht — keine Query-Änderung, keine Migration, kein
+Suspense-Streaming innerhalb einer Seite.** Navigation im Portal fühlte sich
+träge an, weil bis zum Fertig-Laden der Server Component **nichts** sichtbar
+passierte. Next.js löst das über die eingebaute `loading.tsx`-Konvention: liegt
+eine solche Datei in einem Routen-Ordner, legt der Framework-Router automatisch
+eine Suspense-Boundary um `page.tsx` und zeigt `loading.tsx` **sofort beim
+Klick**, während die Server Component im Hintergrund lädt. Kein eigener
+Boundary-Code, kein Client-JS.
+
+**Die Portal-Shell bleibt stehen:** `loading.tsx` ersetzt nur den Inhalt von
+`.portal-main`, **nicht** Sidebar/Top-Bar/Bottom-Tab-Nav aus
+[app/portal/layout.tsx](app/portal/layout.tsx) — Next.js-Standardverhalten,
+dafür ist nichts zu tun.
+
+### Geteilte Bausteine
+
+[components/skeleton.tsx](components/skeleton.tsx) — `SkeletonBlock`
+(Rechteck: Kachel/Bild/Button/Balken), `SkeletonLine` (flacher, für
+Text/Labels), `SkeletonCard` (Karten-Platzhalter in der bestehenden
+`.card`-Optik). Server-Component-fähig, kein State, kein Datenzugriff; die
+Optik (`.skeleton`, `@keyframes skeleton-pulse`, `--skeleton`-Token,
+`prefers-reduced-motion`-Ausnahme) sitzt in
+[app/globals.css](app/globals.css). Die Bausteine existieren, damit die
+Platzhalter-Optik **nicht** in jeder `loading.tsx` dupliziert wird.
+
+**Barrierefreiheit:** die Skeleton-Elemente sind `aria-hidden`; der Ladezustand
+wird **einmal** am Wurzel-Container der jeweiligen `loading.tsx` über
+`aria-busy="true"` gemeldet, statt jeden Balken einzeln anzukündigen.
+
+### Dateien
+
+| Route | Datei | Platzhalter |
+| --- | --- | --- |
+| `/portal` | [app/portal/loading.tsx](app/portal/loading.tsx) | Kopf, Share-Rate-Headline, 2-Spalten-Raster (4 Karten), Reichweiten-Sektion |
+| `/portal/orders` | [app/portal/orders/loading.tsx](app/portal/orders/loading.tsx) | Titelzeile, Suche/Filter/„Neuer Auftrag", 6 Kachelzeilen |
+| `/portal/orders/[id]` | [app/portal/orders/[id]/loading.tsx](app/portal/orders/[id]/loading.tsx) | sticky Kopf, Stammdaten-Karte, Vorher/Nachher-Slots + Prozess-Raster |
+| `/portal/orders/new` | [app/portal/orders/new/loading.tsx](app/portal/orders/new/loading.tsx) | Titel + Formular-Karte (4 Felder + Button) |
+| `/portal/settings` | [app/portal/settings/loading.tsx](app/portal/settings/loading.tsx) | Titel + 4 Karten-Gruppen mit Feldern |
+| `/portal/orders/[id]/qr` | [app/portal/orders/[id]/qr/loading.tsx](app/portal/orders/[id]/qr/loading.tsx) | Aktionsleiste + QR-Karte |
+
+### Konvention
+
+⚠️ **Jede NEUE Portal-Route bekommt ebenfalls eine `loading.tsx`** — sonst
+erbt sie die nächsthöhere (im Zweifel die Auftragslisten- oder
+Dashboard-Optik) und zeigt beim Klick einen Platzhalter, der nicht zu ihrem
+Inhalt passt. Der Platzhalter soll die **grobe Anordnung** der echten Seite
+spiegeln (Kopf, Karten, Raster), nicht jedes Detail; er ist eine
+Server Component aus rein statischem Markup **ohne** Datenzugriff und **ohne**
+Client-JS — ein `await` darin machte genau die Wartezeit wieder auf, die er
+überbrücken soll.
+
+**Nicht Teil dieses Schritts:** Suspense-Streaming **innerhalb** einer Seite
+(einzelne langsame Abschnitte separat nachladen) — das wäre ein größerer,
+eigener Umbau. Hier geht es nur um die Sofort-Rückmeldung beim Klick.

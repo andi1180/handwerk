@@ -35,6 +35,10 @@
   --red-border: rgba(192, 57, 43, 0.30);
   --red-text: #C0392B;
 
+  /* Skeleton-Platzhalter (Instant-Loading, loading.tsx). Neutraler Ton, der
+     sowohl auf --bg (weiß) als auch in .card (--surface) sichtbar bleibt. */
+  --skeleton: rgba(58, 58, 58, 0.10);
+
   --btn-dark-bg: #3A3A3A;
   --btn-gold-bg: #C4A95B;
 
@@ -1739,6 +1743,33 @@ body {
   color: var(--red-text);
   margin: 0;
   text-align: center;
+}
+
+
+/* --- Instant-Loading-Skeletons (loading.tsx) ---
+   Reine Anzeige während Next.js die Server Component lädt. Die Bausteine
+   liegen in [components/skeleton.tsx]; hier nur Optik + Puls. */
+.skeleton {
+  display: block;
+  flex-shrink: 0;
+  background: var(--skeleton);
+  animation: skeleton-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes skeleton-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton {
+    animation: none;
+  }
 }
 
 /* Druck: NUR die QR-Karte. Portal-Chrome + Druck-Button raus, Karte schmal/S/W. */
