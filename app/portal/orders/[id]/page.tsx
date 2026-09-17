@@ -34,10 +34,43 @@ const DATE_FORMAT = new Intl.DateTimeFormat("de-DE", {
 const SIGNED_URL_TTL_SECONDS = 3600;
 
 /**
+ * Signiert mehrere Pfade des privaten Buckets `order-media` in EINEM Aufruf und
+ * gibt eine `Pfad → Signed-URL`-Map zurück. Gleiches Muster wie `signPaths` in
+ * [lib/booklet/load.ts] und die Frame-Signierung in `capture.tsx`: ein
+ * Batch-Call statt N Einzelaufrufe (Performance — pro Medium ein eigener
+ * Storage-Roundtrip summierte sich auf der Detailseite spürbar).
+ *
+ * Defensiv PER PFAD gemappt (`row.path`, nicht die Index-Reihenfolge): ein
+ * einzelner fehlgeschlagener Pfad verschiebt die Zuordnung der übrigen nicht.
+ * Fehlgeschlagene Pfade fehlen schlicht in der Map ⇒ der Aufrufer fällt auf
+ * `null` zurück (Kachel rendert ihren Platzhalter, kein Seiten-Crash).
+ */
+async function signOrderMediaPaths(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  paths: string[],
+): Promise<Map<string, string>> {
+  const map = new Map<string, string>();
+  const unique = [...new Set(paths)].filter((p) => p.length > 0);
+  if (unique.length === 0) return map;
+
+  const { data } = await supabase.storage
+    .from("order-media")
+    .createSignedUrls(unique, SIGNED_URL_TTL_SECONDS);
+
+  for (const row of data ?? []) {
+    if (row.path && row.signedUrl && !row.error) {
+      map.set(row.path, row.signedUrl);
+    }
+  }
+  return map;
+}
+
+/**
  * Auftrags-Detailseite (Server Component, mobile-first). Lädt den Auftrag über
  * den AUTHENTICATED Client (RLS skopiert auf den Betrieb; fremde/fehlende id →
- * `notFound()`) sowie dessen Medien und erzeugt pro Medium **server-seitig** eine
- * Signed-URL (privater Bucket `order-media`).
+ * `notFound()`) sowie dessen Medien und erzeugt **server-seitig** die
+ * Signed-URLs (privater Bucket `order-media`) — Medien + Video-Frames in EINEM
+ * gebündelten `createSignedUrls`-Aufruf, nicht pro Medium einzeln.
  */
 export default async function OrderDetailPage({
   params,
@@ -96,37 +129,31 @@ export default async function OrderDetailPage({
     }))
     .filter((t) => t.paths.length > 0);
 
-  const frameUrlsByMedia = new Map<string, string[]>();
+  // Frames UND Medien in EINEM Batch-Call signieren: die Frame-Pfade waren schon
+  // gebündelt, die Medien-Pfade liefen bis dahin als N Einzelaufrufe (ein
+  // Storage-Roundtrip pro Foto/Video). Beide Mengen zusammen ⇒ ein Aufruf.
+  // Leere Liste ⇒ der Helfer returnt früh, ganz ohne Call.
   const allFramePaths = frameTargets.flatMap((t) => t.paths);
-  if (allFramePaths.length > 0) {
-    const { data: signed } = await supabase.storage
-      .from("order-media")
-      .createSignedUrls(allFramePaths, SIGNED_URL_TTL_SECONDS);
-    const urlByPath = new Map<string, string>();
-    (signed ?? []).forEach((s, idx) => {
-      const path = allFramePaths[idx];
-      if (path && !s.error && s.signedUrl) urlByPath.set(path, s.signedUrl);
-    });
-    for (const t of frameTargets) {
-      const urls = t.paths
-        .map((p) => urlByPath.get(p))
-        .filter((u): u is string => Boolean(u));
-      if (urls.length > 0) frameUrlsByMedia.set(t.id, urls);
-    }
+  const urlByPath = await signOrderMediaPaths(supabase, [
+    ...media.map((m) => m.storage_path),
+    ...allFramePaths,
+  ]);
+
+  const frameUrlsByMedia = new Map<string, string[]>();
+  for (const t of frameTargets) {
+    const urls = t.paths
+      .map((p) => urlByPath.get(p))
+      .filter((u): u is string => Boolean(u));
+    if (urls.length > 0) frameUrlsByMedia.set(t.id, urls);
   }
 
-  const mediaWithUrls: MediaWithUrl[] = await Promise.all(
-    media.map(async (item) => {
-      const { data } = await supabase.storage
-        .from("order-media")
-        .createSignedUrl(item.storage_path, SIGNED_URL_TTL_SECONDS);
-      return {
-        ...item,
-        signedUrl: data?.signedUrl ?? null,
-        frameUrls: frameUrlsByMedia.get(item.id) ?? [],
-      };
-    }),
-  );
+  const mediaWithUrls: MediaWithUrl[] = media.map((item) => ({
+    ...item,
+    // Pfad ohne gültige Signatur ⇒ null: die Kachel rendert ihren bestehenden
+    // Platzhalter, die übrigen Medien bleiben unberührt.
+    signedUrl: urlByPath.get(item.storage_path) ?? null,
+    frameUrls: frameUrlsByMedia.get(item.id) ?? [],
+  }));
 
   // Editier-Modus nur im Entwurf. Spätere Stufen sind read-only. Es gibt keinen
   // `finalized`-Zwischenschritt mehr: ein Klick „Booklet erstellen" führt direkt

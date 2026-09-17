@@ -186,7 +186,7 @@ Datei: [supabase/migrations/0002_storage.sql](supabase/migrations/0002_storage.s
 - **Pfad-Konvention:** `{business_id}/{order_id}/{media_id}` — das **erste Pfad-Segment ist die `business_id`** und damit die Mandanten-Grenze im Storage.
 - **Tenant-skopierte Policies auf `storage.objects`** (nur `authenticated`): `order_media_select`/`_insert`/`_delete` erlauben Zugriff genau dann, wenn `bucket_id = 'order-media'` **und** der eingeloggte Nutzer Mitglied des Betriebs ist, dessen Id im ersten Pfad-Segment steht (`(storage.foldername(name))[1] = bu.business_id::text`).
 - **`service_role`** umgeht RLS (für spätere server-seitige Generierung) — **keine** Policy nötig. **`anon`**: keine Policy = **kein** Zugriff.
-- **Privater Bucket → Signed URLs:** Reads laufen nie direkt; die Detailseite erzeugt pro Medium **server-seitig** eine `createSignedUrl(path, 3600)` (Ablauf 3600 s).
+- **Privater Bucket → Signed URLs:** Reads laufen nie direkt; die Detailseite signiert **server-seitig** (Ablauf 3600 s) — inzwischen **gebündelt** über `createSignedUrls(paths, 3600)`, siehe den Hinweis im Detailseiten-Abschnitt.
 - Verifikation: [supabase/verify/0002_storage_checks.sql](supabase/verify/0002_storage_checks.sql) prüft (1) Bucket existiert + privat, (2) genau 3 `order_media_*`-Policies, alle nur für `authenticated`.
 
 ### Query-Helper (`lib/orders/queries.ts`)
@@ -205,6 +205,27 @@ Datei: [supabase/migrations/0002_storage.sql](supabase/migrations/0002_storage.s
 - **Medien-Liste:** lädt `order_media` (RLS, `sort_order` ASC). Pro Item: Thumbnail (Foto → `<img>` mit Signed-URL; Video → Typ-Icon), Medientyp-Icon (Inline-SVG Foto/Video), `keyword` und `tag`-Pill. Leerer Zustand: `orderDetail.noMedia`.
 - **Kein Capture-Button** in 4a (folgt in 4b).
 - Die **Auftragsliste** ([app/portal/orders/page.tsx](app/portal/orders/page.tsx)) ist nun zeilenweise klickbar (`<Link>` auf `/portal/orders/[id]`, Hover-Stil `.card-link` → `--surface-2`).
+
+> **Update (Signed-URLs gebündelt — N+1 → ein Batch-Call):** Die Seite erzeugte
+> **pro** `order_media`-Item einen eigenen `createSignedUrl(path, 3600)` — bei N
+> Fotos/Videos N einzelne Storage-Roundtrips, die sich in der Ladezeit summierten
+> (die Frame-Pfade waren bereits gebündelt, der Haupt-Schritt nicht). Jetzt
+> sammelt ein lokaler Helfer `signOrderMediaPaths(supabase, paths)` alle Pfade
+> (Medien **+** Video-Frames) und signiert sie in **EINEM**
+> `createSignedUrls(paths, 3600)`-Aufruf; leere Liste ⇒ früher Return, gar kein
+> Call. **Grund: Performance** — dasselbe Muster wie an den zwei bestehenden
+> Batch-Stellen: `signPaths` in [lib/booklet/load.ts](lib/booklet/load.ts)
+> (Medien + Branding-Assets der öffentlichen Web-Story) und die
+> Frame-Signierung in [capture.tsx](app/portal/orders/[id]/capture.tsx). Wie
+> dort wird das Ergebnis **defensiv PER PFAD** zurückgemappt (`row.path`, nicht
+> die Index-Reihenfolge) ⇒ ein einzelner fehlerhafter Pfad verschiebt die
+> Zuordnung der übrigen nicht; fehlgeschlagene Pfade fehlen schlicht in der Map
+> ⇒ `signedUrl: null` ⇒ die Kachel rendert ihren bestehenden Platzhalter, die
+> übrigen Medien bleiben unberührt (kein Seiten-Crash). Isolation unverändert:
+> AUTHENTICATED Client, **kein** `service_role`, `business_id` weiter nur aus
+> Session/RLS. [media-section.tsx](app/portal/orders/[id]/media-section.tsx)
+> (Frame-Signierung nach dem Upload) ist **nicht** betroffen — die war schon
+> gebündelt.
 
 ### i18n
 
