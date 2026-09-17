@@ -3863,3 +3863,29 @@ Auswahl-Checkbox.
 ### i18n
 
 `orders.copy` (aria-label/Tooltip „Auftrag kopieren"), `orders.copyError`.
+
+## Vercel-Function-Region = `fra1` (Frankfurt)
+
+[vercel.json](vercel.json) (NEU) setzt `"regions": ["fra1"]`. **Reine
+Infrastruktur-Konfiguration — kein Anwendungscode betroffen, keine Migration.**
+
+**Grund:** Die Functions liefen auf `iad1` (Washington D.C., USA-Ost), das
+Supabase-Projekt liegt auf **eu-central-1 (Frankfurt)**. Jeder Request machte
+damit einen **Transatlantik-Roundtrip zur DB — und zwar mehrfach pro
+Seitenaufruf** (die Auftragsliste etwa setzt drei parallele Queries ab, das
+Dashboard Funnel + Events + Reichweite). Das war der Hauptverdächtige für die
+4–5 s Ladezeit im Portal: nicht die Queries selbst, sondern die Entfernung
+davor. `fra1` liegt in derselben Region wie die Datenbank.
+
+Betrifft **alle** Server-Pfade gleichermaßen — Server Components, Route
+Handler, den öffentlichen Booklet-Render `/b/[token]`, den Webhook und die
+`after()`-Hintergrundjobs (Reel-Render, Booklet-Generierung).
+
+⚠️ `vercel.json` **überschreibt** die Einstellung im Dashboard
+(Settings → Functions → Function Region); dort nachzustellen ist weder nötig
+noch wirksam — die Datei ist die Quelle. Nach dem Deploy trotzdem einmal
+sichtprüfen, dass dort `fra1` steht.
+
+**Nicht erledigt:** die in CLAUDE.md notierte Zusammenführung der drei
+Auftragslisten-Queries zu einem Join. Die Region senkt die Latenz **pro**
+Roundtrip, die Anzahl der Roundtrips bleibt unverändert.
