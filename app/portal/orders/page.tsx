@@ -37,7 +37,17 @@ import {
   getDraftWithMediaIds,
 } from "@/lib/orders/orders-query";
 
-/** Eine Zeile der Auftragsliste — nur die für die Übersicht benötigten Felder. */
+/** Die je Auftrag mit-eingebetteten `booklets`-Felder (1:1, s. `OrderListRow`). */
+type BookletEmbed = {
+  reel_status: ReelStatus | null;
+  business_reel_status: BusinessReelStatus | null;
+  business_reel_shared_at: string | null;
+};
+
+/**
+ * Eine Zeile der Auftragsliste — nur die für die Übersicht benötigten Felder,
+ * plus die beiden **Embeds**, die früher zwei eigene Queries kosteten.
+ */
 type OrderListRow = {
   id: string;
   customer_name: string;
@@ -47,6 +57,14 @@ type OrderListRow = {
   picked_up_at: string | null;
   created_at: string;
   archived_at: string | null;
+  /**
+   * 1:1-Embed (`booklets.order_id` ist UNIQUE, 0001) ⇒ PostgREST liefert ein
+   * Objekt bzw. `null`. Die Array-Variante steht nur als defensiver Fallback im
+   * Typ (Schema-Cache-Quirk) und wird unten normalisiert.
+   */
+  booklets: BookletEmbed | BookletEmbed[] | null;
+  /** to-many-Embed: ALLE Medien-Kategorien dieses Auftrags (Filter in JS). */
+  order_media: { category: string }[] | null;
 };
 
 const DATE_FORMAT = new Intl.DateTimeFormat("de-DE", {
@@ -117,19 +135,27 @@ export default async function OrdersPage({
 
   const supabase = await createClient();
 
-  // EINE Zweitquery (geteilter Helfer), die das Badge UND den Filter speist: alle
-  // Entwürfe des aktuellen Scopes (aktiv/archiviert) MIT ≥1 Medium. RLS skopiert
-  // auf den Betrieb; kein service_role. **Geschäftsweit** (nicht seiten-skopiert).
-  // Derselbe Helfer trägt den by-filter-Bulk (`status='new'`) ⇒ kein Drift.
-  const draftWithMedia = await getDraftWithMediaIds(supabase, {
-    businessId: business.id,
-    archived: isArchiveView,
-  });
+  // Geschäftsweite Menge der Entwürfe MIT ≥1 Medium — **nur** für den Filter
+  // `status='new'` („Entwurf OHNE Medium"), der sie als `id NOT IN` braucht und
+  // daher VOR der Hauptquery kennen muss. Das `hasMedia`-Badge kommt dagegen aus
+  // dem `order_media`-Embed der Hauptquery (s. u.), deshalb kostet diese
+  // Zusatz-Query in allen anderen Fällen keinen Roundtrip mehr.
+  // RLS skopiert auf den Betrieb; kein service_role. Derselbe Helfer trägt den
+  // by-filter-Bulk (`status='new'`) ⇒ kein Drift.
+  const draftWithMedia =
+    activeStatusFilter === "new" && !activeQuick
+      ? await getDraftWithMediaIds(supabase, {
+          businessId: business.id,
+          archived: isArchiveView,
+        })
+      : new Set<string>();
 
-  // Gefilterte (un-ge-`order`-te, un-ge-`range`-te) Query über den geteilten
-  // Builder — dieselbe Filter-Verzweigung speist später den by-filter-Bulk.
-  // `.order()`/`.range()` hängt die Liste selbst an. `draftWithMedia` (oben für
-  // das Badge berechnet) trägt das NOT-IN von `status='new'`.
+  // EINE Query für alles: gefilterte (un-ge-`order`-te, un-ge-`range`-te) Basis
+  // über den geteilten Builder — dieselbe Filter-Verzweigung speist später den
+  // by-filter-Bulk — PLUS die beiden Embeds (`booklets`, `order_media`), die
+  // früher zwei zusätzliche Roundtrips waren. Embeds nesten je Auftrag (kein
+  // Zeilen-Duplizieren wie bei einem rohen JOIN) ⇒ `count: "exact"` + `.range()`
+  // zählen weiterhin Aufträge, die Pagination bleibt unverändert korrekt.
   const from = (page - 1) * ORDERS_PAGE_SIZE;
   const { data, count } = await buildFilteredOrdersQuery(supabase, {
     businessId: business.id,
@@ -139,6 +165,8 @@ export default async function OrdersPage({
     draftWithMediaIds: draftWithMedia,
     selectCols:
       "id, customer_name, external_ref, short_summary, status, picked_up_at, created_at, archived_at",
+    withBookletData: true,
+    withMediaCategories: true,
     count: "exact",
     q: qParam,
   })
@@ -173,15 +201,8 @@ export default async function OrdersPage({
   // Scope: alle Aufträge mit Booklet (generated/sent/viewed/shared) — spiegelt
   // RENDERABLE_STATUSES aus den beiden render-*-Routen.
   const RENDERABLE = ["generated", "sent", "viewed", "shared"] as const;
-  const renderableIds = orders
-    .filter((o) => (RENDERABLE as readonly string[]).includes(o.status))
-    .map((o) => o.id);
-
-  // Im Archiv-Scope werden die Booklet-Status für ALLE Karten gebraucht (nicht
-  // nur die renderbaren): der „Medien löschen"-Button und der „Medien gelöscht"-
-  // Hinweis hängen an reel_status/business_reel_status, und archivierte Aufträge
-  // können in jedem Status stehen. Die Gate-Query bleibt auf renderableIds.
-  const bookletIds = isArchiveView ? orders.map((o) => o.id) : renderableIds;
+  const isRenderable = (status: OrderStatus) =>
+    (RENDERABLE as readonly string[]).includes(status);
 
   type BookletEntry = {
     reel_status: ReelStatus | null;
@@ -193,48 +214,43 @@ export default async function OrdersPage({
   // Gate-Map: Vorher/Nachher-Fotos je Auftrag (Bedingung für das Betriebs-Reel).
   const gateByOrder = new Map<string, { hasBefore: boolean; hasAfter: boolean }>();
 
-  // bookletIds ist im Archiv-Scope eine Obermenge von renderableIds, sonst
-  // identisch — dieser eine Guard deckt daher beide Queries ab.
-  if (bookletIds.length > 0) {
-    // Beide Queries parallel — ein Round-Trip.
-    const [bookletResult, gateResult] = await Promise.all([
-      supabase
-        .from("booklets")
-        .select("order_id, reel_status, business_reel_status, business_reel_shared_at")
-        .in("order_id", bookletIds)
-        .returns<
-          {
-            order_id: string;
-            reel_status: ReelStatus | null;
-            business_reel_status: BusinessReelStatus | null;
-            business_reel_shared_at: string | null;
-          }[]
-        >(),
-      supabase
-        .from("order_media")
-        .select("order_id, category")
-        .in("order_id", renderableIds)
-        .in("category", ["before", "after"])
-        .returns<{ order_id: string; category: string }[]>(),
-    ]);
+  // `hasMedia` fürs Badge („Neu" vs. „In Arbeit" bei `draft`) — aus dem Embed,
+  // nicht mehr aus der geschäftsweiten `getDraftWithMediaIds`-Query.
+  const hasMediaByOrder = new Map<string, boolean>();
 
-    for (const b of bookletResult.data ?? []) {
-      reelByOrder.set(b.order_id, {
-        reel_status: b.reel_status,
-        business_reel_status: b.business_reel_status,
-        business_reel_shared_at: b.business_reel_shared_at,
-      });
+  // Beide Maps entstehen jetzt IN MEMORY aus den Embeds der einen Query — mit
+  // exakt demselben Scope wie zuvor die beiden Einzel-Queries:
+  //  - booklets: im Archiv-Scope für ALLE Karten (der „Medien löschen"-Button und
+  //    der „Medien gelöscht"-Hinweis hängen an reel_status/business_reel_status,
+  //    und archivierte Aufträge können in jedem Status stehen), sonst nur für die
+  //    renderbaren. Das ist KEIN Schönheitsdetail: ein Entwurf mit gepurgtem
+  //    Booklet würde sonst auch in der Hauptliste „Medien gelöscht" zeigen.
+  //  - Gate: nur für die renderbaren Karten, und nur before/after (der Embed
+  //    liefert bewusst alle Kategorien, s. `withMediaCategories`).
+  for (const order of orders) {
+    const media = order.order_media ?? [];
+    hasMediaByOrder.set(order.id, media.length > 0);
+
+    const renderable = isRenderable(order.status);
+
+    if (isArchiveView || renderable) {
+      const booklet = Array.isArray(order.booklets)
+        ? (order.booklets[0] ?? null)
+        : order.booklets;
+      if (booklet) {
+        reelByOrder.set(order.id, {
+          reel_status: booklet.reel_status,
+          business_reel_status: booklet.business_reel_status,
+          business_reel_shared_at: booklet.business_reel_shared_at,
+        });
+      }
     }
 
-    // Aggregiere Vorher/Nachher je Auftrag.
-    for (const row of gateResult.data ?? []) {
-      const entry = gateByOrder.get(row.order_id) ?? {
-        hasBefore: false,
-        hasAfter: false,
-      };
-      if (row.category === "before") entry.hasBefore = true;
-      if (row.category === "after") entry.hasAfter = true;
-      gateByOrder.set(row.order_id, entry);
+    if (renderable) {
+      gateByOrder.set(order.id, {
+        hasBefore: media.some((m) => m.category === "before"),
+        hasAfter: media.some((m) => m.category === "after"),
+      });
     }
   }
 
@@ -435,7 +451,7 @@ export default async function OrdersPage({
                       >
                         <OrderStatusBadge
                           status={order.status}
-                          hasMedia={draftWithMedia.has(order.id)}
+                          hasMedia={hasMediaByOrder.get(order.id) ?? false}
                           reelStatus={
                             reelByOrder.get(order.id)?.reel_status ?? null
                           }
@@ -487,7 +503,7 @@ export default async function OrdersPage({
                     <div className="order-media-purged">
                       {t(DEFAULT_LOCALE, "orders.mediaPurged")}
                     </div>
-                  ) : (RENDERABLE as readonly string[]).includes(order.status) ? (
+                  ) : isRenderable(order.status) ? (
                     <div style={{ display: "flex", alignItems: "center" }}>
                       <BusinessReelButton
                         orderId={order.id}

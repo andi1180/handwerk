@@ -22,12 +22,33 @@ export type FilteredOrdersOptions = {
    */
   draftWithMediaIds: Set<string>;
   /**
-   * Basis-Spaltenliste. Bei `status='in_progress'` hängt die Funktion
-   * `order_media!inner(id)` an; bei `status ∈ {creating, ready, failed}`
-   * `booklets!inner(reel_status)` (damit auch die Bulk-Variante mit `select("id")`
-   * korrekt über den jeweiligen Inner-Join filtert).
+   * Basis-Spaltenliste. Die nötigen Embeds hängt die Funktion selbst an:
+   * bei `status='in_progress'` `order_media!inner(…)`, bei
+   * `status ∈ {creating, ready, failed}` `booklets!inner(…)` (damit auch die
+   * Bulk-Variante mit `select("id")` korrekt über den jeweiligen Inner-Join
+   * filtert).
    */
   selectCols: string;
+  /**
+   * Zusätzlich die `booklets`-Daten je Auftrag mitladen (Reel-Status-Badge +
+   * Betriebs-Reel-Button der Liste) — **kein** zweiter Roundtrip.
+   *
+   * ⚠️ Es gibt bewusst nur EINEN `booklets`-Embed, der Filter UND Daten trägt:
+   * zwei Embeds derselben Relation (einer aliased, einer `!inner`) liefern in
+   * PostgREST für `booklets.reel_status`-Filter **falsche** Ergebnisse (gemessen:
+   * der Filter greift nicht, es kommen zusätzliche Zeilen zurück). Daher wird
+   * hier nur die Spaltenliste des einen Embeds verbreitert.
+   */
+  withBookletData?: boolean;
+  /**
+   * Zusätzlich die Medien-**Kategorien** je Auftrag mitladen (`order_media(category)`)
+   * — speist das Vorher/Nachher-Gate des Betriebs-Reels und das `hasMedia`-Badge,
+   * ebenfalls ohne zweiten Roundtrip. Bewusst OHNE Kategorie-Filter im Embed:
+   * derselbe Embed trägt bei `status='in_progress'` den `!inner`-Join („hat ≥1
+   * Medium"), ein `category`-Filter würde dessen Bedeutung verändern. Die
+   * Einschränkung auf before/after passiert deshalb server-seitig im Aufrufer.
+   */
+  withMediaCategories?: boolean;
   /** Optional die count-Option (Liste: "exact"; Bulk: weglassen). */
   count?: "exact" | "planned" | "estimated";
   /**
@@ -58,11 +79,11 @@ export type FilteredOrdersOptions = {
  *
  *  - `quick='flagged'`      → picked_up_at gesetzt UND status ∈ {draft, generated}.
  *  - `status='new'`         → status='draft' UND id NOT IN draftWithMediaIds.
- *  - `status='in_progress'` → status='draft' (+ order_media!inner(id) im select).
+ *  - `status='in_progress'` → status='draft' (+ order_media!inner(…) im select).
  *  - `status='creating'`    → status='generated' UND reel_status ∈ {pending,rendering}.
  *  - `status='ready'`       → status='generated' UND reel_status='ready'.
  *  - `status='failed'`      → status='generated' UND reel_status='failed'.
- *    (Die drei composite-Filter via booklets!inner(reel_status) im select.)
+ *    (Die drei composite-Filter via booklets!inner(…) im select.)
  *  - `status ∈ {sent,viewed,shared}` → status=<wert>.
  *  - sonst (null/null)      → kein Status-Filter.
  */
@@ -77,19 +98,37 @@ export function buildFilteredOrdersQuery(
     archived,
     draftWithMediaIds,
     selectCols,
+    withBookletData,
+    withMediaCategories,
     count,
     head,
     q,
   } = opts;
 
-  // „In Arbeit" = Entwurf MIT Medium ⇒ order_media!inner direkt in der Query;
-  // die Reel-Composite-Filter (creating/ready/failed) ⇒ booklets!inner(reel_status).
-  const cols =
-    status === "in_progress"
-      ? `${selectCols}, order_media!inner(id)`
-      : status === "creating" || status === "ready" || status === "failed"
-        ? `${selectCols}, booklets!inner(reel_status)`
-        : selectCols;
+  // Embeds: je Relation GENAU EINER — er trägt den Inner-Join des Filters UND
+  // (wenn angefordert) die Daten. „In Arbeit" = Entwurf MIT Medium ⇒
+  // order_media!inner; die Reel-Composite-Filter (creating/ready/failed) ⇒
+  // booklets!inner (der `booklets.reel_status`-Filter unten adressiert ihn).
+  const bookletInner =
+    status === "creating" || status === "ready" || status === "failed";
+  const mediaInner = status === "in_progress";
+
+  const embeds: string[] = [];
+  if (withBookletData || bookletInner) {
+    embeds.push(
+      `booklets${bookletInner ? "!inner" : ""}(${
+        withBookletData
+          ? "reel_status, business_reel_status, business_reel_shared_at"
+          : "reel_status"
+      })`,
+    );
+  }
+  if (withMediaCategories || mediaInner) {
+    embeds.push(
+      `order_media${mediaInner ? "!inner" : ""}(${withMediaCategories ? "category" : "id"})`,
+    );
+  }
+  const cols = [selectCols, ...embeds].join(", ");
 
   // `head` nur zusammen mit `count` setzen; ohne `head` bleibt das Select-Argument
   // exakt `{ count }` (Liste unverändert) bzw. `undefined`.

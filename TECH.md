@@ -2771,7 +2771,9 @@ Optionales Prop `hasMedia?: boolean` (Default `false`). Wirkt **nur** auf `draft
 
 ### Medien-Existenz — EINE Query, die Badge UND Filter speist ([app/portal/orders/page.tsx](app/portal/orders/page.tsx))
 
-Eine zusätzliche Query (Muster wie die bestehende `reel_status`-Zweitquery) liefert die **geschäftsweite** Menge der Entwürfe mit ≥1 Medium: `orders` + `order_media!inner(id)`, `status='draft'`, `business_id`-skopiert (AUTHENTICATED, RLS, **kein** `service_role`) → `Set<order_id>` (`draftWithMedia`). `order_media!inner` ⇒ PostgREST liefert nur Aufträge mit Medium (eine Zeile je Auftrag, Kinder genested). **Geschäftsweit** (nicht seiten-skopiert), weil der „Neu"-Filter ein `id NOT IN (…)` über die GESAMTE Menge braucht (Pagination greift erst nach dem WHERE). Aus dem Set wird je Zeile `hasMedia={draftWithMedia.has(order.id)}` ans Badge gegeben.
+Eine zusätzliche Query (Muster wie die bestehende `reel_status`-Zweitquery) liefert die **geschäftsweite** Menge der Entwürfe mit ≥1 Medium: `orders` + `order_media!inner(id)`, `status='draft'`, `business_id`-skopiert (AUTHENTICATED, RLS, **kein** `service_role`) → `Set<order_id>` (`draftWithMedia`). `order_media!inner` ⇒ PostgREST liefert nur Aufträge mit Medium (eine Zeile je Auftrag, Kinder genested). **Geschäftsweit** (nicht seiten-skopiert), weil der „Neu"-Filter ein `id NOT IN (…)` über die GESAMTE Menge braucht (Pagination greift erst nach dem WHERE).
+
+> **Stand heute** (s. „Auftragsliste — eine Query statt drei" am Dateiende): Das Badge liest `hasMedia` **nicht mehr** aus diesem Set, sondern aus dem `order_media`-Embed der Hauptquery (`length > 0`) — für eine `draft`-Zeile auf der Seite äquivalent, aber ohne eigenen Roundtrip. Der Helfer `getDraftWithMediaIds` wird deshalb nur noch für den Filter `?status=new` geladen (und unverändert vom by-filter-Bulk genutzt).
 
 ### Detailseite ([app/portal/orders/[id]/page.tsx](app/portal/orders/[id]/page.tsx))
 
@@ -3893,8 +3895,9 @@ Infrastruktur-Konfiguration — kein Anwendungscode betroffen, keine Migration.*
 **Grund:** Die Functions liefen auf `iad1` (Washington D.C., USA-Ost), das
 Supabase-Projekt liegt auf **eu-central-1 (Frankfurt)**. Jeder Request machte
 damit einen **Transatlantik-Roundtrip zur DB — und zwar mehrfach pro
-Seitenaufruf** (die Auftragsliste etwa setzt drei parallele Queries ab, das
-Dashboard Funnel + Events + Reichweite). Das war der Hauptverdächtige für die
+Seitenaufruf** (die Auftragsliste setzte damals drei Queries ab — inzwischen
+zu einer Query mit Embeds zusammengeführt, s. Dateiende —, das Dashboard
+Funnel + Events + Reichweite). Das war der Hauptverdächtige für die
 4–5 s Ladezeit im Portal: nicht die Queries selbst, sondern die Entfernung
 davor. `fra1` liegt in derselben Region wie die Datenbank.
 
@@ -3967,3 +3970,97 @@ Client-JS — ein `await` darin machte genau die Wartezeit wieder auf, die er
 **Nicht Teil dieses Schritts:** Suspense-Streaming **innerhalb** einer Seite
 (einzelne langsame Abschnitte separat nachladen) — das wäre ein größerer,
 eigener Umbau. Hier geht es nur um die Sofort-Rückmeldung beim Klick.
+
+---
+
+## Auftragsliste — eine Query statt drei (PostgREST-Embeds)
+
+Die Auftragsliste ([app/portal/orders/page.tsx](app/portal/orders/page.tsx))
+setzte pro Seitenaufruf **drei** DB-Roundtrips ab — die paginierte Orders-Query,
+danach `booklets` (Reel-Status) und `order_media` (Vorher/Nachher-Gate) parallel
+— plus die vorgelagerte `getDraftWithMediaIds`-Query, also **vier** nacheinander
+bzw. nebenläufig. Jetzt reicht in der Regel **einer**: die beiden Zusatztabellen
+kommen als **PostgREST-Embeds** in derselben Query mit.
+
+**Reine Datenbeschaffung** — Filterlogik, Badges, Pagination, Bulk-Auswahl und
+das gesamte JSX sind unverändert; keine Migration, kein `service_role`,
+`business_id` weiter nur aus der Session (AUTHENTICATED + RLS).
+
+### Was der Builder jetzt tut ([lib/orders/orders-query.ts](lib/orders/orders-query.ts))
+
+`FilteredOrdersOptions` bekommt zwei optionale Flags:
+
+- **`withBookletData`** → `booklets(reel_status, business_reel_status, business_reel_shared_at)`
+- **`withMediaCategories`** → `order_media(category)`
+
+⚠️ **Je Relation gibt es GENAU EINEN Embed** — derselbe trägt den `!inner`-Join
+des Filters *und* die Daten. Das ist keine Stilfrage: Zwei Embeds derselben
+Relation (einer aliased, einer `!inner`) werden von PostgREST zwar akzeptiert,
+liefern für `booklets.reel_status`-Filter aber **stillschweigend falsche
+Ergebnisse** — gemessen am echten Projekt: `status=ready` gab mit Doppel-Embed
+**3** statt **2** Zeilen zurück, darunter eine mit `reel_status='rendering'`
+(der Filter griff schlicht nicht). Deshalb wird nur die **Spaltenliste** des
+einen Embeds verbreitert, nie ein zweiter angehängt.
+
+⚠️ Der Medien-Embed hat bewusst **keinen `category`-Filter**: bei
+`status='in_progress'` trägt genau dieser Embed den `!inner`-Join „hat ≥ 1
+Medium". Ein `category=in.(before,after)` darin würde die Filter-Bedeutung
+verändern (nur noch Entwürfe mit Vorher/Nachher-Foto). Die Einschränkung auf
+before/after passiert deshalb **server-seitig im Aufrufer**, nicht in der Query.
+
+Ohne die Flags ist das erzeugte Select **byte-identisch** zu vorher — der
+by-filter-Bulk ([archive-bulk/route.ts](app/api/portal/orders/archive-bulk/route.ts))
+bleibt damit unangetastet.
+
+### Warum `count`/Pagination heil bleiben
+
+Embeds **nesten** je Auftrag (`booklets` als Objekt, `order_media` als Array) —
+anders als ein roher SQL-JOIN duplizieren sie keine Elternzeilen. `count:"exact"`
+und `.range()` zählen also weiterhin **Aufträge**. Für `booklets` gilt das
+ohnehin doppelt: `order_id` ist UNIQUE (0001) ⇒ 1:1 ⇒ PostgREST liefert ein
+Objekt bzw. `null`, kein Array.
+
+### Was die Seite daraus baut
+
+`reelByOrder` und `gateByOrder` entstehen jetzt **in memory** aus den Embeds —
+mit **exakt demselben Scope** wie zuvor die zwei Einzel-Queries:
+
+- **booklets**: im Archiv-Scope für ALLE Karten, sonst nur für die renderbaren
+  (`generated`/`sent`/`viewed`/`shared`). ⚠️ Kein Schönheitsdetail: Ein Entwurf
+  mit gepurgtem Booklet würde sonst auch in der Hauptliste „Medien gelöscht"
+  zeigen — vorher war er schlicht nicht in der `bookletIds`-Menge.
+- **Gate**: nur für renderbare Karten, und nur `before`/`after` (der Embed
+  liefert bewusst alle Kategorien, s. o.).
+
+### `getDraftWithMediaIds` nur noch für den `new`-Filter
+
+Das `hasMedia`-Badge („Neu" vs. „In Arbeit") kommt jetzt aus dem
+`order_media`-Embed (`length > 0`) statt aus der geschäftsweiten
+`draftWithMedia`-Menge. Beides ist für eine `draft`-Zeile auf der Seite
+äquivalent — und das Badge liest `hasMedia` ohnehin **nur** bei `draft`
+(`status === "draft" && hasMedia`).
+
+Damit bleibt nur **ein** Fall mit zwei Roundtrips: `?status=new` („Entwurf OHNE
+Medium") braucht die geschäftsweite Menge **vor** der Hauptquery für sein
+`id NOT IN (…)` — Pagination greift erst nach dem WHERE, seiten-skopiert wäre
+falsch. Der Helfer selbst und seine Nutzung im Bulk sind unverändert.
+
+### Verifikation (Maßstab war „1:1 identisch", nicht „baut grün")
+
+- **Datenschicht, echter Live-Bestand (126 Aufträge, alle Status, 74 archiviert,
+  56 geflaggt):** ALT (3 Queries) vs. NEU (1 Query) über **18 Varianten** —
+  alle Status-Filter, `quick=flagged`, Archiv-Scope, Seiten 2 und 3, vier
+  Suchbegriffe, Suche+Status kombiniert. Verglichen wurden `count`, die
+  Reihenfolge der IDs und der komplette abgeleitete Kartenzustand (Badge,
+  `reel_status`, purged, Betriebs-Reel-Status, Gate, `shared_at`, Flag):
+  **18/18 identisch**.
+- **Select-Strings**: gegen den echten Builder mit einem Aufnahme-Stub
+  protokolliert; die Bulk-Variante ist byte-identisch zu vorher. (supabase-js
+  strippt unquoted Whitespace, das Wire-Format entspricht also exakt dem
+  geprüften.)
+- **Gerendertes HTML**: mit echter Session gegen den Production-Build,
+  **15 URL-Varianten**, ALT vs. NEU — Karten (31 Stück), Badge-Texte,
+  Betriebs-Reel-Pill-Klassen, Warn-/Purge-Hinweise, Filter-Auswahl, Pagination
+  und Leer-Zustände **identisch**. Der einzige Byte-Unterschied war Reacts
+  Streaming-Gerüst (ALT hatte durch das zusätzliche `await` einen Chunk mehr).
+
