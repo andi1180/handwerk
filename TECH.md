@@ -4116,3 +4116,42 @@ falsch. Der Helfer selbst und seine Nutzung im Bulk sind unverändert.
   und Leer-Zustände **identisch**. Der einzige Byte-Unterschied war Reacts
   Streaming-Gerüst (ALT hatte durch das zusätzliche `await` einen Chunk mehr).
 
+---
+
+## Tier-/Abo-Fundament (Schritt A1, Migration 0019)
+
+Fünf nullable Spalten auf `businesses`: `tier`, `subscription_status`,
+`trial_ends_at`, `current_period_end`, `stripe_subscription_id` — plus
+`entitlement_overrides jsonb not null default '{}'`. Rein additiv, kein
+bestehender Code liest oder schreibt sie.
+
+**CHECK-Constraints:** `tier in ('WOM Starter','WOM Plus','WOM Pro')` —
+die drei Namen sind fest (E9), ihr Inhalt (Funktionen/Limits je Tier)
+liegt als Daten im künftigen Backoffice, nicht im Code.
+`subscription_status in
+('trial','trial_ended','active','past_due','canceled')` — bewusst ohne
+`'suspended'`: das übernimmt weiterhin ausschließlich `businesses.status`
+(seit 0005), um nicht zwei Felder mit derselben Bedeutung zu pflegen.
+
+**Rechte:** `revoke update (...) on businesses from authenticated` auf
+allen sechs neuen Spalten — die bestehende `businesses_update`-Policy
+(RLS, seit 0001) prüft nur Mitgliedschaft, keine Spaltenliste; ohne das
+REVOKE hätte jedes Betriebsmitglied über einen direkten Client-Call
+Schreibzugriff auf sein eigenes Tier gehabt. Schreiben bleibt
+`service_role` vorbehalten (kommt mit dem Stripe-Webhook A2/E3 und dem
+Admin-Backoffice A4).
+
+**Backfill:** `businesses.business_email = 'office@alinadax.com'`
+(einziger Produktivbetrieb) → `tier='WOM Pro'`,
+`subscription_status='active'`. Sichert, dass eine spätere Durchsetzung
+(A7) den heutigen Funktionsumfang nicht versehentlich einschränkt.
+
+Verify-Gate:
+[supabase/verify/0019_business_tier_subscription_checks.sql](supabase/verify/0019_business_tier_subscription_checks.sql).
+Manuell im SQL-Editor nach der Migration ausführen.
+
+**Nächster Schritt (A2):** `lib/entitlements/` — zentrale Auskunft
+„effektives Limit = min(Plattform, max(Tier, Betriebs-Ausnahme),
+Betriebs-Einstellung)". Erst dort werden diese Spalten zum ersten Mal
+gelesen.
+
