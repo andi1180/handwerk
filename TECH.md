@@ -4355,3 +4355,109 @@ korrigiert das defensiv (`revoke all ... from authenticated` +
 `grant select`). **Gilt als Pflicht-Checkliste für jede künftige neue
 Tabelle:** `revoke all ... from anon, public, authenticated` VOR den
 gezielten GRANTs, nicht nur `anon, public` wie ursprünglich in 0021.
+
+## Platform-Admin-Rolle (Schritt A3, Migration 0023)
+
+Die globale Plattform-Rolle aus ROLLOUT_PFLICHTENHEFT.md §4.2 —
+„Plattform-Obergrenzen, Tier eines Betriebs, Sperren, alle Betriebe
+sehen". **Stand: Tabelle + Helfer existieren, es gibt noch KEINEN
+Aufrufer** — keine Route, keine Seite, keine Komponente liest sie.
+Verdrahtung = **A4 (Admin-Backoffice)**.
+
+### Warum eine eigene Tabelle statt `business_users.role`
+
+`business_users` ist strukturell an **einen** Betrieb gebunden
+(`business_id` + `role`). Einen Plattform-Admin dort abzubilden hieße,
+für **jeden** Kundenbetrieb eine Mitgliedschaftszeile anzulegen und bei
+jedem Neukunden nachzuziehen. Ein Plattform-Admin soll alle Betriebe
+sehen können, ohne Mitglied irgendeines zu sein — das ist eine andere
+Art von Rolle und bekommt deshalb eine eigene Tabelle.
+
+### Schema
+
+```sql
+create table platform_admins (
+  user_id uuid primary key references auth.users(id),
+  created_at timestamptz not null default now()
+);
+```
+
+Zwei Spalten, keine `business_id`, kein Rollen-Text: die Zeile selbst
+**ist** die Rolle.
+
+### RLS + GRANTs
+
+```sql
+alter table platform_admins enable row level security;
+revoke all on platform_admins from anon, public, authenticated;
+
+create policy platform_admins_select on platform_admins
+  for select to authenticated
+  using (user_id = auth.uid());
+
+grant select on platform_admins to authenticated;
+grant all    on platform_admins to service_role;
+```
+
+- **`revoke all` steht VOR den GRANTs und nennt `authenticated`
+  ausdrücklich.** Das ist die in 0021/0022 gelernte Lektion, hier von
+  Anfang an angewendet statt nachkorrigiert: Supabase grantet neuen
+  Tabellen per Default breit, und eine `for select`-Policy schränkt das
+  GRANT **nicht** ein (RLS filtert Zeilen, das GRANT erlaubt
+  Operationen).
+- **Lesen nur die eigene Zeile.** Jeder eingeloggte Nutzer darf sehen,
+  *ob er selbst* Admin ist — nicht, wer sonst noch Admin ist.
+- **Keine INSERT/UPDATE/DELETE-Policy.** RLS blockt kategorisch,
+  `service_role` ist der einzige Schreibweg. Vergabe ausschließlich
+  manuell per SQL; es gibt keinen Code-Pfad zum Selbst-Befördern.
+
+### Backfill (defensiv, per `do $$ … $$`)
+
+Der Primärschlüssel ist ein **Fremdschlüssel auf `auth.users(id)`** —
+ein fester oder erfundener Wert ließe die ganze Migration am FK
+scheitern. Der Block sucht die `auth.users`-Zeile zu
+`andreas.dax@gmail.com`, fügt bei Treffer ein (`on conflict do nothing`
+⇒ idempotent) und gibt sonst eine `raise notice` mit dem nachzuholenden
+INSERT aus. Tabelle, RLS und Rechte entstehen in **jedem** Fall — nur
+der Eintrag wird ggf. übersprungen.
+
+⚠️ **Zwei Rollen für dieselbe Adresse, bewusst:**
+`andreas.dax@gmail.com` ist gleichzeitig **Owner des Test-Betriebs**
+„Schneideratelier Alina Dax" (über `business_users`, RLS wie bei jedem
+Kunden) **und** `platform_admin` (plattformweit, darüber). Die beiden
+Rollen sind unabhängig voneinander; der Produktivbetrieb „Atelier Alina
+Dax" (`office@alinadax.com`) ist davon unberührt.
+
+### API: [lib/auth/platform-admin.ts](lib/auth/platform-admin.ts)
+
+```ts
+isPlatformAdmin(supabase: ServerClient, userId: string): Promise<boolean>
+```
+
+Für künftige Aufrufer (A4):
+
+- Nimmt einen **bereits erzeugten AUTHENTICATED** Server-Client (RLS,
+  **kein `service_role`**) **und** die `userId` explizit entgegen —
+  dasselbe Muster wie
+  [lib/entitlements/load.ts](lib/entitlements/load.ts) (A2). Das Modul
+  erzeugt selbst keinen Client und liest nie aus Cookies/Session;
+  die `userId` MUSS beim Aufrufer aus der Session stammen.
+- Der `userId`-Parameter ist **defensiv** (explizit statt implizit),
+  **kein** Sicherheitsmechanismus für sich — die RLS-Policy beschränkt
+  die sichtbaren Zeilen ohnehin auf `auth.uid()`.
+- Keine Zeile ⇒ `false`. Ein echter **Datenbankfehler wirft**: fail-safe
+  heißt hier „kein Zugriff bei Unsicherheit", nicht „Fehler
+  verschlucken" — still `false` wäre eine stille Sperre, still `true`
+  eine stille Öffnung.
+
+### Verify-Gate
+
+[supabase/verify/0023_platform_admins_checks.sql](supabase/verify/0023_platform_admins_checks.sql)
+— manuell im SQL-Editor **nach** der Migration ausführen: Tabelle + FK,
+RLS aktiv, `authenticated` genau `SELECT`, `anon` 0 Zeilen,
+`service_role` alles, Backfill-Status. Der SQL-Editor läuft mit
+erhöhten Rechten (RLS greift dort nicht) — genau deshalb ist die
+Grant-Prüfung dort aussagekräftig.
+
+> ⚠️ Migration 0023 muss angewendet sein, **bevor** A4 verdrahtet wird —
+> sonst wirft `isPlatformAdmin` an jeder Stelle, die sie aufruft.
