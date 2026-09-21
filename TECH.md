@@ -4347,3 +4347,11 @@ Constraint, RLS aktiv, `authenticated` nur `SELECT`, `anon` gar nichts,
 > sonst wirft `loadEntitlements` an jeder Schreibstelle (gemessen:
 > `entitlements: load_tier_definition: Could not find the table
 > 'public.tier_definitions'`).
+
+⚠️ **Korrektur (Migration 0022):** `authenticated` hatte nach 0021 über
+Supabase's Default-Grant volle CRUD-Rechte auf `tier_definitions` statt
+nur SELECT — die RLS-Policy allein schränkt das GRANT nicht ein. 0022
+korrigiert das defensiv (`revoke all ... from authenticated` +
+`grant select`). **Gilt als Pflicht-Checkliste für jede künftige neue
+Tabelle:** `revoke all ... from anon, public, authenticated` VOR den
+gezielten GRANTs, nicht nur `anon, public` wie ursprünglich in 0021.
