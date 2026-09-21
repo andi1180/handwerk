@@ -1,4 +1,10 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "regions": ["fra1"]
+  "regions": ["fra1"],
+  "functions": {
+    "app/api/portal/orders/[id]/render-reel/route.ts": { "memory": 4096 },
+    "app/api/portal/orders/[id]/render-business-reel/route.ts": { "memory": 4096 },
+    "app/api/portal/orders/[id]/generate/route.ts": { "memory": 4096 },
+    "app/api/portal/orders/[id]/media/[mediaId]/compress/route.ts": { "memory": 4096 }
+  }
 }

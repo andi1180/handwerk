@@ -3914,6 +3914,58 @@ sichtprüfen, dass dort `fra1` steht.
 Auftragslisten-Queries zu einem Join. Die Region senkt die Latenz **pro**
 Roundtrip, die Anzahl der Roundtrips bleibt unverändert.
 
+### Function-CPU pro Route (Performance, 2 vCPU)
+
+Dieselbe [vercel.json](vercel.json) hebt über den `functions`-Block **NUR die
+vier FFmpeg-Routen** auf `"memory": 4096` — das ist laut
+[Vercel-Doku](https://vercel.com/docs/functions/configuring-functions/memory)
+die **Performance-Stufe: 4 GB / 2 vCPUs**; der Projekt-Default bleibt
+**Standard: 2 GB / 1 vCPU**.
+
+```json
+"functions": {
+  "app/api/portal/orders/[id]/render-reel/route.ts": { "memory": 4096 },
+  "app/api/portal/orders/[id]/render-business-reel/route.ts": { "memory": 4096 },
+  "app/api/portal/orders/[id]/generate/route.ts": { "memory": 4096 },
+  "app/api/portal/orders/[id]/media/[mediaId]/compress/route.ts": { "memory": 4096 }
+}
+```
+
+**Warum nur diese vier:** Portal-Seiten und die übrigen Route Handler sind
+**I/O-gebunden** — sie warten auf Supabase, mehr CPU beschleunigt Warten nicht,
+kostet aber Provisioned Memory. Die vier Routen sind die einzigen, in denen
+**FFmpeg** läuft (alle über `ensureFfmpeg()` aus
+[lib/reel/ffmpeg.ts](lib/reel/ffmpeg.ts), alle in `after()` nach der Response):
+
+| Route | FFmpeg-Arbeit |
+| --- | --- |
+| `render-reel` | `renderReel` — Kunden-Reel |
+| `render-business-reel` | `renderBusinessReel` — Betriebs-Reel (0013) |
+| `generate` | ruft seit **B1** `renderReel` im `after()` mit (Booklet & Reel in einem Klick) — deshalb **nicht** vergessen |
+| `media/[mediaId]/compress` | `compressOrderVideo` — serverseitige Video-Kompression (720p/H.264) |
+
+⚠️ Der **Nachlauf per Script** (`scripts/*`) läuft auf dem eigenen Rechner,
+nicht als Function — dort gibt es nichts zu konfigurieren.
+
+⚠️ **`maxDuration` steht weiterhin im Code** (`export const maxDuration = 300`
+in allen vier Routen) und wurde **nicht** nach `vercel.json` gezogen — eine
+zweite Quelle für denselben Wert wäre eine Drift-Falle.
+
+⚠️ **Per-Route-Konfiguration ändert das Bundling:** Routen mit abweichender
+Konfiguration werden **separat** gebündelt. Das ist hier geprüft und
+unkritisch — `outputFileTracingIncludes`
+([next.config.ts](next.config.ts)) ist zwar nur für `render-reel` notiert, der
+Build-Trace listet Schrift + Scrims aber weiterhin in **allen drei**
+Reel-Routen (`render-reel`, `generate`, `render-business-reel`); `compress`
+braucht sie nicht (reine Transkodierung, **kein** `drawtext`). Nach Änderungen
+am Bundling erneut gegen die `.nft.json` prüfen.
+
+⚠️ **Keine Thread-Grenze im Code:** FFmpeg wird nirgends mit `-threads` o. ä.
+aufgerufen, nutzt also von sich aus beide vCPUs. Das ist **bewusst so
+belassen** — eine Thread-Vorgabe wäre eine eigene Entscheidung, und der
+Production-Build ist **6.0.1** (s. die 6.0.1-Stolpersteine bei den
+Reel-Frames).
+
 ## Instant-Loading (`loading.tsx`)
 
 **Reine Anzeige-Schicht — keine Query-Änderung, keine Migration, kein
