@@ -4161,3 +4161,189 @@ Manuell im SQL-Editor nach der Migration ausführen.
 Betriebs-Einstellung)". Erst dort werden diese Spalten zum ersten Mal
 gelesen.
 
+
+---
+
+## Entitlements-Fundament (Schritt A2, Migration 0021)
+
+Die **eine** zentrale Auskunft „darf/kann dieser Betrieb X?"
+([lib/entitlements/](lib/entitlements/)) — damit kein verstreutes
+`if (tier === …)` in Routen entsteht (ROLLOUT_PFLICHTENHEFT.md §4.1).
+
+> ⚠️ **Noch KEIN Aufrufer.** Das Modul entsteht isoliert; keine Route,
+> keine Seite, keine Komponente ruft es auf. Die Durchsetzung an den
+> Schreibstellen (Upload-/Render-Route) ist **A7**. Bis dahin ändert
+> sich am Verhalten der App nichts.
+
+### Die Formel
+
+```
+Effektiv(key) = min(
+  Plattform-Obergrenze(key),           # Code, nur Andreas — hart (E6/E7)
+  max( Tier-Vorgabe(key),              # tier_definitions (Daten, E9)
+       Betriebs-Ausnahme(key) ),       # businesses.entitlement_overrides
+  Betriebs-Einstellung(key)            # businesses.settings (der Kunde)
+)
+```
+
+- Das **äußere `min()`** ist die harte Kappung: eine Ausnahme über der
+  Plattform-Obergrenze bleibt wirkungslos.
+- Das **innere `max()`** heißt: eine Betriebs-Ausnahme kann nur
+  **gewähren**, nie entziehen. Weniger geben = Tier ändern.
+- **Fehlender Key ≠ 0.** Fehlt ein Limit-Key in Tier-Vorgabe UND
+  Ausnahme, entfällt der ganze `max()`-Term und es bleibt
+  `min(Plattform-Obergrenze, Betriebs-Einstellung)` — also exakt das,
+  was die App heute schon durchsetzt.
+
+### Datenquellen
+
+| Schicht | Quelle | Wer ändert |
+|---|---|---|
+| Plattform-Obergrenze | `PLATFORM_CEILINGS` = `PHOTO_COUNT.max` / `VIDEO_COUNT.max` / `VIDEO_SECONDS.max` aus [lib/settings/options.ts](lib/settings/options.ts) | nur Andreas, Code/Deploy |
+| Tier-Vorgabe | `tier_definitions.limits` / `.features` (0021) | Daten, ohne Deploy (E9) |
+| Betriebs-Ausnahme | `businesses.entitlement_overrides` (0019) | Daten, pro Betrieb |
+| Betriebs-Einstellung | `businesses.settings` über `normalizeSettings` | der Kunde in den Settings |
+
+Die Plattform-Obergrenzen sind die **bereits vorhandenen** `max`-Felder
+(seit Schritt 8c ausdrücklich als „Plattform-Ceiling" dokumentiert) —
+wiederverwendet, nicht neu erfunden. Auch die Limit-Key-Namen sind
+identisch zu den Keys in `businesses.settings`; es gibt keine zweiten
+Namen für dieselbe Sache.
+
+### Schema `tier_definitions` (0021)
+
+```sql
+tier       text primary key   -- CHECK ('WOM Starter','WOM Plus','WOM Pro')
+limits     jsonb not null default '{}'
+features   jsonb not null default '{}'
+updated_at timestamptz not null default now()   -- Trigger set_updated_at() aus 0001
+```
+
+**Plattformweite Referenzdaten, KEINE Mandanten-Tabelle** — keine
+`business_id`, kein RLS-Filter außer dem Lese-Recht selbst: RLS aktiv,
+`revoke all from anon, public`, eine `select`-Policy für `authenticated`
+(`using (true)`, jedes eingeloggte Mitglied darf lesen — später z. B.
+„was beinhaltet mein Tier" in den Settings), schreiben darf **nur**
+`service_role` (Backoffice A4).
+
+Der CHECK spiegelt bewusst die Werteliste von `businesses_tier_check`
+(0019) **ohne Fremdschlüssel** — 0019 ist bereits produktiv angewendet,
+eine FK-Umstellung dort ist nicht Teil dieses Schritts. Ändert sich
+einer der drei Namen, müssen **beide** Stellen angepasst werden.
+
+> ⚠️ **Die drei eingefügten Zeilen sind PLATZHALTER** (`limits={}`,
+> `features={}`), weil O1–O3 offen sind. Daraus folgt die
+> Sicherheits-Eigenschaft dieses Schritts: **solange alle Tiers leer
+> sind, gibt es keinen Verhaltensunterschied zu heute** — jeder
+> Limit-Key fällt auf `min(Obergrenze, Einstellung)` zurück, kein
+> Feature ist an ein Tier gebunden. Gemessen am echten Betrieb
+> `office@alinadax.com` (`WOM Pro`, Settings 10 Fotos / 8 Videos / 5 s):
+> die Formel liefert 10 / 8 / 5.
+
+### API (für künftige Aufrufer, A7)
+
+```ts
+import { loadEntitlements, limitFor, hasFeature } from "@/lib/entitlements";
+
+const entitlements = await loadEntitlements(supabase, business.id);
+if (photoCount >= limitFor(entitlements, "photo_max_count")) return 400;
+if (!hasFeature(entitlements, "ai_captions")) return 403;
+```
+
+Vier Dateien:
+
+| Datei | Inhalt |
+|---|---|
+| [model.ts](lib/entitlements/model.ts) | Limit-Keys, `PLATFORM_CEILINGS`, Typen, `parseEntitlementBundle`, Lese-Helfer `limitFor`/`hasFeature` |
+| [compute.ts](lib/entitlements/compute.ts) | `computeEntitlements(inputs)` — **rein**, synchron, kein DB-Zugriff |
+| [load.ts](lib/entitlements/load.ts) | `loadEntitlements(client, businessId)` — dünner Lade-Wrapper |
+| [index.ts](lib/entitlements/index.ts) | Barrel + Übersicht |
+
+Die Trennung **rein ↔ ladend** ist Absicht: die Formel bleibt ohne
+Datenbank prüfbar (so wurde sie auch nachgewiesen, siehe unten).
+
+**Gemeinsame Form für Tier-Vorgabe UND Betriebs-Ausnahme**, damit eine
+Merge-Logik auf beide passt:
+
+```jsonc
+// businesses.entitlement_overrides (ein jsonb-Objekt)
+{ "limits": { "photo_max_count": 15 }, "features": { "beta_website": true } }
+```
+
+`tier_definitions` hält dieselbe Struktur in zwei Spalten;
+`bundleFromTierRow(limits, features)` bringt sie in dieselbe Form.
+`parseEntitlementBundle` ist **tolerant** (die Werte werden von Hand
+bzw. im Backoffice gepflegt): unbekannte Limit-Keys, nicht-endliche
+oder negative Zahlen und nicht-boolesche Feature-Werte werden still
+verworfen und verhalten sich wie ein **fehlender** Key — nie wie `0`.
+Ein Tippfehler darf niemanden aussperren.
+
+**Limits geschlossen, Features offen** — bewusste Asymmetrie:
+
+- **Limit-Keys** sind eine feste Menge (`photo_max_count`,
+  `video_max_count`, `video_max_seconds`), weil jeder Key zwingend eine
+  Plattform-Obergrenze im Code braucht; ohne sie hätte das `min()`
+  keine harte Kappung, also keinen Kostenschutz (E6). `PLATFORM_CEILINGS`,
+  die Settings-Zuordnung und das Fail-safe-Objekt sind deshalb
+  **explizit ausgeschrieben** statt per Schleife gebaut: ein neuer
+  Limit-Key erzeugt so einen Compile-Fehler und kann nicht ohne
+  Obergrenze/Quelle durchrutschen.
+- **Features** sind ein offener `Record<string, boolean>` mit
+  **deny-by-default** (`hasFeature` ⇒ unbekannter Key `false`), weil E9
+  verlangt, dass ein neues Feature eine Zeile in `tier_definitions` ist
+  und kein Deploy. Deshalb steht hier auch keine Feature-Liste — welche
+  es gibt, ist O1.
+
+### Fail-safe ≠ Fehler
+
+| Fall | Verhalten |
+|---|---|
+| `tier IS NULL` | restriktivste Werte: alle Limits `0`, keine Features, `fallbackApplied: true` — **kein Wurf** |
+| keine passende `tier_definitions`-Zeile | ebenso fail-safe (`tier` bleibt im Ergebnis sichtbar) |
+| Betrieb nicht sichtbar (RLS/gelöscht) | ebenso fail-safe |
+| **Query schlägt fehl** | `EntitlementsLoadError` mit Schritt-Kontext — **wirft** |
+
+Ein nicht erreichbarer Rechte-Datensatz darf weder still zu „alles
+erlaubt" noch unbemerkt zu „nichts erlaubt" werden.
+
+### Isolation (§14.2)
+
+Das Modul erzeugt **selbst keinen Client** und liest **nie** aus
+Cookies/Session. Client **und** `businessId` kommen vom Aufrufer; der
+AUTHENTICATED Server-Client (RLS, **kein `service_role`**) ist als Typ
+festgeschrieben — Muster wie [lib/orders/orders-query.ts](lib/orders/orders-query.ts)
+und [lib/analytics/reach.ts](lib/analytics/reach.ts), `import type` ⇒
+keine Runtime-Abhängigkeit. Die Pflicht „`business_id` ausschließlich
+aus der Session" bleibt damit beim Aufrufer, wo sie hingehört.
+
+Zwei Queries nacheinander (erst `businesses`, dann — nur bei gesetztem
+Tier — `tier_definitions`); ein PostgREST-Embed ist mangels
+Fremdschlüssel bewusst nicht möglich. `normalizeSettings` wird aus
+[lib/auth/current-business.ts](lib/auth/current-business.ts)
+wiederverwendet (eine Quelle, kein Drift); die Formel wendet `min()`
+trotzdem erneut an — die Kappung darf nicht davon abhängen, dass eine
+andere Schicht sie schon gemacht hat.
+
+### Nicht-Ziele (ausdrücklich)
+
+- **`subscription_status`** (trial / trial_ended / past_due / canceled)
+  und **`businesses.status`** (pending / active / suspended) werden von
+  der Formel **komplett ignoriert**. Ob ein Betrieb wegen seines
+  Abo-Zustands nur noch lesen darf, ist eine eigene Frage und ein
+  eigener, späterer Schritt.
+- **`settings.connector_roapp_enabled`** gehört nicht hierher (UX-Schalter,
+  C1f/B3).
+- **Durchsetzung** an den Schreibstellen = **A7**. Dieses Modul
+  beantwortet nur, es verbietet nichts.
+
+### Verify-Gate
+
+[supabase/verify/0021_tier_definitions_checks.sql](supabase/verify/0021_tier_definitions_checks.sql)
+— manuell im SQL-Editor **nach** der Migration ausführen (Tabelle +
+Constraint, RLS aktiv, `authenticated` nur `SELECT`, `anon` gar nichts,
+`service_role` alles, drei Platzhalter-Zeilen).
+
+> ⚠️ Migration 0021 muss angewendet sein, **bevor** A7 verdrahtet wird —
+> sonst wirft `loadEntitlements` an jeder Schreibstelle (gemessen:
+> `entitlements: load_tier_definition: Could not find the table
+> 'public.tier_definitions'`).
