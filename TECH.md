@@ -4133,13 +4133,19 @@ liegt als Daten im künftigen Backoffice, nicht im Code.
 `'suspended'`: das übernimmt weiterhin ausschließlich `businesses.status`
 (seit 0005), um nicht zwei Felder mit derselben Bedeutung zu pflegen.
 
-**Rechte:** `revoke update (...) on businesses from authenticated` auf
-allen sechs neuen Spalten — die bestehende `businesses_update`-Policy
-(RLS, seit 0001) prüft nur Mitgliedschaft, keine Spaltenliste; ohne das
-REVOKE hätte jedes Betriebsmitglied über einen direkten Client-Call
-Schreibzugriff auf sein eigenes Tier gehabt. Schreiben bleibt
-`service_role` vorbehalten (kommt mit dem Stripe-Webhook A2/E3 und dem
-Admin-Backoffice A4).
+**Rechte:** `authenticated` darf die sechs neuen Spalten nicht schreiben
+— Schreiben bleibt `service_role` vorbehalten (kommt mit dem
+Stripe-Webhook A2/E3 und dem Admin-Backoffice A4). ⚠️ **Umgesetzt in
+zwei Schritten:** Ein spaltenweises `revoke update (spalten) from
+authenticated` in 0019 wirkte **nicht**, weil `authenticated` aus 0001
+eine tabellenweite UPDATE-Berechtigung auf `businesses` besitzt (keine
+Column-List) — Postgres prueft additiv, ein Spalten-REVOKE kann eine
+Tabellen-GRANT nicht aufheben. **Migration 0020** korrigiert das: erst
+die tabellenweite Berechtigung vollstaendig entziehen, dann jede
+bestehende Spalte AUSSER den sechs sensiblen dynamisch wieder
+freigeben. **Gilt als Muster fuer jede kuenftige spaltenweise
+Einschraenkung** in diesem Projekt (z. B. `credentials` auf der
+kuenftigen `business_connections`-Tabelle, C1a).
 
 **Backfill:** `businesses.business_email = 'office@alinadax.com'`
 (einziger Produktivbetrieb) → `tier='WOM Pro'`,
