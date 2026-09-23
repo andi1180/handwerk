@@ -3,8 +3,13 @@ import { NextResponse, type NextRequest } from "next/server";
 
 /**
  * Session-Refresh (Standard-@supabase/ssr-updateSession-Pattern) + Schutz
- * von /portal/*. Läuft bei jedem Request, hält die Auth-Cookies frisch und
- * leitet nicht eingeloggte Nutzer von geschützten Routen auf /login um.
+ * von /portal/* und /admin/*. Läuft bei jedem Request, hält die Auth-Cookies
+ * frisch und leitet nicht eingeloggte Nutzer von geschützten Routen auf /login
+ * um.
+ *
+ * /admin ist hier NUR die frühe Abfangschicht (Session vorhanden?). Ob der
+ * Nutzer Plattform-Admin ist, entscheidet `requirePlatformAdmin()` im
+ * Admin-Layout und in jeder Admin-Seite — nicht die Middleware.
  */
 export async function middleware(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request });
@@ -36,8 +41,11 @@ export async function middleware(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  // Geschützte Portal-Routen: ohne Session zurück zum Login.
-  if (!user && request.nextUrl.pathname.startsWith("/portal")) {
+  const { pathname } = request.nextUrl;
+  const isAdminPath = pathname === "/admin" || pathname.startsWith("/admin/");
+
+  // Geschützte Portal- und Admin-Routen: ohne Session zurück zum Login.
+  if (!user && (pathname.startsWith("/portal") || isAdminPath)) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     return NextResponse.redirect(url);
@@ -49,7 +57,9 @@ export async function middleware(request: NextRequest) {
   // /api/portal/*-Routen ab, die hier nicht unter /portal fallen). /pending und
   // /register liegen außerhalb /portal ⇒ keine Schleife. FAIL-SAFE: fehlt oder
   // erroriert die Abfrage, wird NICHT umgeleitet (das Layout prüft erneut).
-  if (user && request.nextUrl.pathname.startsWith("/portal")) {
+  // Bewusst NICHT für /admin: pending ist ein Betriebs-Zustand, die Admin-Rolle
+  // ist global und hängt an keinem Betrieb.
+  if (user && pathname.startsWith("/portal")) {
     const { data: row } = await supabase
       .from("business_users")
       .select("businesses(status)")

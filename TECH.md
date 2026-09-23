@@ -4461,3 +4461,168 @@ Grant-Prüfung dort aussagekräftig.
 
 > ⚠️ Migration 0023 muss angewendet sein, **bevor** A4 verdrahtet wird —
 > sonst wirft `isPlatformAdmin` an jeder Stelle, die sie aufruft.
+
+## Admin-Backoffice: Betriebsliste (Schritt A4a)
+
+Erster Teil von A4 (ROLLOUT_PFLICHTENHEFT.md §6: „Admin-Backoffice:
+Betriebsliste, Tier setzen, sperren, Obergrenzen") — **nur die Liste,
+rein lesend**. Keine Migration (alle Spalten aus 0001/0019/0023), keine
+Bearbeitung, kein Button, kein Route Handler, keine Pagination, kein Link
+aus dem Portal nach `/admin` (Aufruf per direkter URL).
+
+### Routen / Dateien
+
+| Datei | Rolle |
+|---|---|
+| [middleware.ts](middleware.ts) | frühe Abfangschicht: `/admin`, `/admin/*` ohne Session ⇒ `/login` |
+| [lib/auth/require-platform-admin.ts](lib/auth/require-platform-admin.ts) | `requirePlatformAdmin()` — die eigentliche Prüfung (NEU) |
+| [lib/auth/platform-admin.ts](lib/auth/platform-admin.ts) | `isPlatformAdmin()` aus A3, **unverändert** |
+| [app/admin/layout.tsx](app/admin/layout.tsx) | eigene, schlanke Admin-Shell (Logo + „Admin"-Pill), sperrt die Oberfläche |
+| [app/admin/businesses/page.tsx](app/admin/businesses/page.tsx) | Betriebsliste; prüft selbst, dann `service_role`-Query |
+| [app/admin/businesses/loading.tsx](app/admin/businesses/loading.tsx) | Instant-Loading (statisch) |
+| [app/globals.css](app/globals.css) | `.admin-*`-Sektion am Dateiende, bestehende Tokens |
+| [lib/i18n/de.ts](lib/i18n/de.ts) | Block `admin.*` |
+
+`/admin` selbst hat **keine** `page.tsx` — reserviert für ein späteres
+Admin-Dashboard (heute: Anonyme ⇒ `/login`, Admins ⇒ 404).
+
+**Warum nicht unter `/portal`:** die Portal-Shell
+([app/portal/layout.tsx](app/portal/layout.tsx)) löst über
+`getCurrentBusiness()` den **Session-Betrieb** auf und rendert dessen
+Logo, Sidebar und Bottom-Nav. Die Admin-Sicht ist betriebsübergreifend
+— dort gibt es keinen Session-Betrieb, nur die globale Rolle
+`platform_admin`. Dazu kommt, dass `andreas.dax@gmail.com` zugleich
+Owner des Testbetriebs ist (A3): unter `/portal` würde die Admin-Liste im
+Branding dieses einen Betriebs erscheinen.
+
+### Zugriffsschutz — zwei Schichten
+
+```
+Request /admin/…
+  │
+  ├─ 1. middleware.ts               Session da?
+  │      nein ─────────────────────▶ 307 /login
+  │      (KEINE pending-Prüfung: pending ist ein Betriebs-Zustand,
+  │       die Admin-Rolle hängt an keinem Betrieb)
+  │
+  └─ 2. requirePlatformAdmin()      auth.getUser() + isPlatformAdmin()
+         ├─ in app/admin/layout.tsx          (Oberfläche)
+         └─ in JEDER Admin-Seite, direkt     (Daten)
+            vor dem Datenzugriff
+         kein User  ─────────────────▶ redirect('/login')
+         kein Admin ─────────────────▶ notFound()  → 404
+         Admin      ─────────────────▶ { userId }  → Query
+```
+
+- **Schicht 1 ist nur Komfort** (frühe Umleitung, frische Cookies),
+  **Schicht 2 ist die Autorität** — dasselbe Verhältnis wie Middleware
+  und `getCurrentBusiness()` beim Portal.
+- **404 statt 403** für eingeloggte Nicht-Admins: die Admin-Fläche soll
+  für normale Nutzer nicht als existent erkennbar sein.
+- `requirePlatformAdmin()` nutzt den **AUTHENTICATED** Server-Client
+  (kein `service_role`); die `userId` stammt aus `auth.getUser()` (gegen
+  den Auth-Server validiert, nicht aus dem Cookie gelesen). Ein
+  Datenbankfehler im Lookup wirft weiter — fail-safe heißt „kein Zugriff
+  bei Unsicherheit".
+- **React-`cache()`** dedupliziert pro Request: rendern Layout und Seite
+  gemeinsam, läuft der Lookup nur einmal; auch ein Wurf
+  (`redirect`/`notFound`) gilt dann für beide Stellen.
+
+#### ⚠️ Warum die Seite selbst prüft (Layout allein reicht nicht)
+
+Next.js führt ein Layout beim **Teil-Rendern** nicht erneut aus. Welche
+Segmente neu gerendert werden, leitet der Server aus dem Router-Zustand
+ab, **den der Client mitschickt** (`Next-Router-State-Tree`). Gemessen am
+Production-Build (A4a-Abnahme) mit einem eingeloggten **Nicht-Admin**:
+
+- präparierte Anfrage `GET /admin/businesses` mit `RSC: 1` und einem
+  Router-Zustand, der behauptet, das `admin`-Layout sei schon geladen;
+- Antwort: Flight-Pfad `["children","admin","children","businesses",…]`
+  — gerendert wurde **ab dem `businesses`-Segment**, das Admin-Layout
+  lief **nicht**;
+- der Seiten-Chunk war `E{"digest":"NEXT_HTTP_ERROR_FALLBACK;404"}` —
+  geworfen vom **Seiten**-Check, keine Betriebsdaten in der Antwort.
+
+Ohne den Aufruf in der Seite hätte in genau diesem Fall die
+`service_role`-Query für einen beliebigen eingeloggten Nutzer
+ausgeführt. **Regel: jede Admin-Seite und jeder künftige
+Admin-Route-Handler (A4b) ruft `requirePlatformAdmin()` selbst auf,
+unmittelbar vor dem Datenzugriff.** Der Layout-Aufruf bleibt für die
+Oberfläche (404 mit korrektem Status, bevor gestreamt wird).
+
+### ⚠️ Die `service_role`-Ausnahme
+
+Die Liste liest **alle** Betriebe über `createServiceClient()`
+([lib/supabase/service.ts](lib/supabase/service.ts)):
+
+```ts
+await requirePlatformAdmin();          // Schutz: VOR der Query
+const service = createServiceClient(); // bewusst ungefiltert
+await service
+  .from("businesses")
+  .select("id, name, business_email, status, tier, subscription_status,
+           trial_ends_at, current_period_end, created_at")
+  .order("created_at", { ascending: false });
+```
+
+Das ist eine **ausdrückliche Ausnahme** von der Isolationsregel
+„`business_id` ausschließlich aus der Session" (§14.2), die überall
+sonst im Projekt gilt.
+
+- **Warum nötig:** der AUTHENTICATED Client würde über die Policy
+  `businesses_select` (0001, `exists … business_users … auth.uid()`) auf
+  den einen Betrieb filtern, dem der Admin selbst angehört.
+- **Warum sicher:** der Schutz liegt nicht **in** der Query (die ist
+  absichtlich ohne `business_id`-Filter), sondern **davor** —
+  `requirePlatformAdmin()` in derselben Funktion lässt nur Nutzer aus
+  `platform_admins` bis zur Query. Diese Tabelle ist nur per
+  `service_role` beschreibbar (A3), es gibt keinen Code-Pfad zum
+  Selbst-Befördern.
+- **Umfang begrenzt:** rein lesend, **feste Spaltenliste** — keine
+  Secrets (`webhook_secret`, `website_pull_secret`), keine
+  `branding`/`settings`-Blobs, kein `stripe_*`. Die Ausnahme ist am
+  Query-Ort kommentiert.
+
+### Anzeige
+
+- Spalten: Betrieb · Login-E-Mail · Status · Tier · Abo-Status ·
+  Testphase bis · Periode bis · Registriert. Kein Join, keine
+  Auftragszahlen.
+- Sortierung `created_at DESC`: neue `pending`-Registrierungen stehen
+  oben (die Freischaltung selbst bleibt vorerst Hand-SQL aus der
+  Admin-Mail).
+- Status-Pill (lokal in der Seite, Optik wie `OrderStatusBadge`, nur
+  bestehende Tokens): `pending` amber „Wartet auf Freischaltung",
+  `active` grün „Aktiv", `suspended` rot „Gesperrt"; ein Wert außerhalb
+  der Check-Constraint erscheint roh und neutral.
+- `tier`/`subscription_status`: roher DB-Wert als Text, `—` bei `null`.
+- Datumsangaben TT.MM.JJJJ in **Europe/Vienna** — ein Periodenende um
+  Mitternacht Ortszeit zeigte in UTC (Vercel-Serverzeit) sonst den
+  Vortag.
+- Leer- und Fehlerzustand (Fehler per `console.error` geloggt, ohne
+  Anzahl im Kopf). Desktop-only, keine Mobile-Anpassung.
+
+### Abnahme (Production-Build, `pnpm start`)
+
+| Fall | Ergebnis |
+|---|---|
+| ohne Session: `/admin/businesses`, `/admin`, `/admin/foo` | 307 → `/login` |
+| ohne Session: `/administrator` | 404 (Präfix-Vergleich greift nicht fälschlich) |
+| eingeloggter Nicht-Admin, normaler Aufruf | 404, keine Betriebsdaten |
+| eingeloggter Nicht-Admin, präparierte Teil-Render-RSC-Anfrage | Layout übersprungen, Seite wirft 404, keine Betriebsdaten |
+| Admin | 200, beide Betriebe, neueste zuerst, „Anzahl: 2", keine Secrets im HTML |
+| Admin-Rolle entzogen | sofort wieder 404 |
+
+Mit einem Wegwerf-Nutzer ohne Betrieb; für den positiven Pfad kurz in
+`platform_admins` eingetragen, danach Zeile entfernt und Nutzer gelöscht
+(gegengeprüft: `platform_admins` wieder genau 1 Zeile). Kein Betrieb
+wurde angefasst.
+
+### Nächster Schritt: A4b
+
+„Tier setzen", „sperren" (`businesses.status = 'suspended'`) und die
+Obergrenzen-UI (`entitlement_overrides`, `tier_definitions`). Dafür
+braucht es erstmals schreibende Admin-Route-Handler; jeder davon ruft
+`requirePlatformAdmin()` selbst auf und schreibt per `service_role`
+(die Spalten aus 0019 sind für `authenticated` gesperrt, 0020).
+Durchsetzung einer Sperre im Portal ist separat **A5**.

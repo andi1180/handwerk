@@ -1791,3 +1791,121 @@ body {
     margin: 0 auto;
   }
 }
+
+/* --- Admin-Backoffice (A4a) — eigene, schlanke Shell, desktop-only --- */
+.admin-shell {
+  min-height: 100vh;
+  background: var(--bg);
+}
+
+.admin-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 32px;
+  border-bottom: 1px solid var(--border);
+}
+
+.admin-header-logo {
+  display: block;
+  max-width: 140px;
+  max-height: 32px;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+}
+
+.admin-header-badge {
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #8A7320;
+  background: var(--gold-light);
+  border: 1px solid var(--gold-border);
+}
+
+.admin-main {
+  padding: 32px;
+  max-width: 1280px;
+}
+
+.admin-page-head {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  margin-bottom: 6px;
+}
+
+.admin-page-title {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.admin-page-count {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.admin-page-hint {
+  margin: 0 0 20px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.admin-card {
+  padding: 8px 12px;
+  overflow-x: auto;
+}
+
+.admin-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.admin-table th,
+.admin-table td {
+  padding: 10px;
+  text-align: left;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--border);
+}
+
+.admin-table th {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+
+.admin-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.admin-table .admin-strong {
+  font-weight: 600;
+}
+
+.admin-muted {
+  color: var(--text-secondary);
+}
+
+.admin-status-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.admin-empty {
+  margin: 0;
+  padding: 12px 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+}

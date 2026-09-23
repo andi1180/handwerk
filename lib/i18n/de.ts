@@ -589,4 +589,30 @@ export const de = {
     colOpens: "Öffnungen",
     colShares: "Teilen",
   },
+  admin: {
+    // Admin-Backoffice (A4a) — globale Rolle platform_admin, nicht das Portal.
+    metaTitle: "Admin · Valooro Handwerk",
+    badge: "Admin",
+    businesses: {
+      title: "Betriebe",
+      count: "Anzahl: {count}",
+      hint: "Alle registrierten Betriebe, neueste zuerst — neue Registrierungen stehen oben. Nur Anzeige.",
+      empty: "Noch keine Betriebe registriert.",
+      loadError: "Die Betriebe konnten nicht geladen werden.",
+      colName: "Betrieb",
+      colEmail: "Login-E-Mail",
+      colStatus: "Status",
+      colTier: "Tier",
+      colSubscription: "Abo-Status",
+      colTrialEnds: "Testphase bis",
+      colPeriodEnd: "Periode bis",
+      colCreated: "Registriert",
+    },
+    // Anzeige von businesses.status (pending/active/suspended).
+    businessStatus: {
+      pending: "Wartet auf Freischaltung",
+      active: "Aktiv",
+      suspended: "Gesperrt",
+    },
+  },
 } as const;
