@@ -1,6 +1,7 @@
 import { requirePlatformAdmin } from "@/lib/auth/require-platform-admin";
 import { createServiceClient } from "@/lib/supabase/service";
 import { DEFAULT_LOCALE, t } from "@/lib/i18n";
+import { TierEditor } from "@/components/admin/tier-editor";
 
 /** Die Spalten, die die Betriebsliste zeigt (kein Join, keine Auftragszahlen). */
 type AdminBusinessRow = {
@@ -19,8 +20,9 @@ type AdminBusinessRow = {
  * Betriebsliste des Admin-Backoffice (A4a) — rein lesend.
  *
  * Alle Betriebe, neueste zuerst: frische `pending`-Registrierungen fallen so
- * sofort oben ins Auge (Freischaltung selbst bleibt vorerst Hand-SQL; „Tier
- * setzen", „sperren", Obergrenzen = A4b).
+ * sofort oben ins Auge (Freischaltung selbst bleibt vorerst Hand-SQL).
+ * Einzige Bearbeitung: „Tier setzen" (A4b-1, `<TierEditor>` in der
+ * Tier-Spalte); „sperren" (A4b-2) und Obergrenzen (A4b-3) folgen.
  */
 export default async function AdminBusinessesPage() {
   // ZUGRIFFSSCHUTZ VOR DER QUERY. Das Layout hat dieselbe Prüfung schon gemacht
@@ -103,7 +105,13 @@ export default async function AdminBusinessesPage() {
                     <BusinessStatusBadge status={b.status} />
                   </td>
                   <td>
-                    <Plain value={b.tier} />
+                    {/* „Tier setzen" (A4b-1): schreibt über
+                        PATCH /api/admin/businesses/[id]/tier. */}
+                    <TierEditor
+                      businessId={b.id}
+                      businessName={b.name}
+                      currentTier={b.tier}
+                    />
                   </td>
                   <td>
                     <Plain value={b.subscription_status} />

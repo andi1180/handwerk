@@ -4626,3 +4626,111 @@ braucht es erstmals schreibende Admin-Route-Handler; jeder davon ruft
 `requirePlatformAdmin()` selbst auf und schreibt per `service_role`
 (die Spalten aus 0019 sind für `authenticated` gesperrt, 0020).
 Durchsetzung einer Sperre im Portal ist separat **A5**.
+
+## Admin-Backoffice: Tier setzen (Schritt A4b-1)
+
+Erster **schreibender** Admin-Schritt (ROLLOUT_PFLICHTENHEFT.md §6, A4).
+Setzt ausschließlich `businesses.tier`. **Keine Migration** — Spalte und
+CHECK (`businesses_tier_check`) existieren seit 0019.
+
+⚠️ **Nicht Teil dieses Schritts:** „sperren" (`businesses.status =
+'suspended'`) folgt als **A4b-2**, die Obergrenzen-UI
+(`entitlement_overrides`, `tier_definitions`) als **A4b-3**. Die
+Durchsetzung eines Tiers in der App ist weiterhin **A7** — das Setzen
+hier ändert am Verhalten eines Betriebs heute nichts.
+
+### Route / Vertrag
+
+`PATCH /api/admin/businesses/[id]/tier` —
+[app/api/admin/businesses/[id]/tier/route.ts](app/api/admin/businesses/[id]/tier/route.ts)
+
+| Fall | Antwort |
+|---|---|
+| keine Session | 307 → `/login` (`redirect()` aus `requirePlatformAdmin`) |
+| eingeloggt, kein `platform_admin` | 404 (`notFound()`) |
+| `[id]` kein uuid | 400 `invalid_id` |
+| Body kein JSON-Objekt | 400 `invalid_body` |
+| Body enthält einen Key außer `tier` | 400 `unexpected_fields` + `fields` |
+| `tier` fehlt | 400 `missing_tier` |
+| `tier` weder `null` noch ein `TIER_NAMES`-Wert | 400 `invalid_tier` + `message` + `allowed` |
+| kein Betrieb mit dieser id | 404 `not_found` |
+| DB-Fehler | 500 `update_failed` (geloggt, nie leerer Erfolg) |
+| Erfolg | 200 `{ id, tier }` |
+
+- **Zugriffsschutz im Handler selbst**, als erste Zeile:
+  `requirePlatformAdmin()` (A4a, unverändert). Ein Route Handler hat kein
+  Layout, das ihn umschließt — `app/admin/layout.tsx` greift hier nicht.
+  Das 307/404-Verhalten ist das Bestandsmuster von `getCurrentBusiness()`
+  in `/api/portal/*` (Redirect statt 403), bewusst keine neue Variante.
+- **Strikter Body:** genau `{ tier: string | null }`. Unbekannte Keys
+  werden **nicht** ignoriert, sondern mit 400 abgewiesen — der Endpunkt
+  soll nie still zum Einfallstor für weitere `businesses`-Spalten werden;
+  wer später versehentlich ein zweites Feld mitschickt, merkt es sofort.
+- **Schreiben per `service_role`, einziger legitimer Schreibweg:**
+  `authenticated` hat seit 0020 (A1-Fix) absichtlich kein UPDATE-Recht auf
+  `tier` (sonst könnte sich ein Betrieb selbst hochstufen). Geschrieben
+  wird nur die Spalte `tier`, gefiltert auf genau die id:
+  `update({ tier }).eq("id", id).select("id, tier").maybeSingle()` —
+  keine Zeile getroffen ⇒ 404 (Existenzprüfung und Update in einer Query).
+  `subscription_status`, `entitlement_overrides`, `trial_ends_at`,
+  `current_period_end`, `stripe_subscription_id` und `status` werden nie
+  angefasst.
+
+### Quelle der Tier-Namen
+
+`TIER_NAMES` / `TierName` / `isTierName` in
+[lib/entitlements/model.ts](lib/entitlements/model.ts) — die **einzige**
+Stelle im TS-Code mit den drei Strings; Route und UI importieren von dort.
+`model.ts` ist client-importierbar (Laufzeit-Import nur aus
+`lib/settings/options.ts`, sonst `import type`). Client-Code importiert
+direkt aus `model.ts`, **nicht** über den Barrel `lib/entitlements/index.ts`
+(der re-exportiert `load.ts`).
+
+⚠️ Die Namen stehen außerdem in zwei DB-CHECKs:
+`businesses_tier_check` (0019) und `tier_definitions_tier_check` (0021).
+Eine Umbenennung braucht alle drei Stellen (bewusst ohne FK, siehe 0021).
+
+### UI
+
+[components/admin/tier-editor.tsx](components/admin/tier-editor.tsx)
+(`"use client"`), eingebunden in der Tier-Spalte von
+[app/admin/businesses/page.tsx](app/admin/businesses/page.tsx):
+
+- `<select>`: „— kein Tier —" (`null`) + die drei `TIER_NAMES`. Ein
+  gespeicherter Wert außerhalb der Liste bleibt defensiv als Option
+  sichtbar.
+- „Speichern" ist deaktiviert, solange die Auswahl dem gespeicherten Wert
+  entspricht.
+- Klick ⇒ `window.confirm` mit Betriebsname und „alt → neu" ⇒ PATCH.
+  Während des Requests sind Select und Button deaktiviert („Speichert …").
+- Erfolg ⇒ `router.refresh()` (in `useTransition`); Fehler ⇒ Inline-Text
+  an der Zeile, die Auswahl bleibt für einen erneuten Versuch.
+- Kein `<form>`, kein `any`, Inline-Styles auf den bestehenden Tokens,
+  desktop-only. Strings unter `admin.tier.*` in `lib/i18n/de.ts`.
+
+### Abnahme (Production-Build, `pnpm start`, UI in Chromium via Playwright)
+
+| Fall | Ergebnis |
+|---|---|
+| ohne Session | 307 → `/login`, tier unverändert |
+| eingeloggter Nicht-Admin | 404, tier unverändert |
+| Admin, `{ tier: "WOM Plus", subscription_status: "active" }` | 400 `unexpected_fields`; `tier` blieb `null`, `subscription_status` blieb `null` |
+| Admin, `{ tier: "Enterprise" }` | 400 `invalid_tier` |
+| ungültige id / unbekannte uuid / leerer Body / `tier: 3` | 400 / 404 / 400 / 400 |
+| UI, Testbetrieb „Schneideratelier Alina Dax": `null` → `WOM Plus` | 200, DB und UI nach Reload `WOM Plus`, übrige Spalten unverändert |
+| UI, zurück auf „— kein Tier —" | 200, DB `null` (Ausgangszustand) |
+| Confirm abgebrochen | kein Request |
+| simulierter 500 | Inline-Fehlertext, Auswahl bleibt, DB unverändert |
+| Produktivbetrieb `office@alinadax.com` | `WOM Pro` vor und nach dem Test |
+
+Mit einem Wegwerf-Nutzer ohne Betrieb, für die Admin-Fälle kurz in
+`platform_admins` eingetragen; danach Zeile entfernt und Nutzer gelöscht
+(gegengeprüft: `platform_admins` wieder genau 1 Zeile).
+
+### Nächste Schritte
+
+- **A4b-2** „sperren" — `businesses.status`, eigener Route Handler nach
+  demselben Muster (`requirePlatformAdmin()` zuerst, strikter Body,
+  `service_role`). Durchsetzung der Sperre im Portal ist **A5**.
+- **A4b-3** Obergrenzen — `entitlement_overrides` pro Betrieb bzw.
+  `tier_definitions`.

@@ -596,7 +596,7 @@ export const de = {
     businesses: {
       title: "Betriebe",
       count: "Anzahl: {count}",
-      hint: "Alle registrierten Betriebe, neueste zuerst — neue Registrierungen stehen oben. Nur Anzeige.",
+      hint: "Alle registrierten Betriebe, neueste zuerst — neue Registrierungen stehen oben. Bearbeitbar ist nur das Tier.",
       empty: "Noch keine Betriebe registriert.",
       loadError: "Die Betriebe konnten nicht geladen werden.",
       colName: "Betrieb",
@@ -607,6 +607,16 @@ export const de = {
       colTrialEnds: "Testphase bis",
       colPeriodEnd: "Periode bis",
       colCreated: "Registriert",
+    },
+    // „Tier setzen" (A4b-1) — Editor in der Tier-Spalte der Betriebsliste.
+    tier: {
+      none: "— kein Tier —",
+      noneValue: "kein Tier",
+      save: "Speichern",
+      saving: "Speichert …",
+      selectLabel: "Tier für {name}",
+      confirm: "Tier von „{name}“ ändern?\n\n{from} → {to}",
+      error: "Tier konnte nicht gespeichert werden.",
     },
     // Anzeige von businesses.status (pending/active/suspended).
     businessStatus: {

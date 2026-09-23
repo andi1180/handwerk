@@ -8,7 +8,10 @@
  * rein und ohne Next-Runtime testbar bleibt.
  *
  * NOCH KEIN AUFRUFER — das Modul entsteht isoliert und wird erst in A7 an den
- * Schreibstellen (Upload-/Render-Route) verdrahtet.
+ * Schreibstellen (Upload-/Render-Route) verdrahtet. Ausnahme: `TIER_NAMES`
+ * wird seit A4b-1 von der Admin-Route „Tier setzen" + deren UI gelesen (auch
+ * im Client — dieses Modul ist dafür client-importierbar; NICHT über den
+ * Barrel `index.ts` importieren, der zieht `load.ts` mit).
  */
 import {
   PHOTO_COUNT,
@@ -17,6 +20,27 @@ import {
   asRecord,
 } from "@/lib/settings/options";
 import type { BusinessSettings } from "@/lib/auth/current-business";
+
+/**
+ * Die drei erlaubten Paket-Namen (E9: nur die NAMEN sind fest, die Inhalte
+ * leben als Daten in `tier_definitions`). **Die einzige Stelle im TS-Code**, an
+ * der die drei Strings stehen — Admin-Route „Tier setzen" (A4b-1) und die
+ * Admin-UI importieren von hier.
+ *
+ * ⚠️ Spiegel des DB-CHECKs `businesses_tier_check` (0019) und
+ * `tier_definitions_tier_check` (0021). Ändert sich ein Name, müssen ALLE drei
+ * Stellen angepasst werden (bewusst ohne FK, siehe 0021).
+ */
+export const TIER_NAMES = ["WOM Starter", "WOM Plus", "WOM Pro"] as const;
+export type TierName = (typeof TIER_NAMES)[number];
+
+/** Type-Guard für einen erlaubten Paket-Namen. */
+export function isTierName(value: unknown): value is TierName {
+  return (
+    typeof value === "string" &&
+    (TIER_NAMES as readonly string[]).includes(value)
+  );
+}
 
 /**
  * Die Limit-Keys — bewusst eine **geschlossene** Menge, anders als die Features
