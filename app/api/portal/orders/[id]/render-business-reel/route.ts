@@ -4,6 +4,7 @@ import { createServiceClient } from "@/lib/supabase/service";
 import { getCurrentBusiness } from "@/lib/auth/current-business";
 import { orderBookletMedia } from "@/lib/booklet/media-order";
 import { renderBusinessReel, type MediaItem } from "@/lib/reel/render";
+import { isRenderBusy, type RenderLockRow } from "@/lib/reel/stale";
 
 /**
  * Schritt 2b — Betriebs-Reel-Render (0013).
@@ -21,6 +22,9 @@ import { renderBusinessReel, type MediaItem } from "@/lib/reel/render";
  *  3. Renderbarer Status (generated/sent/viewed/shared) → sonst 409
  *  4. ≥1 Medium gesamt → sonst 400 need_media
  *  5. Booklet vorhanden → sonst 500 no_booklet
+ *  6. Parallel-Sperre: läuft im selben Betrieb bei einem ANDEREN Auftrag
+ *     bereits ein nicht-staler Betriebsreel-Render → 409 render_busy
+ *     (mehrere gleichzeitige FFmpeg-Renders haben die Instanz gekillt).
  *
  * ISOLATION (§14.2): business_id AUS DER GELADENEN ORDER (RLS-validiert), NIE
  * aus dem Body. Alle service_role-Writes strikt auf diese business_id gescoped.
@@ -115,7 +119,34 @@ export async function POST(
     return NextResponse.json({ error: "no_booklet" }, { status: 500 });
   }
 
+  // Guard 6: Parallel-Sperre pro Betrieb (AUTHENTICATED Client, RLS).
+  // BEST EFFORT: Check-then-set ohne Transaktion/Lock. Zwei POSTs im selben
+  // Moment können beide den Check passieren und beide starten — akzeptiert;
+  // die Sperre fängt den realistischen Fall (nacheinander angetippte Kacheln)
+  // ab. Stale 'rendering'-Zeilen (abgebrochene Instanz) blockieren NICHT,
+  // s. lib/reel/stale.ts — die Selbstheilung im Status-Poll räumt sie auf.
+  const { data: lockRows, error: lockError } = await supabase
+    .from("booklets")
+    .select("order_id, business_reel_status, updated_at")
+    .eq("business_id", order.business_id)
+    .eq("business_reel_status", "rendering")
+    .neq("order_id", order.id)
+    .returns<RenderLockRow[]>();
+  if (lockError) {
+    // Fail-open: ein fehlgeschlagener Sperr-Check soll das Rendern nicht
+    // verhindern (heutiges Verhalten), nur geloggt werden.
+    console.error("render-business-reel: busy check failed", {
+      order_id: order.id,
+      step: "busy_check",
+      message: lockError.message,
+    });
+  } else if (isRenderBusy(lockRows ?? [], order.id, new Date())) {
+    return NextResponse.json({ error: "render_busy" }, { status: 409 });
+  }
+
   // Sofort auf 'rendering' setzen (business_reel_error löschen) + 202.
+  // `updated_at` setzt der BEFORE-UPDATE-Trigger `trg_booklets_updated`
+  // (0001) zuverlässig auf now() — Maßstab der Stale-Erkennung.
   const { error: statusError } = await service
     .from("booklets")
     .update({ business_reel_status: "rendering", business_reel_error: null })

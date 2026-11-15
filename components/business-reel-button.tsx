@@ -8,6 +8,7 @@ import {
   shareFile,
   downloadFile,
 } from "@/lib/share/file-share";
+import { CLIENT_RENDER_TIMEOUT_MS } from "@/lib/reel/stale";
 
 /**
  * Render-Zustand des Betriebs-Reels — spiegelt `booklets.business_reel_status`.
@@ -22,6 +23,8 @@ export type BusinessReelStatus =
   | "purged";
 
 const REEL_POLL_MS = 3_000;
+/** Wie lange der 409-`render_busy`-Hinweis neben der Pill stehen bleibt. */
+const BUSY_NOTICE_MS = 6_000;
 
 /**
  * Kompaktes Pill auf einer Auftragskachel, das den Render-Zustand des
@@ -43,6 +46,15 @@ const REEL_POLL_MS = 3_000;
  *  2  — ready + !sharedAt  → Grün-Pill „Reel teilen", Tap = Popup öffnen
  *  3  — ready + sharedAt   → Grün-Pill „Erneut teilen", Tap = Popup öffnen
  *  F  — failed             → Rot-Pill, Tap = Retry
+ *
+ * Hängender Render: bleibt der Status im Client länger als
+ * `CLIENT_RENDER_TIMEOUT_MS` auf `rendering`, endet das Polling und der
+ * Button zeigt F (Retry). Im Normalfall heilt vorher schon der Server
+ * (`business-reel-status` setzt stale `rendering` ⇒ `failed`, lib/reel/stale.ts).
+ *
+ * 409 `render_busy` (anderer Betriebsreel desselben Betriebs läuft): KEIN
+ * Fehlerzustand — die Pill bleibt wie sie war (weiter antippbar), daneben
+ * steht kurz ein freundlicher Hinweis.
  *
  * Kein `<form>`, kein `any`. AUTHENTICATED + RLS (Routes prüfen server-seitig).
  */
@@ -68,15 +80,26 @@ export function BusinessReelButton({
   const [fetchError, setFetchError] = useState(false);
   const [canShare, setCanShare] = useState(false);
 
+  // 409 render_busy: kurzer Hinweis neben der Pill.
+  const [busyNotice, setBusyNotice] = useState(false);
+
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pollStartRef = useRef(0);
+  const noticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mountedRef = useRef(true);
 
   useEffect(() => {
     mountedRef.current = true;
     setCanShare(canShareFiles());
     return () => {
+      // Unmount: Polling + Hinweis-Timer sauber beenden. Laufende Fetches
+      // prüfen `mountedRef` und setzen danach keinen State mehr.
       mountedRef.current = false;
-      if (pollRef.current) clearInterval(pollRef.current);
+      stopPoll();
+      if (noticeTimerRef.current) {
+        clearTimeout(noticeTimerRef.current);
+        noticeTimerRef.current = null;
+      }
     };
   }, []);
 
@@ -86,20 +109,33 @@ export function BusinessReelButton({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // only on mount
 
+  function stopPoll() {
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+  }
+
   function startPoll() {
-    if (pollRef.current) clearInterval(pollRef.current);
+    stopPoll();
+    pollStartRef.current = Date.now();
     pollRef.current = setInterval(async () => {
+      // Notbremse: zu lange 'rendering' ⇒ Polling beenden, Retry anbieten.
+      if (Date.now() - pollStartRef.current > CLIENT_RENDER_TIMEOUT_MS) {
+        stopPoll();
+        if (mountedRef.current) setCurrent("failed");
+        return;
+      }
       try {
         const res = await fetch(
           `/api/portal/orders/${orderId}/business-reel-status`,
         );
         if (!res.ok) return;
         const json = (await res.json()) as { status: string };
-        if (!mountedRef.current) return;
+        if (!mountedRef.current || !pollRef.current) return;
         if (json.status === "ready" || json.status === "failed") {
-          clearInterval(pollRef.current!);
-          pollRef.current = null;
-          setCurrent(json.status as BusinessReelStatus);
+          stopPoll();
+          setCurrent(json.status);
         }
       } catch {
         // Netzwerkfehler → weiter pollen
@@ -107,16 +143,36 @@ export function BusinessReelButton({
     }, REEL_POLL_MS);
   }
 
+  function showBusyNotice() {
+    setBusyNotice(true);
+    if (noticeTimerRef.current) clearTimeout(noticeTimerRef.current);
+    noticeTimerRef.current = setTimeout(() => {
+      noticeTimerRef.current = null;
+      if (mountedRef.current) setBusyNotice(false);
+    }, BUSY_NOTICE_MS);
+  }
+
   async function handleRender(e: React.MouseEvent) {
     e.preventDefault();
     e.stopPropagation();
     if (busy) return;
     setBusy(true);
+    setBusyNotice(false);
     try {
       const res = await fetch(
         `/api/portal/orders/${orderId}/render-business-reel`,
         { method: "POST" },
       );
+      if (res.status === 409) {
+        const body = (await res.json().catch(() => null)) as {
+          error?: string;
+        } | null;
+        if (body?.error === "render_busy") {
+          // Kein Fehlerzustand: Pill bleibt antippbar, nur Hinweis.
+          if (mountedRef.current) showBusyNotice();
+          return;
+        }
+      }
       if (!res.ok) {
         if (mountedRef.current) setCurrent("failed");
         return;
@@ -277,30 +333,46 @@ export function BusinessReelButton({
     );
   }
 
+  const notice = busyNotice ? (
+    <span
+      className="business-reel-busy-hint"
+      role="status"
+      onClick={stopOnly}
+    >
+      {t(DEFAULT_LOCALE, "businessReel.busyHint")}
+    </span>
+  ) : null;
+
   // Zustand F: Fehlgeschlagen — Rot, Tap = Retry.
   if (current === "failed") {
     return (
-      <button
-        type="button"
-        className="business-reel-pill business-reel-pill--failed"
-        onClick={handleRender}
-        disabled={busy}
-      >
-        {busy ? "…" : t(DEFAULT_LOCALE, "businessReel.retry")}
-      </button>
+      <>
+        <button
+          type="button"
+          className="business-reel-pill business-reel-pill--failed"
+          onClick={handleRender}
+          disabled={busy}
+        >
+          {busy ? "…" : t(DEFAULT_LOCALE, "businessReel.retry")}
+        </button>
+        {notice}
+      </>
     );
   }
 
   // Zustand 1: Bereit — Gold, Tap = Render starten.
   return (
-    <button
-      type="button"
-      className="business-reel-pill business-reel-pill--create"
-      onClick={handleRender}
-      disabled={busy}
-    >
-      {busy ? "…" : t(DEFAULT_LOCALE, "businessReel.create")}
-    </button>
+    <>
+      <button
+        type="button"
+        className="business-reel-pill business-reel-pill--create"
+        onClick={handleRender}
+        disabled={busy}
+      >
+        {busy ? "…" : t(DEFAULT_LOCALE, "businessReel.create")}
+      </button>
+      {notice}
+    </>
   );
 }
 

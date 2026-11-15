@@ -1677,6 +1677,19 @@ body {
   opacity: 0.55;
 }
 
+/* 409 render_busy: freundlicher Hinweis NEBEN der (weiter antippbaren)
+   Pill — kein Fehlerzustand. Bricht im schmalen Kachel-Flex sauber um. */
+.business-reel-busy-hint {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin-left: 8px;
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--amber-text);
+  white-space: normal;
+  cursor: default;
+}
+
 /* Zustand F: Fehlgeschlagen (Rot — Klick = Retry). */
 .business-reel-pill--failed {
   color: var(--red-text);

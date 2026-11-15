@@ -4734,3 +4734,104 @@ Mit einem Wegwerf-Nutzer ohne Betrieb, für die Admin-Fälle kurz in
   `service_role`). Durchsetzung der Sperre im Portal ist **A5**.
 - **A4b-3** Obergrenzen — `entitlement_overrides` pro Betrieb bzw.
   `tier_definitions`.
+
+## Betriebs-Reel: Selbstheilung hängender Renders + Parallel-Sperre
+
+**Problem (15.11.2026):** `POST …/render-business-reel` setzt
+`booklets.business_reel_status='rendering'` und rendert danach in `after()`
+(`renderBusinessReel`, [lib/reel/render.ts](lib/reel/render.ts)). Wird die
+Vercel-Instanz hart beendet (OOM, `maxDuration` 300 s), läuft der
+`fail()`-Pfad nicht mehr ⇒ die Zeile bleibt **dauerhaft** auf `'rendering'`,
+der Button pollt endlos. 10 Aufträge standen so fest, einer seit 24.09.;
+zusätzlich haben 4–5 gleichzeitige Renders desselben Betriebs die Instanz
+zweimal gekillt. **Keine Migration, keine Änderung an der Render-Logik, kein
+`maxDuration`-Change.**
+
+### Statusablauf
+
+```
+pending ──POST──▶ rendering ──after() ok──▶ ready
+                     │      ──after() Fehler──▶ failed   (bisher)
+                     │
+                     └─ Instanz tot, updated_at > STALE_RENDER_MS alt
+                        ──nächster Status-Poll──▶ failed  (Selbstheilung, NEU)
+                          business_reel_error = „Abgebrochen – bitte erneut starten"
+failed ──Tap „Neu erstellen"──▶ rendering
+```
+
+### `lib/reel/stale.ts` (NEU, plain, ohne Imports)
+
+- `STALE_RENDER_MS = 6 min` (= `maxDuration` 300 s + 1 min Puffer).
+- `CLIENT_RENDER_TIMEOUT_MS = 8 min` — Client-Notbremse, bewusst darüber,
+  damit im Normalfall der Server zuerst heilt.
+- `isStaleRendering(status, updatedAt, now)` — true ⇔ `'rendering'` UND
+  `updatedAt < now − STALE_RENDER_MS` (**strikt**: genau am Limit gilt die
+  Zeile noch als laufend, konsistent mit dem `.lt()` im DB-Update);
+  `null`/unlesbarer Zeitstempel ⇒ **kein** Heilen.
+- `isRenderBusy(rows, orderId, now)` — Parallel-Sperre (s. u.).
+
+**Zeitmaßstab = `booklets.updated_at`.** Der BEFORE-UPDATE-Trigger
+`trg_booklets_updated` (0001, `set_updated_at()`) setzt es bei **jedem**
+Update auf `now()`, also auch beim Wechsel auf `'rendering'` — kein expliziter
+Schreibzugriff nötig. ⚠️ Grenze: auch andere Updates derselben Booklet-Zeile
+(Kundenreel fertig, `viewed_at`, `first_shared_at`, Self-Heal selbst …)
+verschieben `updated_at`. Das **verzögert** die Erkennung höchstens, es kann
+**nie** ein noch laufender Render vorzeitig als abgebrochen gelten.
+
+### Selbstheilung — `GET …/business-reel-status`
+
+Liest zusätzlich `id, updated_at`. Ist die Zeile stale, folgt ein
+**bedingtes** Update über den **AUTHENTICATED** Client (RLS,
+`booklets_update`, **kein** `service_role`):
+`business_reel_status='failed'`, `business_reel_error=t("businessReel.staleError")`,
+gefiltert auf `id` + `business_id` + **`business_reel_status='rendering'`** +
+**`updated_at < cutoff`** — ein parallel fertig gewordener bzw. neu
+gestarteter Render (frisches `updated_at`) wird so nicht überschrieben.
+Trifft das Update 0 Zeilen (oder scheitert es), wird der **tatsächliche**
+Stand neu gelesen und zurückgegeben. Ausgelöst wird die Heilung vom
+Button-Poll, den die Kachel bei `'rendering'` beim Mount automatisch startet.
+
+### Parallel-Sperre — `POST …/render-business-reel` (Guard 6)
+
+Nach den bestehenden Guards, **vor** dem `'rendering'`-Write: alle
+`booklets` desselben Betriebs mit `business_reel_status='rendering'` und
+`order_id ≠` diesem Auftrag laden (AUTHENTICATED, RLS) → `isRenderBusy` ⇒
+**409 `{error:'render_busy'}`**, es startet nichts. Stale Zeilen blockieren
+**nicht**. ⚠️ **Best effort** (Check-then-set, keine Transaktion/Lock): zwei
+POSTs im selben Augenblick können beide durchkommen — akzeptiert; die Sperre
+deckt den realen Fall (Kacheln nacheinander angetippt). Scheitert der
+Sperr-Check selbst (DB-Fehler) ⇒ **fail-open** (geloggt, Render startet wie
+bisher). Derselbe Auftrag blockiert sich nicht (Doppel-Tap verhindert der
+Button ohnehin per `busy`/Rendering-Zustand).
+
+### `BusinessReelButton` ([components/business-reel-button.tsx](components/business-reel-button.tsx))
+
+- **Polling-Limit:** `startPoll` merkt sich den Startzeitpunkt; nach
+  `CLIENT_RENDER_TIMEOUT_MS` im Zustand `rendering` ⇒ Polling stoppen,
+  Zustand `failed` (Retry-Taste). Greift auch, wenn der Status-Endpunkt
+  dauerhaft Fehler liefert (die wurden bisher endlos weiter gepollt).
+- **409 `render_busy`:** **kein** Fehlerzustand — die Pill bleibt wie sie war
+  (weiter antippbar), daneben steht ~6 s lang der Hinweis
+  `businessReel.busyHint` (`.business-reel-busy-hint`, amber, bricht im
+  Kachel-Flex um). Andere 409 (`invalid_status`) ⇒ wie bisher `failed`.
+- **Unmount:** Interval + Hinweis-Timer werden geräumt; laufende Fetches
+  prüfen `mountedRef`/`pollRef` und setzen danach keinen State.
+
+### Tests
+
+Kein Test-Framework im Projekt ⇒ `node:test` ohne neue Dependency:
+[lib/reel/stale.test.mjs](lib/reel/stale.test.mjs) lädt `stale.ts` direkt
+(Node ≥ 23, natives TS-Type-Stripping), `pnpm test`. 14 Fälle:
+Grenzwert genau am Limit / +1 ms, `null`/`undefined`/unlesbares
+`updatedAt`, PostgREST-Mikrosekunden, alle Nicht-`rendering`-Status
+(= Self-Heal-Bedingung), `isRenderBusy` (frisch ⇒ busy, nur stale ⇒ frei,
+eigener Auftrag, Nicht-`rendering`, Mischung, leer = 409-Pfad).
+Routen/Komponente sind nicht automatisiert getestet.
+
+### Offen
+
+- **Kundenreel hat dieselbe Lücke:** `render-reel` und `generate` setzen
+  `reel_status='rendering'`, `renderReel` läuft in `after()`, `reel-status`
+  hat keine Stale-Erkennung und `RenderingProgress` pollt ohne Limit. Nicht
+  geändert — eigener Schritt; `lib/reel/stale.ts` ist wiederverwendbar.
+- Echte Sperre (Advisory-Lock / Job-Queue) statt best effort.

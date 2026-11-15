@@ -500,6 +500,12 @@ export const de = {
     purged: "Medien gelöscht",
     purgedHint:
       "Die Medien dieses Auftrags wurden gelöscht — ein Reel kann nicht mehr erstellt werden.",
+    // Selbstheilung (lib/reel/stale.ts): hängendes 'rendering' ⇒ 'failed'.
+    // Landet als business_reel_error in der DB.
+    staleError: "Abgebrochen – bitte erneut starten",
+    // 409 render_busy: anderer Betriebsreel desselben Betriebs läuft noch.
+    busyHint:
+      "Es läuft bereits ein Betriebsreel. Bitte warte, bis es fertig ist.",
   },
   website: {
     // Website-Veröffentlichung auf der Auftrags-Detailseite (Migration 0015).
