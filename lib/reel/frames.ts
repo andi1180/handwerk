@@ -710,6 +710,32 @@ export async function bakeOutroFrame({
 const CANON_ENCODE = ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-an"] as const;
 
 /**
+ * Betriebs-Reel-Encoding (Render-Zeit, 15.11.2026): schnelleres x264-Preset bei
+ * ABGESENKTEM CRF. Die x264-Defaults (`medium`, CRF 23) kosteten ~94 % der
+ * Clip-Zeit. `veryfast` + CRF 18 halbiert die Encode-CPU und liegt bei der
+ * Bildqualität (SSIM UND PSNR gegen eine verlustfreie Referenz) in ALLEN
+ * gemessenen Fällen (echtes Foto mit/ohne VORHER-Label, Rausch-Foto, echter
+ * Clip, Rausch-Clip, rotierter Clip) AUF oder ÜBER `medium`/23 — Auflösung,
+ * fps, Dauer, Codec (h264 High@4.0), Pixelformat unverändert. Preis: größere
+ * Dateien (+35–96 % je nach Material). Messwerte: TECH.md „Render-Zeit
+ * Betriebs-Reel".
+ *
+ * NUR das Betriebs-Reel übergibt diese Argumente (opt-in `x264Args`). ALLE
+ * Segmente eines Reels müssen dieselben Argumente tragen — sonst unterscheiden
+ * sich SPS/PPS und der concat-Demuxer (`-c copy`, eine avcC) bricht.
+ * Kunden-Reel: unverändert (Default `[]` ⇒ x264-Defaults).
+ */
+export const BUSINESS_X264_ARGS = ["-preset", "veryfast", "-crf", "18"] as const;
+
+/**
+ * Default-Eingangsrate des image2-Demuxers (`-loop 1` ohne `-framerate`). Der
+ * Einmal-Dekodier-Pfad (`singleDecode`) ist nur bei ganzzahligem
+ * `seconds × 25` bit-identisch zum alten Pfad (gemessen: 3 s/4 s identisch,
+ * 2,5 s = 62,5 Frames weicht ab) ⇒ sonst Fallback auf den alten Pfad.
+ */
+const IMAGE2_DEFAULT_FPS = 25;
+
+/**
  * Gebackenes Still-PNG (Intro/Foto/Outro) → normalisiertes mp4-Segment (8b-2a):
  * das Bild wird `seconds` lang geloopt (`-loop 1 -t s`) und auf die KANONISCHE
  * Reel-Form encodet. Diese Form ist identisch zu `normalizeClip` — Voraussetzung
@@ -720,32 +746,66 @@ export async function encodeStillSegment({
   image,
   seconds,
   output,
+  singleDecode = false,
+  x264Args = [],
 }: {
   ffmpegBin: string;
   image: string;
   seconds: number;
   output: string;
+  /**
+   * Opt-in (Betriebs-Reel): das PNG EINMAL dekodieren + EINMAL nach yuv420p
+   * wandeln und dann per `loop`-Filter wiederholen, statt es mit `-loop 1` für
+   * jeden der `seconds × 25` Eingangs-Frames neu zu lesen, zu dekodieren und
+   * umzurechnen (≈ 50 % der Still-CPU). Die Ausgabe wird per `-t` als
+   * AUSGABE-Option auf dieselbe Dauer begrenzt (sonst ein Frame zu viel).
+   * Gemessen BIT-IDENTISCH zum alten Pfad (gleiche MD5 des H.264-Streams, 3 s
+   * und 4 s); nur bei ganzzahligem `seconds × 25` aktiv, sonst alter Pfad.
+   */
+  singleDecode?: boolean;
+  /** Zusätzliche x264-Argumente (Betriebs-Reel: `BUSINESS_X264_ARGS`);
+   *  Default `[]` ⇒ Kunden-Reel unverändert. */
+  x264Args?: readonly string[];
 }): Promise<void> {
-  await execFileAsync(
-    ffmpegBin,
-    [
-      "-y",
-      "-nostdin",
-      "-loglevel",
-      "error",
-      "-loop",
-      "1",
-      "-t",
-      String(seconds),
-      "-i",
-      image,
-      "-vf",
-      `setsar=1,fps=${REEL_FPS},format=yuv420p`,
-      ...CANON_ENCODE,
-      output,
-    ],
-    { timeout: SEGMENT_TIMEOUT_MS, maxBuffer: FFMPEG_MAX_BUFFER },
-  );
+  const decodeOnce =
+    singleDecode && Number.isInteger(seconds * IMAGE2_DEFAULT_FPS);
+  const args = decodeOnce
+    ? [
+        "-y",
+        "-nostdin",
+        "-loglevel",
+        "error",
+        "-i",
+        image,
+        "-vf",
+        `setsar=1,format=yuv420p,loop=loop=-1:size=1:start=0,fps=${REEL_FPS}`,
+        "-t",
+        String(seconds),
+        ...CANON_ENCODE,
+        ...x264Args,
+        output,
+      ]
+    : [
+        "-y",
+        "-nostdin",
+        "-loglevel",
+        "error",
+        "-loop",
+        "1",
+        "-t",
+        String(seconds),
+        "-i",
+        image,
+        "-vf",
+        `setsar=1,fps=${REEL_FPS},format=yuv420p`,
+        ...CANON_ENCODE,
+        ...x264Args,
+        output,
+      ];
+  await execFileAsync(ffmpegBin, args, {
+    timeout: SEGMENT_TIMEOUT_MS,
+    maxBuffer: FFMPEG_MAX_BUFFER,
+  });
 }
 
 /**
@@ -774,6 +834,7 @@ export async function normalizeClip({
   logoPath,
   primaryColor,
   logoPosition = "topleft",
+  x264Args = [],
 }: {
   ffmpegBin: string;
   input: string;
@@ -783,6 +844,9 @@ export async function normalizeClip({
   logoPath: string | null;
   primaryColor: string;
   logoPosition?: "topleft" | "topright";
+  /** Zusätzliche x264-Argumente (Betriebs-Reel: `BUSINESS_X264_ARGS`);
+   *  Default `[]` ⇒ Kunden-Reel unverändert. */
+  x264Args?: readonly string[];
 }): Promise<void> {
   const accent = ffmpegColor(primaryColor, DEFAULT_BRANDING.primary_color);
   const textfiles: string[] = [];
@@ -804,6 +868,7 @@ export async function normalizeClip({
         "-vf",
         `${COVER},fps=${REEL_FPS},format=yuv420p`,
         ...CANON_ENCODE,
+        ...x264Args,
         output,
       ],
       { timeout: SEGMENT_TIMEOUT_MS, maxBuffer: FFMPEG_MAX_BUFFER },
@@ -850,6 +915,7 @@ export async function normalizeClip({
         "-map",
         "[v]",
         ...CANON_ENCODE,
+        ...x264Args,
         output,
       ],
       { timeout: SEGMENT_TIMEOUT_MS, maxBuffer: FFMPEG_MAX_BUFFER },
@@ -858,6 +924,14 @@ export async function normalizeClip({
     await unlinkAll(textfiles);
   }
 }
+
+/**
+ * PNG-Zwischenbild des Betriebs-Reels schwächer komprimieren (zlib-Stufe 1
+ * statt Default). PNG ist VERLUSTFREI ⇒ identische Pixel (gemessen: gleiche
+ * framemd5), nur die Temp-Datei in /tmp wird größer; Backen ≈ −40 % CPU, und
+ * `encodeStillSegment` dekodiert sie schneller. Nur `bakeBusinessPhotoFrame`.
+ */
+const BUSINESS_PNG_ARGS = ["-compression_level", "1"] as const;
 
 /** Label-Boxfarben/-Maße für VORHER/NACHHER (bakeBusinessPhotoFrame). */
 const LABEL_FONT_SIZE = 130;
@@ -919,7 +993,20 @@ export async function bakeBusinessPhotoFrame({
   if (caption === null && !logoPath && !label) {
     await execFileAsync(
       ffmpegBin,
-      ["-y", "-nostdin", "-loglevel", "error", "-i", input, "-vf", COVER, "-frames:v", "1", output],
+      [
+        "-y",
+        "-nostdin",
+        "-loglevel",
+        "error",
+        "-i",
+        input,
+        "-vf",
+        COVER,
+        "-frames:v",
+        "1",
+        ...BUSINESS_PNG_ARGS,
+        output,
+      ],
       { timeout: FRAME_TIMEOUT_MS, maxBuffer: FFMPEG_MAX_BUFFER },
     );
     return;
@@ -975,6 +1062,7 @@ export async function bakeBusinessPhotoFrame({
         `[${finalLabel}]`,
         "-frames:v",
         "1",
+        ...BUSINESS_PNG_ARGS,
         output,
       ],
       { timeout: FRAME_TIMEOUT_MS, maxBuffer: FFMPEG_MAX_BUFFER },

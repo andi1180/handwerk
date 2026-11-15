@@ -4882,3 +4882,100 @@ liefert `cgroup_mb` dort durchgehend `null`, bleibt nur `rss_mb` (ohne ffmpeg).
 ist **nicht** instrumentiert; der Helfer ist mit `kind: "customer"`
 wiederverwendbar. Tests: [lib/reel/diag.test.mjs](lib/reel/diag.test.mjs)
 (`pnpm test`).
+
+## Render-Zeit Betriebs-Reel (ffmpeg-Argumente, 15.11.2026)
+
+**Ausgangslage** (`reel_mem`, Auftrag N1537, 10 Fotos + 5 Videos, 12 MB
+Eingabe): `total_ms` **168 583**. Pro Foto 9,3–10,8 s, pro Clip 9,8–12,8 s
+(Ausreißer 19,8 s), alles sequentiell; ffmpeg bereit 1,4 s, Download 1,7 s,
+concat 0,6 s, Upload 0,8 s. Reel 14,3 MB. Auf Vercel liefert `cgroup_mb`
+`null` (keine cgroup-Dateien in der Function).
+
+### Analyse (alte Argumente)
+
+- **Foto-Frame backen** (`bakeBusinessPhotoFrame`): `-i jpg -filter_complex
+  "[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1
+  [+ overlay Scrim, drawbox, drawtext Caption, scale+overlay Logo, drawtext Label]"
+  -frames:v 1 out.png` (rgb24, zlib-Default). Ein Frame ⇒ günstig.
+- **Foto-Segment** (`encodeStillSegment`): `-loop 1 -t 4 -i frame.png -vf
+  setsar=1,fps=30,format=yuv420p -c:v libx264 -pix_fmt yuv420p -an`.
+  **Kostentreiber 1:** `-loop 1` liest und **dekodiert das PNG für jeden der
+  100 Eingangs-Frames neu** und rechnet jeden Frame RGB→yuv420p um (≈ 50 % der
+  Still-CPU, obwohl alle Frames identisch sind). **Kostentreiber 2:** x264 mit
+  Defaults (`-preset medium`, CRF 23).
+- **Clip** (`normalizeClip`): `-t 6 -i clip -i scrim.png -i logo.png
+  -filter_complex "[0:v]scale…increase,crop=1080:1920,setsar=1,fps=30[base];
+  overlay Scrim, drawbox, drawtext, scale+overlay Logo, format=yuv420p" -c:v libx264
+  -pix_fmt yuv420p -an`. **Kostentreiber:** x264 `medium` = **~94 % der
+  Clip-CPU** (Dekodieren + Scale + Overlays + drawtext ≈ 6 %).
+- **concat** (`concatSegments`): `-f concat -safe 0 -i list -c copy -movflags
+  +faststart` — kein Re-Encode, unkritisch.
+- Kein `-threads` gesetzt (x264 auto), keine teuren Bewegungsfilter (kein
+  zoompan/xfade/gradients im Betriebs-Reel). Auflösung 1080×1920, 30 fps CFR,
+  yuv420p, h264 High@4.0, SAR 1:1.
+- `ensureFfmpeg`: Download nur bei Kaltstart (gz komplett in den Speicher →
+  gunzip → atomar `/tmp/ffmpeg-v2`), warme Instanz nutzt `/tmp` (X_OK-Check).
+  Erklärt den RSS-Peak (~320 MB) bei `ffmpeg_ready`, kostet aber keine Renderzeit.
+- Eingaben werden je Item als Buffer geladen und sofort nach `/tmp` geschrieben;
+  das fertige Reel wird für den Upload einmal komplett gelesen.
+
+### Änderungen (NUR Betriebs-Reel, alles opt-in in `lib/reel/frames.ts`)
+
+| Wo | Alt | Neu | Beleg |
+|---|---|---|---|
+| `encodeStillSegment` `singleDecode:true` | `-loop 1 -t 4 -i png -vf setsar=1,fps=30,format=yuv420p` | `-i png -vf setsar=1,format=yuv420p,loop=loop=-1:size=1:start=0,fps=30 -t 4` | **bit-identischer** H.264-Stream (MD5) bei 3 s/4 s; ohne `-t` als Ausgabe-Option entstand ein 121. Frame. Nur aktiv bei ganzzahligem `seconds×25` (2,5 s weicht ab ⇒ alter Pfad). CPU −50 % |
+| `bakeBusinessPhotoFrame` | PNG zlib-Default | `-compression_level 1` (`BUSINESS_PNG_ARGS`) | PNG verlustfrei ⇒ **pixel-identisch** (framemd5); nur Temp-Datei größer. Backen −40 % CPU |
+| alle Betriebs-Segmente | x264 Default `medium`, CRF 23 | `-preset veryfast -crf 18` (`BUSINESS_X264_ARGS`) | SSIM **und** PSNR gegen verlustfreie Referenz in **allen** Testfällen ≥ alt (s. u.); Encode-CPU −47…−65 % |
+
+`BUSINESS_X264_ARGS` müssen auf **allen** Segmenten eines Reels gleich sein
+(sonst unterschiedliche SPS/PPS ⇒ concat `-c copy` bricht) — Stills und Clips
+bekommen sie gemeinsam in `renderBusinessReel`.
+
+**Kunden-Reel unverändert:** `renderReel` übergibt keine der neuen Optionen;
+Defaults = alter Befehl. Belegt: der neue Code ohne Optionen liefert
+**bit-identische** Segmente und Reels wie der alte (MD5, beide Testsätze).
+
+### Gleichheitsbeleg (lokal, ffmpeg 6.1.6 — Produktion 6.0.1)
+
+Testmaterial: synthetisch (12-MP-Rausch-Foto, Rausch-Clip 406×720, rotierter
+Querformat-Clip) + realistisch (macOS-Wallpaper-Foto 6016², Naturclip 404×720 —
+Größe nach `compressOrderVideo`). Die echten `frames.ts`-Funktionen per `tsx`.
+
+- **ffprobe pro Segment und Reel identisch:** h264 High@4.0, yuv420p,
+  1080×1920, SAR 1:1, 30/1 fps, Dauer 4,000 s / 6,000 s / 20,000 s, 120/180/600
+  Frames. Gefügtes Reel dekodiert fehlerfrei (`-xerror`, 600 Frames).
+- **Qualität gegen verlustfreie Referenz** (Encoder-Eingang mit `-qp 0`):
+
+| Segment | alt SSIM / PSNR | neu SSIM / PSNR |
+|---|---|---|
+| Foto real (Prozess) | 0,99644 / 52,57 dB | 0,99667 / 53,01 dB |
+| Foto real (VORHER-Label) | 0,99657 / 52,19 dB | 0,99679 / 52,72 dB |
+| Foto Rauschen | 0,98147 / 45,53 dB | 0,98271 / 45,85 dB |
+| Clip real | 0,99289 / 48,42 dB | 0,99445 / 49,30 dB |
+| Clip Rauschen | 0,97289 / 43,19 dB | 0,98358 / 45,19 dB |
+| Clip rotiert | 0,99580 / 45,86 dB | 0,99676 / 46,78 dB |
+
+- Sichtvergleich Caption-Schrift + VORHER-Label (mittlerer Frame) nicht unterscheidbar.
+- **Dateigröße steigt:** Reel real 5,9 → 8,2 MB (+41 %), synthetisch 13,4 → 22,4 MB
+  (+68 %); Segmente +35…+96 %. ⚠️ Supabase-Storage-Limit 50 MB pro Datei:
+  N1537 (14,3 MB) ⇒ geschätzt ~20–24 MB; der Maximalfall der Plattform-Ceilings
+  (20 Fotos + 10 Videos) geschätzt ~40–48 MB — knapp darunter.
+- **Zeit lokal** (10 Kerne): Foto-Segment 1,05 → 0,32 s, Backen 0,47 → 0,32 s,
+  Clips 1,37–3,26 → 0,75–1,57 s. **Hochrechnung N1537** (CPU-proportional):
+  ~168 s → ~60 s. Echte Zahl: nächster `reel_mem`-Lauf (`total_ms`).
+
+### Bewusst NICHT geändert
+
+- **Kunden-Reel** (`renderReel`): würde ebenso profitieren — `singleDecode` für
+  Intro (4 s) und Fotos (3 s; Outro 2,5 s fällt auf den alten Pfad),
+  `-compression_level 1` in `bakePhotoFrame`/`bakeIntroFrame`/`bakeOutroFrame`,
+  `BUSINESS_X264_ARGS` auf ALLEN Segmenten inkl. Intro/Outro. Eigener Schritt.
+- `ensureFfmpeg` streamen statt puffern: senkt nur den Speicher-Peak bei
+  Kaltstart, keine Renderzeit; geteilt mit Kunden-Reel + Video-Kompression.
+- Back- und Still-Schritt zu einem ffmpeg-Aufruf zusammenlegen: spart den
+  Zwischen-PNG-Roundtrip, verändert aber die Pixel (yuv→rgb24→yuv entfällt).
+- Schnellere Skalierung (`flags=fast_bilinear`), `-tune stillimage`,
+  `ultrafast`/`superfast` (Profilwechsel), parallele Segment-Encodes (x264 nutzt
+  die 2 vCPU schon): Optik/Profil ändert sich bzw. kein Gewinn.
+- `-threads` explizit: x264-Auto ist auf 2 vCPU bereits passend.
+- `reel_mem`-Logzeilen unverändert (Vorher/Nachher-Vergleich über `total_ms`).

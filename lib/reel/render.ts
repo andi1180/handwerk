@@ -8,6 +8,7 @@ import type { MediaCategory } from "@/lib/orders/queries";
 import { ensureFfmpeg, errMessage } from "@/lib/reel/ffmpeg";
 import { fileBytes, shortError, startReelMemDiag } from "@/lib/reel/diag";
 import {
+  BUSINESS_X264_ARGS,
   assertReelAssets,
   bakeBusinessPhotoFrame,
   bakeIntroFrame,
@@ -498,6 +499,8 @@ export async function renderBusinessReel({
               logoPath: logoLocal,
               primaryColor,
               logoPosition: "topright",
+              // Render-Zeit: veryfast/CRF 18 (s. BUSINESS_X264_ARGS in frames.ts).
+              x264Args: BUSINESS_X264_ARGS,
             });
           } else {
             const framePath = join(tmpDir, `biz-frame-${randomUUID()}.png`);
@@ -525,6 +528,10 @@ export async function renderBusinessReel({
               image: framePath,
               seconds: SECONDS_PER_PHOTO_BUSINESS,
               output: segment,
+              // Render-Zeit: PNG einmal dekodieren (bit-identisch) +
+              // veryfast/CRF 18 — dieselben x264-Args wie die Clips (concat!).
+              singleDecode: true,
+              x264Args: BUSINESS_X264_ARGS,
             });
           }
         } catch (error) {
