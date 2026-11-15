@@ -6,6 +6,7 @@ import { createServiceClient } from "@/lib/supabase/service";
 import { displayCaption } from "@/lib/booklet/caption";
 import type { MediaCategory } from "@/lib/orders/queries";
 import { ensureFfmpeg, errMessage } from "@/lib/reel/ffmpeg";
+import { fileBytes, shortError, startReelMemDiag } from "@/lib/reel/diag";
 import {
   assertReelAssets,
   bakeBusinessPhotoFrame,
@@ -391,8 +392,15 @@ export async function renderBusinessReel({
   const assets: string[] = [];
   const outputPath = join(tmpDir, `business-reel-${randomUUID()}.mp4`);
 
+  // Speicher-Diagnose (lib/reel/diag.ts): `reel_mem`-Logzeilen pro Phase +
+  // Peak-Sampler. Rein beobachtend — wirft nie, beeinflusst den Render nicht.
+  const diag = startReelMemDiag({ kind: "business", orderId, businessId });
+  let outcome: "done" | "failed" = "failed";
+  let failText = "unexpected";
+
   const fail = async (step: string, error: unknown): Promise<void> => {
     const message = errMessage(error);
+    failText = `${step}: ${message}`;
     console.error("render-business-reel: failed", {
       order_id: orderId,
       step,
@@ -425,6 +433,7 @@ export async function renderBusinessReel({
       await fail("ensure_ffmpeg", error);
       return;
     }
+    diag.log("ffmpeg_ready");
 
     // 2) Logo aus dem privaten `branding`-Bucket laden (immer, nicht per
     //    logo_per_page gated — das Betriebs-Reel trägt immer das Logo).
@@ -439,6 +448,7 @@ export async function renderBusinessReel({
     }
 
     // 3) Alle Medien nach /tmp laden.
+    const mediaBytes: number[] = [];
     try {
       for (const item of media) {
         const { data, error } = await service.storage
@@ -452,13 +462,21 @@ export async function renderBusinessReel({
         const ext =
           extname(item.storage_path) || (item.media_type === "video" ? ".mp4" : ".jpg");
         const local = join(tmpDir, `biz-media-${randomUUID()}${ext}`);
-        await writeFile(local, Buffer.from(await data.arrayBuffer()));
+        const buffer = Buffer.from(await data.arrayBuffer());
+        mediaBytes.push(buffer.length);
+        await writeFile(local, buffer);
         localMedia.push(local);
       }
     } catch (error) {
       await fail("download_media", error);
       return;
     }
+    diag.log("downloaded", {
+      photos: media.filter((m) => m.media_type === "photo").length,
+      videos: media.filter((m) => m.media_type === "video").length,
+      input_bytes: mediaBytes.reduce((sum, n) => sum + n, 0),
+      max_input_bytes: mediaBytes.length > 0 ? Math.max(...mediaBytes) : 0,
+    });
 
     // 4) Pro Item EIN formatgleiches Segment in Booklet-Reihenfolge (before →
     //    process → after). before/after-Fotos: zentriertes VORHER/NACHHER-Label,
@@ -468,6 +486,7 @@ export async function renderBusinessReel({
         const item = media[i]!;
         const local = localMedia[i]!;
         const segment = join(tmpDir, `biz-seg-${randomUUID()}.mp4`);
+        const segmentStartedAt = Date.now();
         try {
           if (item.media_type === "video") {
             await normalizeClip({
@@ -512,6 +531,12 @@ export async function renderBusinessReel({
           throw new Error(`item ${i} (${item.media_type}/${item.category}): ${errMessage(error)}`);
         }
         segments.push(segment);
+        diag.log("segment", {
+          index: i,
+          type: item.media_type === "video" ? "video" : "foto",
+          input_bytes: mediaBytes[i] ?? null,
+          ms: Date.now() - segmentStartedAt,
+        });
       }
     } catch (error) {
       await fail("build_segments", error);
@@ -526,6 +551,7 @@ export async function renderBusinessReel({
       await fail("concat", error);
       return;
     }
+    diag.log("concat_done", { output_bytes: fileBytes(outputPath) });
 
     // 6) Upload nach order-media (service_role, upsert).
     try {
@@ -537,6 +563,7 @@ export async function renderBusinessReel({
           upsert: true,
         });
       if (uploadError) throw new Error(uploadError.message);
+      diag.log("uploaded", { output_bytes: fileBuffer.length });
     } catch (error) {
       await fail("upload", error);
       return;
@@ -554,8 +581,14 @@ export async function renderBusinessReel({
       .eq("business_id", businessId);
     if (doneError) {
       await fail("mark_ready", doneError);
+    } else {
+      outcome = "done";
     }
   } finally {
+    diag.finish(
+      outcome,
+      outcome === "failed" ? { error: shortError(failText) } : undefined,
+    );
     const cleanup = [...localMedia, ...pngFrames, ...segments, ...assets, outputPath];
     await Promise.all(
       cleanup.map((p) =>

@@ -4835,3 +4835,50 @@ Routen/Komponente sind nicht automatisiert getestet.
   hat keine Stale-Erkennung und `RenderingProgress` pollt ohne Limit. Nicht
   geändert — eigener Schritt; `lib/reel/stale.ts` ist wiederverwendbar.
 - Echte Sperre (Advisory-Lock / Job-Queue) statt best effort.
+
+## Reel-Speicher-Diagnose (`reel_mem`-Logzeilen)
+
+**Wofür:** `renderBusinessReel` wird auf Vercel teils hart beendet
+(OOM/Timeout). Bisher war unbekannt, wie viel Speicher ein einzelner Render
+braucht und in welcher Phase der Peak liegt. Diese Logzeilen machen das in
+den Vercel-Runtime-Logs messbar — **keine Verhaltensänderung** (keine
+Render-Parameter, kein `maxDuration`, keine Status-Logik, keine UI).
+
+**Helfer** [lib/reel/diag.ts](lib/reel/diag.ts) (server-only):
+`startReelMemDiag({kind, orderId, businessId})` schreibt sofort `stage='start'`
+und startet einen **Peak-Sampler** (`setInterval` 1000 ms, `unref()`), der
+`cgroup_mb` und `rss_mb` liest und die Maxima merkt. `diag.log(stage, extra)`
+schreibt eine Zwischenzeile, `diag.finish('done'|'failed', extra)` stoppt den
+Sampler (idempotent) und schreibt die Abschlusszeile. Der Render ruft
+`finish` im `finally` ⇒ der Sampler endet garantiert. **Alles in try/catch —
+keine Methode wirft**, eine Logging-Störung kann den Render nicht beeinflussen.
+
+**Format:** GENAU EINE `console.log`-Zeile JSON pro Messung:
+
+| Feld | Bedeutung |
+|---|---|
+| `evt` | immer `"reel_mem"` (Filter in den Logs) |
+| `kind` | `"business"` (Kundenreel noch nicht instrumentiert, s. u.) |
+| `orderId`, `businessId` | einzige IDs — **keine** Namen/Captions/Pfade |
+| `stage` | `start` · `ffmpeg_ready` · `downloaded` · `segment` · `concat_done` · `uploaded` · `done` / `failed` |
+| `t_ms` | ms seit `start` |
+| `rss_mb`, `heap_used_mb`, `external_mb`, `array_buffers_mb` | `process.memoryUsage()` des Node-Prozesses |
+| `cgroup_mb` | Speicher der ganzen cgroup — v2 `/sys/fs/cgroup/memory.current`, sonst v1 `/sys/fs/cgroup/memory/memory.usage_in_bytes`, sonst `null`. **Erfasst auch den ffmpeg-Kindprozess**, den `rss_mb` nicht sieht |
+
+Stage-spezifische Zusatzfelder:
+
+- `downloaded`: `photos`, `videos`, `input_bytes` (Summe), `max_input_bytes` (größte Datei)
+- `segment` (pro Item, nach `bakeBusinessPhotoFrame`+`encodeStillSegment` bzw. `normalizeClip`): `index`, `type` (`foto`/`video`), `input_bytes`, `ms`
+- `concat_done` / `uploaded`: `output_bytes`
+- `done` / `failed`: `peak_cgroup_mb`, `peak_rss_mb`, `total_ms`; bei `failed` zusätzlich `error` (`"{step}: {message}"`, einzeilig, ≤ 200 Zeichen)
+
+**Lesen:** Vercel → Logs, nach `reel_mem` filtern. Fehlt bei einem Render die
+`done`/`failed`-Zeile, wurde die Instanz hart beendet — die letzte Zeile zeigt
+die Phase, die letzten Werte die Speicherlage kurz davor. Ob die
+cgroup-Dateien in der Vercel-Function existieren, ist nur live feststellbar;
+liefert `cgroup_mb` dort durchgehend `null`, bleibt nur `rss_mb` (ohne ffmpeg).
+
+**Kundenreel (`renderReel`)** ist eine eigene Funktion mit eigenem Ablauf und
+ist **nicht** instrumentiert; der Helfer ist mit `kind: "customer"`
+wiederverwendbar. Tests: [lib/reel/diag.test.mjs](lib/reel/diag.test.mjs)
+(`pnpm test`).
