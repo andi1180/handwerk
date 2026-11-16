@@ -4979,3 +4979,116 @@ Größe nach `compressOrderVideo`). Die echten `frames.ts`-Funktionen per `tsx`.
   die 2 vCPU schon): Optik/Profil ändert sich bzw. kein Gewinn.
 - `-threads` explizit: x264-Auto ist auf 2 vCPU bereits passend.
 - `reel_mem`-Logzeilen unverändert (Vorher/Nachher-Vergleich über `total_ms`).
+
+## Dateigröße Betriebs-Reel (x264-Parameter, 16.11.2026)
+
+**Anlass:** Seit cd8e414 (`veryfast` / CRF 18) wachsen die Betriebs-Reels
+deutlich. Produktion (`reel_mem`): 8 Fotos + 3 Videos → **19,9 MB**,
+4 Fotos → 1,6 MB ⇒ ~0,40 MB je Foto-Segment (4 s), Videos ~0,93 MB/s
+(≈ 7,4 Mbit/s). ⚠️ Die Schätzung im Abschnitt davor („Maximalfall ~40–48 MB")
+war zu optimistisch — kalibriert auf diese Produktionswerte liegt der Maximalfall
+(20 Fotos + 10 Videos à 6 s) bei **~64 MB**, über dem 50-MB-Storage-Limit.
+
+### Messaufbau (Methodik wie cd8e414)
+
+- ffmpeg **6.1.6** lokal (`/opt/homebrew/opt/ffmpeg@6`, Produktion 6.0.1),
+  10 Kerne. Die **echten** Funktionen aus `lib/reel/frames.ts` per `tsx`
+  (`bakeBusinessPhotoFrame`, `encodeStillSegment` mit `singleDecode:true`,
+  `normalizeClip` mit `logoPosition:'topright'`, `concatSegments`); nur
+  `x264Args` variiert. Frames einmal gebacken, für alle Varianten identisch.
+- **Referenz** = derselbe Encoder-Eingang verlustfrei (`-preset ultrafast -qp 0`);
+  SSIM/PSNR je Segment und je gefügtem Reel gegen diese Referenz.
+- **Realistisch:** echte Atelier-Handyclips (iPhone, 1080p, Tweed-Stoff, Hände)
+  — zwei davon durch die echten `compressOrderVideo`-Parameter (720p, CRF 23,
+  wie neue Uploads), einer als unkomprimiertes 1080p-Original (Alt-Upload);
+  Fotos = Standbilder aus Atelier-Clips (VORHER/NACHHER-Label, mit/ohne Caption)
+  + ein 4K-Landschaftsfoto (Prozess, Caption + Logo).
+  `reel_real` = VORHER-Foto, Prozess-Foto, 3 Clips, NACHHER-Foto (30 s).
+- **Synthetisch:** 12-MP-Rauschfoto, Rauschclip 720×1280, Querformat-Testclip
+  (Cover-Crop, ohne Overlay). `reel_synth` = 2 Rauschfotos + 2 Clips (20 s).
+- Auswahlregel (Auftrag): Reel ≤ 1,10 × ALT **und** SSIM ≥ ALT − 0,003 **und**
+  PSNR ≥ ALT − 0,5 dB — geprüft auf **beiden** Reels.
+
+### Ergebnis je Reel (ALT = `medium`/CRF 23, Stand vor cd8e414)
+
+| Variante | real MB | ×ALT | ΔSSIM | ΔPSNR | synth MB | ×ALT | ΔSSIM | ΔPSNR | CPU s | WC kalibr. | WC schwer | Regel |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| ALT medium/23 | 13,4 | 1,000 | 0 | 0 | 88,6 | 1,000 | 0 | 0 | 131 | 39,5 | 49,7 | (Basis) |
+| **veryfast/18 (aktuell)** | 23,2 | 1,737 | +0,0025 | +1,32 | 139,2 | 1,572 | +0,0026 | +3,29 | 61 | **63,7** | 82,3 | – |
+| veryfast/19 | 19,9 | 1,490 | +0,0012 | +0,64 | 131,1 | 1,481 | +0,0019 | +2,40 | 59 | 55,6 | 71,8 | – |
+| veryfast/20 | 17,0 | 1,277 | −0,0003 | −0,04 | 122,8 | 1,386 | +0,0009 | +1,41 | 57 | 48,5 | 62,7 | – |
+| veryfast/21 | 14,6 | 1,095 | −0,0020 | −0,72 | 113,8 | 1,285 | −0,0004 | +0,43 | 56 | 42,3 | 54,6 | – |
+| veryfast/22 | 12,5 | 0,940 | −0,0039 | −1,40 | 106,1 | 1,198 | −0,0018 | −0,44 | 54 | 37,0 | 47,7 | – |
+| veryfast/23 | 10,8 | 0,807 | −0,0062 | −2,09 | 97,3 | 1,099 | −0,0038 | −1,44 | 53 | 32,3 | 41,6 | – |
+| veryfast/24 | 9,3 | 0,694 | −0,0088 | −2,78 | 88,9 | 1,004 | −0,0060 | −2,38 | 52 | 28,2 | 36,2 | – |
+| veryfast/21 + 4M/8M | 9,4 | 0,701 | −0,0070 | −2,76 | 6,7 | 0,076 | −0,1645 | −14,11 | 42 | 31,5 | 36,8 | – |
+| veryfast/22 + 4M/8M | 9,1 | 0,685 | −0,0078 | −2,87 | 6,3 | 0,072 | −0,1668 | −14,13 | 42 | 30,4 | 36,4 | – |
+| *Zusatz:* faster/21 | 16,9 | 1,268 | +0,0008 | +0,52 | 110,9 | 1,253 | +0,0015 | +1,61 | 84 | 49,1 | 62,4 | – |
+| *Zusatz:* faster/22 | 14,7 | 1,102 | −0,0006 | −0,11 | 102,7 | 1,160 | +0,0004 | +0,65 | 82 | 43,3 | 55,1 | – |
+| *Zusatz:* fast/21 | 17,7 | 1,325 | +0,0023 | +1,05 | 104,0 | 1,175 | +0,0019 | +1,90 | 118 | 51,0 | 64,5 | – |
+| *Zusatz:* fast/22 | 15,4 | 1,155 | +0,0011 | +0,42 | 95,9 | 1,083 | +0,0010 | +0,93 | 114 | 45,3 | 57,2 | – |
+| *Zusatz:* medium/21 | 17,6 | 1,317 | +0,0025 | +1,24 | 103,9 | 1,173 | +0,0020 | +1,97 | 138 | 50,2 | 63,3 | – |
+| *Zusatz:* medium/22 | 15,3 | 1,148 | +0,0014 | +0,62 | 96,1 | 1,085 | +0,0012 | +1,00 | 135 | 44,5 | 56,1 | – |
+| *Zusatz:* veryfast/20 + 8M/16M | 15,6 | 1,170 | −0,0009 | −0,39 | 10,0 | 0,113 | −0,1301 | −13,19 | 46 | 48,5 | 62,7 | – |
+| *Zusatz:* veryfast/21 + 6M/12M | 12,4 | 0,927 | −0,0037 | −1,48 | 8,2 | 0,092 | −0,1425 | −13,50 | 44 | 41,0 | 52,4 | – |
+| *Zusatz:* fast/21 + 6M/12M | 13,6 | 1,022 | +0,0002 | −0,16 | 8,6 | 0,097 | −0,1421 | −14,07 | 79 | 45,5 | 54,7 | – |
+
+- **CPU s** = user-Zeit aller Encodes einer Variante (Summe über beide
+  Testsätze; Wandzeit lokal 7–19 s). veryfast ≈ 55 s, faster ≈ 83 s, fast ≈
+  115 s, medium ≈ 135 s ⇒ auf 2 vCPU skaliert die Renderzeit grob mit.
+- **WC kalibr.** = Worst Case 20 Fotos + 10 Videos à 6 s, hochgerechnet aus den
+  **Produktionswerten** von veryfast/18 (0,40 MB/Foto, 0,93 MB/s Video) × dem
+  lokal gemessenen Größenverhältnis Variante/veryfast-18 (Fotos: die drei
+  realen Fotos; Videos: die zwei komprimierten Atelier-Clips).
+  **WC schwer** = 20 × größtes reales Foto + 10 × größter komprimierter
+  Atelier-Clip (Tweed, viel Textur) direkt aus der lokalen Messung.
+- Segmente (Auszug, ×ALT / ΔPSNR): veryfast/18 Clips ×1,69–1,87 / +1,5…+1,7 dB,
+  Fotos ×1,09–1,14 / −0,05…+0,3 dB; veryfast/21 Clips ×1,09–1,14 / −0,3…−0,45 dB,
+  Fotos ×0,83–0,87 / −2,0…−2,3 dB. Deckel 4M: Rauschclip SSIM 0,46, 1080p-
+  Original −3,3 dB, komprimierte Atelier-Clips −1,8…−2,7 dB.
+
+### Befund — KEINE Variante erfüllt die Regel ⇒ x264-Parameter UNVERÄNDERT
+
+- **Strukturell:** `veryfast` ist bei gleicher Dateigröße weniger effizient als
+  `medium`. Jede veryfast-Variante in ALT-Nähe der Größe verliert 0,7–1,4 dB;
+  jede mit ALT-Qualität ist 1,3–1,7× so groß. Die Regel verlangt beides.
+- **Kleinster Abstand (aus dem vorgegebenen Satz): veryfast/CRF 21** — auf dem
+  realistischen Reel ×1,095 und ΔSSIM −0,0020 (beides erfüllt), aber ΔPSNR
+  −0,72 dB (verfehlt um 0,22 dB); auf dem synthetischen Reel ×1,285 (verfehlt).
+  WC kalibriert 42,3 MB (> 40).
+- **Bitratendeckel 4M/8M** (Punkt 1c/3) scheidet aus: er greift genau bei
+  texturreichem Material (Tweed) und kostet dort 1,8–3,3 dB; Rauschen kollabiert.
+- **40 MB im Worst Case sind bei Qualität ≥ ALT nicht erreichbar:** schon ALT
+  selbst liegt kalibriert bei 39,5 MB, bei texturreichem Material bei 49,7 MB.
+  Ein harter 40-MB-Garant braucht im Mittel ≤ ~4,4 Mbit/s Video — das ist der
+  4M-Deckel mit seinem Qualitätsverlust.
+
+### Optionen (Entscheidung offen)
+
+1. **veryfast/CRF 21** (nächster Kandidat): real −37 % Größe ggü. heute
+   (23,2 → 14,6 MB), −0,72 dB/−0,002 SSIM ggü. ALT; Zeit wie heute; WC ~42 MB
+   kalibriert, ~55 MB bei texturreichem Material ⇒ Guard (unten) bleibt nötig.
+2. **faster/CRF 22:** real ×1,102 / −0,11 dB / −0,0006 (verfehlt die Größe nur
+   um 0,002), synth ×1,16; WC ~43 MB; Encode-CPU +34 % ggü. veryfast/18
+   (Produktion grob 47 s → ~60–65 s für 11 Clips).
+3. **fast/CRF 21 + Deckel 6M/12M:** realistisches Reel erfüllt die Regel
+   (×1,022 / +0,0002 / −0,16 dB), Rauschen kollabiert, Encode-CPU +30 % ggü. veryfast/18;
+   WC ~46 MB ⇒ kein 40-MB-Garant.
+4. **Plattform-Ceiling senken** (`VIDEO_COUNT.max` 10 → z. B. 6): der Worst Case
+   ist zu ~85 % Video; Produktentscheidung, unabhängig von x264.
+5. **Ziel lockern:** Qualität = „IG kodiert ohnehin neu" ⇒ CRF 22/23 akzeptieren.
+
+### Eingebaut (unabhängig von der Parameterwahl)
+
+- **Größen-Absicherung** `lib/reel/limits.ts`: `BUSINESS_REEL_MAX_BYTES =
+  48_000_000` (bewusst **dezimal** — 48 MiB wären 50 331 648 Bytes und lägen
+  über 50 MB, falls Supabase MB als 10⁶ zählt) + `exceedsBusinessReelMaxBytes`.
+  `renderBusinessReel` prüft nach `concat` **vor** dem Upload; zu groß ⇒ kein
+  Upload, `business_reel_status='failed'`, `business_reel_error` =
+  `businessReel.tooLarge` („Das Reel ist zu groß. Bitte weniger Videos
+  auswählen."), Log/`reel_mem` mit Schritt `too_large` + Bytes. Die Größe steht
+  bereits in `concat_done.output_bytes` (nicht doppelt geloggt). Unbekannte
+  Größe (`null`) blockiert nicht. Tests `lib/reel/limits.test.mjs`.
+- `BUSINESS_X264_ARGS` (veryfast/CRF 18), `singleDecode`,
+  `-compression_level 1`, Stale/Busy, UI, `maxDuration`: **unverändert**.
+  Kunden-Reel (`renderReel`) **unverändert** (kein Guard, eigene Funktion).

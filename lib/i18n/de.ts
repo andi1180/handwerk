@@ -503,6 +503,9 @@ export const de = {
     // Selbstheilung (lib/reel/stale.ts): hängendes 'rendering' ⇒ 'failed'.
     // Landet als business_reel_error in der DB.
     staleError: "Abgebrochen – bitte erneut starten",
+    // Größen-Absicherung (lib/reel/limits.ts): fertiges Reel > 48 MB ⇒ kein
+    // Upload, 'failed'. Landet als business_reel_error in der DB.
+    tooLarge: "Das Reel ist zu groß. Bitte weniger Videos auswählen.",
     // 409 render_busy: anderer Betriebsreel desselben Betriebs läuft noch.
     busyHint:
       "Es läuft bereits ein Betriebsreel. Bitte warte, bis es fertig ist.",

@@ -8,6 +8,11 @@ import type { MediaCategory } from "@/lib/orders/queries";
 import { ensureFfmpeg, errMessage } from "@/lib/reel/ffmpeg";
 import { fileBytes, shortError, startReelMemDiag } from "@/lib/reel/diag";
 import {
+  BUSINESS_REEL_MAX_BYTES,
+  exceedsBusinessReelMaxBytes,
+} from "@/lib/reel/limits";
+import { DEFAULT_LOCALE, t } from "@/lib/i18n";
+import {
   BUSINESS_X264_ARGS,
   assertReelAssets,
   bakeBusinessPhotoFrame,
@@ -399,7 +404,13 @@ export async function renderBusinessReel({
   let outcome: "done" | "failed" = "failed";
   let failText = "unexpected";
 
-  const fail = async (step: string, error: unknown): Promise<void> => {
+  // `userMessage` (optional): verständlicher Text statt `{step}: {message}` in
+  // `business_reel_error` (z. B. „zu groß"); Log + reel_mem behalten die Technik.
+  const fail = async (
+    step: string,
+    error: unknown,
+    userMessage?: string,
+  ): Promise<void> => {
     const message = errMessage(error);
     failText = `${step}: ${message}`;
     console.error("render-business-reel: failed", {
@@ -411,7 +422,7 @@ export async function renderBusinessReel({
       .from("booklets")
       .update({
         business_reel_status: "failed",
-        business_reel_error: `${step}: ${message}`,
+        business_reel_error: userMessage ?? `${step}: ${message}`,
       })
       .eq("id", bookletId)
       .eq("business_id", businessId);
@@ -558,7 +569,20 @@ export async function renderBusinessReel({
       await fail("concat", error);
       return;
     }
-    diag.log("concat_done", { output_bytes: fileBytes(outputPath) });
+    const outputBytes = fileBytes(outputPath);
+    diag.log("concat_done", { output_bytes: outputBytes });
+
+    // 5b) Größen-Absicherung (lib/reel/limits.ts): über dem Storage-Limit gar
+    //     nicht erst hochladen, sondern sauber 'failed' mit klarer Meldung.
+    //     Die Größe steht bereits in `concat_done.output_bytes` (nicht doppelt).
+    if (exceedsBusinessReelMaxBytes(outputBytes)) {
+      await fail(
+        "too_large",
+        new Error(`${outputBytes} bytes > ${BUSINESS_REEL_MAX_BYTES}`),
+        t(DEFAULT_LOCALE, "businessReel.tooLarge"),
+      );
+      return;
+    }
 
     // 6) Upload nach order-media (service_role, upsert).
     try {
