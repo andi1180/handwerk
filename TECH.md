@@ -5047,7 +5047,7 @@ war zu optimistisch — kalibriert auf diese Produktionswerte liegt der Maximalf
   Fotos ×0,83–0,87 / −2,0…−2,3 dB. Deckel 4M: Rauschclip SSIM 0,46, 1080p-
   Original −3,3 dB, komprimierte Atelier-Clips −1,8…−2,7 dB.
 
-### Befund — KEINE Variante erfüllt die Regel ⇒ x264-Parameter UNVERÄNDERT
+### Befund — KEINE Variante erfüllt die Regel (Stand b5ac5db; Entscheidung s. „Umsetzung faster/CRF 22" unten)
 
 - **Strukturell:** `veryfast` ist bei gleicher Dateigröße weniger effizient als
   `medium`. Jede veryfast-Variante in ALT-Nähe der Größe verliert 0,7–1,4 dB;
@@ -5092,3 +5092,32 @@ war zu optimistisch — kalibriert auf diese Produktionswerte liegt der Maximalf
 - `BUSINESS_X264_ARGS` (veryfast/CRF 18), `singleDecode`,
   `-compression_level 1`, Stale/Busy, UI, `maxDuration`: **unverändert**.
   Kunden-Reel (`renderReel`) **unverändert** (kein Guard, eigene Funktion).
+
+### Umsetzung: `faster` / CRF 22 (16.11.2026, Entscheidung nach dieser Messung)
+
+- **Parameter:** `BUSINESS_REEL_PRESET = "faster"`, `BUSINESS_REEL_CRF = "22"`
+  in `lib/reel/frames.ts` (EINE Stelle); `BUSINESS_X264_ARGS` wird daraus
+  gebaut und von `renderBusinessReel` auf **alle** Segmentarten übergeben
+  (Foto-Stills via `encodeStillSegment`, Clips via `normalizeClip`) ⇒
+  identische SPS/PPS, concat `-c copy` bleibt heil. Beide Optionen gibt es in
+  ffmpeg 6.0.1 / libx264.
+- **Begründung:** Option 2 der Tabelle oben — echtes Reel ×1,102 gegenüber
+  medium/23, ΔSSIM −0,0006, ΔPSNR −0,11 dB (praktisch ALT-Qualität bei ~ALT-Größe);
+  synthetisch ×1,160 / +0,0004 / +0,65 dB. Gegenüber veryfast/18: echtes Reel
+  23,2 → 14,7 MB (−37 %).
+- **Erwartete Werte:** Größe ~×1,10 gegenüber medium/23; Worst Case
+  (20 Fotos + 10 Videos à 6 s) kalibriert **~43 MB** (vorher ~64 MB), bei sehr
+  texturreichem Material ~55 MB ⇒ dort greift die 48-MB-Absicherung.
+  Encode-CPU +34 % gegenüber veryfast/18 ⇒ Renderzeit für 8 Fotos + 3 Videos
+  grob **~47 s → ~63 s**. Echte Zahlen: nächster `reel_mem`-Lauf
+  (`total_ms`, `concat_done.output_bytes`).
+- **Gegencheck lokal** (ffmpeg 6.1.6, NUR synthetisches Material: Rauschfoto mit
+  VORHER-Label + Caption, Rauschclip mit Caption + Logo, Querformat-Testclip
+  ohne Overlay; echte `frames.ts`-Funktionen, `BUSINESS_X264_ARGS` importiert):
+  alle Segmente und das gefügte Reel h264 **High@4.0**, **yuv420p**,
+  **1080×1920**, **30/1 fps**, SAR **1:1**, ohne Audiospur; Foto 4,000 s/120
+  Frames, Clips je 6,000 s/180 Frames, Reel 20,000 s/600 Frames. concat
+  `-c copy` ohne Fehler, Reel dekodiert mit `-xerror` fehlerfrei. x264-SEI
+  bestätigt `rc=crf crf=22.0 subme=4 ref=2 me=hex` (faster).
+- **Unverändert:** 48-MB-Absicherung, `reel_mem`-Logs, Kunden-Reel,
+  Stale/Busy, UI, `maxDuration`, `singleDecode`, `-compression_level 1`.

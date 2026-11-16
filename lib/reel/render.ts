@@ -510,7 +510,7 @@ export async function renderBusinessReel({
               logoPath: logoLocal,
               primaryColor,
               logoPosition: "topright",
-              // Render-Zeit: veryfast/CRF 18 (s. BUSINESS_X264_ARGS in frames.ts).
+              // Encoding: BUSINESS_X264_ARGS (faster/CRF 22, s. frames.ts).
               x264Args: BUSINESS_X264_ARGS,
             });
           } else {
@@ -540,7 +540,7 @@ export async function renderBusinessReel({
               seconds: SECONDS_PER_PHOTO_BUSINESS,
               output: segment,
               // Render-Zeit: PNG einmal dekodieren (bit-identisch) +
-              // veryfast/CRF 18 — dieselben x264-Args wie die Clips (concat!).
+              // BUSINESS_X264_ARGS — dieselben x264-Args wie die Clips (concat!).
               singleDecode: true,
               x264Args: BUSINESS_X264_ARGS,
             });

@@ -710,22 +710,29 @@ export async function bakeOutroFrame({
 const CANON_ENCODE = ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-an"] as const;
 
 /**
- * Betriebs-Reel-Encoding (Render-Zeit, 15.11.2026): schnelleres x264-Preset bei
- * ABGESENKTEM CRF. Die x264-Defaults (`medium`, CRF 23) kosteten ~94 % der
- * Clip-Zeit. `veryfast` + CRF 18 halbiert die Encode-CPU und liegt bei der
- * Bildqualität (SSIM UND PSNR gegen eine verlustfreie Referenz) in ALLEN
- * gemessenen Fällen (echtes Foto mit/ohne VORHER-Label, Rausch-Foto, echter
- * Clip, Rausch-Clip, rotierter Clip) AUF oder ÜBER `medium`/23 — Auflösung,
- * fps, Dauer, Codec (h264 High@4.0), Pixelformat unverändert. Preis: größere
- * Dateien (+35–96 % je nach Material). Messwerte: TECH.md „Render-Zeit
- * Betriebs-Reel".
+ * Betriebs-Reel-Encoding — EINE Stelle für Preset + CRF (16.11.2026).
+ *
+ * `faster` / CRF 22 (vorher `veryfast` / CRF 18 aus cd8e414): veryfast/18 machte
+ * die Reels 1,6–1,9× so groß wie die alten x264-Defaults (`medium`/23); der
+ * Maximalfall (20 Fotos + 10 Videos à 6 s) lag kalibriert bei ~64 MB, über dem
+ * 50-MB-Storage-Limit. faster/22 auf echtem Atelier-Material: Reel ×1,102
+ * gegenüber medium/23, ΔSSIM −0,0006, ΔPSNR −0,11 dB; Encode-CPU ~+34 %
+ * gegenüber veryfast/18; Worst Case ~43 MB. Messtabelle: TECH.md „Dateigröße
+ * Betriebs-Reel". Beide Optionen sind in ffmpeg 6.0.1 (libx264) vorhanden.
  *
  * NUR das Betriebs-Reel übergibt diese Argumente (opt-in `x264Args`). ALLE
- * Segmente eines Reels müssen dieselben Argumente tragen — sonst unterscheiden
- * sich SPS/PPS und der concat-Demuxer (`-c copy`, eine avcC) bricht.
- * Kunden-Reel: unverändert (Default `[]` ⇒ x264-Defaults).
+ * Segmente eines Reels (Foto-Stills UND Clips) müssen dieselben Argumente
+ * tragen — sonst unterscheiden sich SPS/PPS und der concat-Demuxer (`-c copy`,
+ * eine avcC) bricht. Kunden-Reel: unverändert (Default `[]` ⇒ x264-Defaults).
  */
-export const BUSINESS_X264_ARGS = ["-preset", "veryfast", "-crf", "18"] as const;
+export const BUSINESS_REEL_PRESET = "faster";
+export const BUSINESS_REEL_CRF = "22";
+export const BUSINESS_X264_ARGS = [
+  "-preset",
+  BUSINESS_REEL_PRESET,
+  "-crf",
+  BUSINESS_REEL_CRF,
+] as const;
 
 /**
  * Default-Eingangsrate des image2-Demuxers (`-loop 1` ohne `-framerate`). Der
